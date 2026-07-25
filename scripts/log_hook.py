@@ -37,6 +37,8 @@ def detect_tool(data: dict) -> str:
     # Heuristics
     if "transcript_path" in data:
         return "codex"
+    if "opencode" in data or data.get("source") == "opencode":
+        return "opencode"
     if data.get("hook_event_name", "").startswith(("Before", "After", "Session", "Pre", "Notification")):
         return "gemini"
     if data.get("hook_event_name", "")[0:1].islower():
@@ -138,6 +140,17 @@ def normalize(data: dict, tool: str) -> dict | None:
             "prompt": data.get("prompt", "")[:1000],
             "tool_name": data.get("toolName", ""),
             "tool_args": data.get("toolArgs"),
+        })
+
+    elif tool == "opencode":
+        prompt = data.get("prompt") or data.get("message") or ""
+        if isinstance(prompt, dict):
+            prompt = prompt.get("content") or prompt.get("text") or ""
+        base.update({
+            "prompt": str(prompt)[:1000],
+            "tool_name": data.get("tool_name") or data.get("tool") or "",
+            "tool_input": data.get("tool_input") or data.get("args"),
+            "tool_response": str(data.get("tool_response") or data.get("output") or "")[:500],
         })
 
     # Skip only true noise: no prompt AND no tool-specific payload (tool_input,
