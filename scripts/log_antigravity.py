@@ -119,8 +119,27 @@ def _unquote_arg(val):
     return val
 
 
+PATH_RE = re.compile(r'([a-zA-Z]:[\\/][^\s\(\)\<\>"\'\:\t\r\n]+)')
+
+
+def _extract_paths_from_val(val) -> list[str]:
+    paths = []
+    if isinstance(val, str):
+        unquoted = _unquote_arg(val)
+        if isinstance(unquoted, str):
+            for m in PATH_RE.findall(unquoted):
+                paths.append(m)
+    elif isinstance(val, dict):
+        for v in val.values():
+            paths.extend(_extract_paths_from_val(v))
+    elif isinstance(val, list):
+        for item in val:
+            paths.extend(_extract_paths_from_val(item))
+    return paths
+
+
 def _conv_cwds(transcript: Path) -> set[str]:
-    """All Cwd values that appear in tool calls inside this transcript."""
+    """All Cwd values and file paths that appear in tool calls or prompt metadata inside this transcript."""
     cwds: set[str] = set()
     try:
         with open(transcript, encoding="utf-8") as f:
@@ -132,12 +151,18 @@ def _conv_cwds(transcript: Path) -> set[str]:
                     entry = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+
                 for tc in (entry.get("tool_calls") or []):
                     args = tc.get("args") or {}
-                    cwd = args.get("Cwd") or args.get("cwd")
-                    cwd = _unquote_arg(cwd)
-                    if isinstance(cwd, str):
-                        n = _normalize(cwd)
+                    for p in _extract_paths_from_val(args):
+                        n = _normalize(p)
+                        if n:
+                            cwds.add(n)
+
+                content = entry.get("content") or ""
+                if content:
+                    for p in _extract_paths_from_val(content):
+                        n = _normalize(p)
                         if n:
                             cwds.add(n)
     except OSError:
