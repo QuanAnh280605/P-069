@@ -193,8 +193,12 @@ def main():
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Output valid JSON (required by some tools like Gemini)
-    print(json.dumps({"status": "logged"}))
+    # Output valid JSON matching each tool's hook response schema.
+    # Codex CLI and Claude Code expect empty JSON `{}` for no-op hook responses.
+    if tool in ("codex", "claude", "cursor"):
+        print("{}")
+    else:
+        print(json.dumps({"status": "logged"}))
 
 
 if __name__ == "__main__":
