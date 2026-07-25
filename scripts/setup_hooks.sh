@@ -7,9 +7,10 @@ HOOK_FILE=".git/hooks/pre-push"
 
 cat > "$HOOK_FILE" <<'EOF'
 #!/usr/bin/env bash
-# Pre-push: sweep recent Antigravity / Gemini prompts, then submit AI logs.
+# Pre-push: recover recent Codex and Antigravity prompts, then submit AI logs.
 # Uses the cross-platform Python launcher so it works whether the user
 # has python3, python, or only the `py` launcher (Windows).
+bash scripts/_pyrun.sh scripts/log_codex.py --auto || true
 bash scripts/_pyrun.sh scripts/log_antigravity.py --auto || true
 bash scripts/_pyrun.sh scripts/submit_log.py || true
 exit 0  # Never block push, even if either step fails
