@@ -159,7 +159,7 @@ uvicorn src.main:app --reload --port 8000
 
 ## 📊 AI Usage Logging
 
-Template đã tích hợp sẵn auto-logging hooks cho 6 AI tools:
+Template đã tích hợp sẵn auto-logging hooks cho 7 AI tools:
 
 | Tool | Cơ chế | Config |
 |------|--------|--------|
@@ -168,6 +168,7 @@ Template đã tích hợp sẵn auto-logging hooks cho 6 AI tools:
 | OpenAI Codex CLI | `.codex/hooks.json` | Tự động |
 | Gemini CLI | `.gemini/settings.json` | Tự động |
 | GitHub Copilot | `.github/hooks/hooks.json` | Tự động |
+| OpenCode AI | `.opencode/plugins/ai-logger.ts` & `.opencode/hooks.json` | Tự động |
 | Antigravity IDE | Pre-push scan transcript | Tự động trên `git push` |
 
 Tất cả prompts và tool calls được log vào `.ai-log/session.jsonl` và tự động submit lên grading server mỗi khi `git push`.
