@@ -169,17 +169,12 @@ def normalize(data: dict, tool: str) -> dict | None:
 
 
 def hook_response(tool: str) -> dict | None:
-    """Return a tool-compatible hook response.
+    if tool == "codex":
+        return None
 
-    Codex validates lifecycle hook stdout against an event-specific schema.
-    Since this logger does not need to control Codex, successful Codex hooks
-    must exit silently. Other integrations keep the JSON acknowledgement they
-    already expect.
-    """
-    if tool in ("codex", "claude", "cursor"):
-        print("{}")
-    else:
-        print(json.dumps({"status": "logged"}))
+    if tool in ("claude", "cursor"):
+        return {}
+    return  {"status": "logged"}
 
 
 def main():
