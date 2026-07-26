@@ -168,6 +168,20 @@ def normalize(data: dict, tool: str) -> dict | None:
     return base
 
 
+def hook_response(tool: str) -> dict | None:
+    """Return a tool-compatible hook response.
+
+    Codex validates lifecycle hook stdout against an event-specific schema.
+    Since this logger does not need to control Codex, successful Codex hooks
+    must exit silently. Other integrations keep the JSON acknowledgement they
+    already expect.
+    """
+    if tool in ("codex", "claude", "cursor"):
+        print("{}")
+    else:
+        print(json.dumps({"status": "logged"}))
+
+
 def main():
     # Read stdin as UTF-8 explicitly. On Windows, sys.stdin defaults to the
     # system code page (e.g. cp1252), which corrupts non-Latin1 prompts
@@ -193,8 +207,12 @@ def main():
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Output valid JSON (required by some tools like Gemini)
-    print(json.dumps({"status": "logged"}))
+    # Some tools (for example Gemini) require JSON output. Codex accepts a
+    # successful hook with no output and rejects unknown fields such as
+    # {"status": "logged"}, especially for Stop hooks.
+    response = hook_response(tool)
+    if response is not None:
+        print(json.dumps(response))
 
 
 if __name__ == "__main__":

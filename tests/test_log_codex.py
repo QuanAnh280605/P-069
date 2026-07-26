@@ -1,5 +1,6 @@
 import json
 
+from scripts.log_hook import hook_response
 from scripts.log_codex import build_entry, iter_transcript_prompts, load_existing, matches_legacy_entry, redact_secrets
 
 
@@ -92,3 +93,8 @@ def test_redacts_secrets_and_converts_timezone(tmp_path):
 def test_redacts_private_key_block():
     value = "before\n-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----\nafter"
     assert redact_secrets(value) == "before\n[REDACTED PRIVATE KEY]\nafter"
+
+
+def test_codex_hook_exits_without_schema_output():
+    assert hook_response("codex") is None
+    assert hook_response("gemini") == {"status": "logged"}
