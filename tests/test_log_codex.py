@@ -1,7 +1,7 @@
 import json
 
-from scripts.log_hook import hook_response
 from scripts.log_codex import build_entry, iter_transcript_prompts, load_existing, matches_legacy_entry, redact_secrets
+from scripts.log_hook import hook_response
 
 
 def write_transcript(path, meta, messages):
