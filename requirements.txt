@@ -8,15 +8,17 @@ python-dotenv>=1.0.0
 # AI / LangChain
 langchain>=0.3.0
 langchain-openai>=0.3.0
+langchain-community>=0.3.0
 langgraph>=0.2.0
 
-# Database (uncomment as needed)
-# sqlalchemy>=2.0.0
-# alembic>=1.14.0
-# psycopg2-binary>=2.9.0
+# Database
+sqlalchemy>=2.0.0
+alembic>=1.14.0
+aiosqlite>=0.19.0
+psycopg2-binary>=2.9.0
 
-# Vector Store (uncomment as needed)
-# chromadb>=0.5.0
+# SQL Safety
+sqlparse>=0.5.0
 
 # Dev tools
 ruff>=0.8.0

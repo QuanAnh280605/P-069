@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     # App
-    app_name: str = "AI20K Agent"
+    app_name: str = "AI Semantic Layer Agent"
     app_env: Literal["development", "production", "test"] = "development"
     app_port: int = Field(default=8000, ge=1, le=65535)
     app_host: str = "0.0.0.0"
@@ -23,13 +23,10 @@ class Settings(BaseSettings):
     # LLM
     openai_api_key: str = ""
     model_name: str = "gpt-4o-mini"
-    llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 0.0 for NL2SQL
 
-    # Database
-    database_url: str = "sqlite:///./data/app.db"
-
-    # Vector Store
-    chroma_persist_dir: str = "./data/chroma"
+    # Metadata Store (PostgreSQL dev/prod, no SQLite)
+    database_url: str = "postgresql+psycopg2://dev:devpassword@localhost:5432/semantic_layer_dev"
 
 
 @lru_cache
