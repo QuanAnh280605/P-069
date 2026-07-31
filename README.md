@@ -32,7 +32,6 @@ git commit -m "feat: khởi tạo dự án từ template"
 ```
 
 ### Bước 2: Setup môi trường
-
 ```bash
 # Tạo virtual environment
 python3.11 -m venv .venv

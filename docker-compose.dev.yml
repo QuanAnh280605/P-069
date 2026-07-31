@@ -1,0 +1,49 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: semantic_layer_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d semantic_layer_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8000:8000"    # API
+      - "5678:5678"    # debugpy (Python remote debug)
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=development
+      - LOG_LEVEL=DEBUG
+      - DATABASE_URL=postgresql+psycopg2://dev:devpassword@postgres:5432/semantic_layer_dev
+    volumes:
+      - .:/app                    # bind mount toàn bộ source — hot-reload
+      - /app/__pycache__          # tránh mount pycache từ host vào container
+    depends_on:
+      postgres:
+        condition: service_healthy  # đợi postgres sẵn sàng trước
+    restart: "no"                 # dev thường tắt thủ công
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  postgres_data:                  # persist data giữa các lần restart
