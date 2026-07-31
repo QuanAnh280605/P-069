@@ -33,16 +33,14 @@ FastAPI (API Gateway)
   │                               Output: Semantic Layer JSON
   │
   └── /api/v1/query/*     ──►  Flow 2: Query Pipeline (LangGraph Multi-Agent)
-                                  Schema Agent (LLM chọn bảng liên quan)
-                                → SQL Gen Agent (LLM viết SQL)
-                                → Validate Agent (sqlparse: chỉ SELECT)
-                                → Execute Agent (SQLAlchemy read-only)
-                                → Format Agent (text/table/number)
+                                  Metric Matcher (Kiểm tra xem có khớp metric đã lưu ở Flow 1 không)
+                                  ├── [Match]  ──► Dùng SQL Template (Bỏ qua SQL Gen) ─┐
+                                  └── [Unmatch]──► Schema Agent → SQL Gen Agent ─────┴──► Validate → Execute → Format
                                   Output: answer + SQL + raw data
 
 Data Layer:
   ├── Target Database (PostgreSQL/MySQL/SQLite) — DB người dùng muốn query
-  └── Metadata Store (SQLite dev / PostgreSQL prod) — lưu Semantic Layer
+  └── Metadata Store (PostgreSQL dev & prod) — lưu Semantic Layer
 ```
 
 ---
@@ -123,9 +121,8 @@ OPENAI_API_KEY=sk-...
 MODEL_NAME=gpt-4o-mini
 LLM_TEMPERATURE=0.0          # LUÔN 0.0 cho NL2SQL (cần deterministic)
 
-# Metadata Store
-DATABASE_URL=sqlite+aiosqlite:///./data/app.db   # dev
-# DATABASE_URL=postgresql+psycopg2://user:pass@host/db  # prod
+# Metadata Store (PostgreSQL dev & prod)
+DATABASE_URL=postgresql+psycopg2://dev:devpassword@localhost:5432/semantic_layer_dev
 
 # CORS
 CORS_ORIGINS=http://localhost:3000
@@ -142,8 +139,7 @@ langgraph, langchain             — agent orchestration
 langchain-openai                 — GPT-4o-mini
 langchain-community              — SQLDatabaseToolkit
 sqlalchemy, alembic              — ORM + migrations
-aiosqlite                        — async SQLite (dev)
-psycopg2-binary                  — PostgreSQL (prod)
+psycopg2-binary                  — PostgreSQL driver (dev & prod)
 sqlparse                         — SQL safety validation
 ruff, pytest, pytest-asyncio, httpx — dev tools
 ```

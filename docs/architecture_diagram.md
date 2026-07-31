@@ -22,7 +22,7 @@ graph TB
     Q4 --> Q5["Format Agent\ntext/table/number"]
 
     G1 -->|introspect| DB[("🗄️ Target Database\nPostgreSQL / MySQL / SQLite")]
-    G4 -->|save| META[("📐 Metadata Store\nSQLite dev / PostgreSQL prod")]
+    G4 -->|save| META[("📐 Metadata Store\nPostgreSQL (dev & prod)")]
     Q1 -->|read| META
     Q4 -->|execute SQL| DB
 ```
@@ -68,5 +68,5 @@ flowchart LR
 | LLM | GPT-4o-mini | Enrich + SQL generation |
 | DB Abstraction | SQLAlchemy | Introspection + execution |
 | SQL Safety | sqlparse | Whitelist SELECT only |
-| Metadata Store | SQLite (dev) / PostgreSQL (prod) | Semantic definitions |
+| Metadata Store | PostgreSQL (dev & prod) | Semantic definitions |
 | Target DB | PostgreSQL / MySQL / SQLite | DB người dùng query |

@@ -43,7 +43,7 @@ graph TB
 
     subgraph Data["🗄️ Data Layer"]
         TARGET["Target Database\nPostgreSQL / MySQL / SQLite"]
-        METADB["Metadata Store\nSQLite dev / PostgreSQL prod"]
+        METADB["Metadata Store\nPostgreSQL (dev & prod)"]
     end
 
     UI --> GEN_API --> Flow1
@@ -83,12 +83,15 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    START(["User: câu hỏi tự nhiên + db_id"]) --> SA
+    START(["User: câu hỏi tự nhiên + db_id"]) --> MATCH
 
-    SA["Schema Agent\nContext: tên + business_name tất cả bảng ~2k tokens\nOutput: selected_tables"]
-    SA --> SQLA
+    MATCH{"Metric Matcher\nKhớp với Business Metric hay\nQuery Template nào đã lưu trong Semantic Layer?"}
 
-    SQLA["SQL Gen Agent\nContext: schema chi tiết 2-5 bảng + business defs ~6k tokens\nOutput: generated_sql"]
+    MATCH -->|"✅ Matched (Fast Path)"| TEMPLATE["Dùng SQL Template có sẵn\n(Bỏ qua SQL Gen Agent)" ]
+    MATCH -->|"❌ Ad-hoc Query"| SA["Schema Agent\nContext: tên + description các bảng\nOutput: selected_tables"]
+
+    TEMPLATE --> VA
+    SA --> SQLA["SQL Gen Agent\nContext: schema chi tiết 2-5 bảng\nOutput: generated_sql"]
     SQLA --> VA
 
     VA{"Validate Agent\nChỉ SELECT?\nSyntax OK?\nRow limit OK?"}
@@ -153,11 +156,14 @@ class QueryState(TypedDict, total=False):
     user_question: str         # Input: câu hỏi tự nhiên
     db_id: str                 # Input: DB cần query
 
-    selected_tables: list[str] # Schema Agent output
+    matched_metric_id: str     # Metric Matcher output (nếu trùng metric có sẵn)
+    is_fast_path: bool         # True nếu dùng SQL template sẵn từ Semantic Layer
+
+    selected_tables: list[str] # Schema Agent output (ad-hoc path)
     schema_context: str        # Schema chi tiết các bảng chọn
     semantic_context: str      # Business definitions từ Metadata Store
 
-    generated_sql: str         # SQL Gen Agent output
+    generated_sql: str         # SQL Gen Agent hoặc Template output
     is_safe: bool              # Validate Agent output
     validation_error: str
 
@@ -233,8 +239,7 @@ semantic_metrics (
 | DB Abstraction | **SQLAlchemy** | ≥ 2.0 | Multi-DB, introspect API |
 | Migration | **Alembic** | ≥ 1.14 | Schema migration |
 | SQL Safety | **sqlparse** | ≥ 0.5 | AST parse, whitelist SELECT |
-| Async SQLite | **aiosqlite** | ≥ 0.19 | Dev local |
-| PostgreSQL | **psycopg2-binary** | ≥ 2.9 | Prod driver |
+| PostgreSQL Driver | **psycopg2-binary** | ≥ 2.9 | Driver cho PostgreSQL (dev & prod) |
 | Container | **Docker** multi-stage | — | Dev/prod separation |
 | CI/CD | **GitHub Actions** | — | Auto test + deploy |
 | Linter | **Ruff** | ≥ 0.8 | Fast lint + format |
@@ -296,10 +301,9 @@ src/
 
 ---
 
-## Design Decisions
-
-| Quyết định | Lựa chọn | Thay thế xét | Lý do |
-|-----------|---------|-------------|-------|
+| Design Decision | Choice | Alternative | Reason |
+|---|---|---|---|
+| Query Execution | **Metric Matcher (Fast Path) + Fallback SQL Gen** | Pure SQL Gen mỗi lần | Tái sử dụng `semantic_metrics` từ Flow 1 → chính xác 100%, 0s LLM SQL gen cho câu hỏi lặp lại |
 | Agent pattern | Multi-Agent Handoff | Single monolithic agent | Phân tách context, giảm cost, dễ retry từng bước |
 | Schema selection | LLM Schema Agent | Vector DB ChromaDB | Không cần infra thêm, có reasoning |
 | LLM | GPT-4o-mini | GPT-4o | Cost 10x rẻ hơn, đủ accuracy NL2SQL |
@@ -328,7 +332,6 @@ langgraph>=0.2.0
 # Database
 sqlalchemy>=2.0.0
 alembic>=1.14.0
-aiosqlite>=0.19.0
 psycopg2-binary>=2.9.0
 
 # SQL Safety
