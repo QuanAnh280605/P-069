@@ -27,7 +27,7 @@ def search_knowledge(query: str) -> str:
     Returns:
         Kết quả tìm kiếm
     """
-    # TODO: Implement actual search logic (e.g., RAG with vector store)
+    # TODO: Implement search logic for semantic layer metadata lookup
     return f"Kết quả tìm kiếm cho: {query}"
 
 

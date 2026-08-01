@@ -135,7 +135,7 @@ uvicorn src.main:app --reload --port 8000
 |---|-------------|-------------|:---:|
 | 1 | Source Code | `src/` | ✅ |
 | 2 | README.md | `README_boilerplate.md` → copy thành `README.md` | ✅ |
-| 3 | Architecture Diagram | `docs/architecture_diagram.md` | ✅ |
+| 3 | Architecture Diagram | `ARCHITECTURE.md` | ✅ |
 | 4 | AI Logs | LangSmith (3 env vars) + Auto AI Usage Logging | ✅ |
 | 5 | Live URL | Deploy lên Render/Vercel | ⚡ CI/CD sẵn |
 | 6 | Video Demo | `presentation/` | 📝 |

@@ -16,8 +16,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AI20K Agent",
-    description="AI Agent built with LangGraph",
+    title="AI Semantic Layer Agent",
+    description="AI Agent xây dựng Semantic Layer & định nghĩa chỉ số thống nhất cho doanh nghiệp.",
     version="1.0.0",
     lifespan=lifespan,
 )
