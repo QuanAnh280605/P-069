@@ -17,14 +17,10 @@
 
 ## 2. Đối tượng Người dùng & Chân dung (User Personas)
 
-### Persona 1 (Primary): Alex — Business Analyst / Data Analyst
+### Persona 1 (Primary): Business Analyst / Data Analyst
 - **Mục tiêu:** Cần quản lý ngữ cảnh dữ liệu nghiệp vụ chính xác; quy định công thức tính chỉ số (doanh thu, churn rate) một lần duy nhất cho toàn đội ngũ.
 - **Pain Points:** Mất thời gian trả lời lặp đi lặp lại các câu hỏi số liệu đơn giản từ các phòng ban vì mỗi người tính theo một cách riêng. Tên bảng/cột trong DB không ai nhớ được ý nghĩa.
 - **Nhu cầu:** Công cụ tự động soi schema DB, đặt tên tiếng Việt có nghĩa, đề xuất metrics và có giao diện cho phép chỉnh sửa/duyệt nhanh (HITL).
-
-### Persona 2 (Future — v2.0+): Sarah — Business Executive / Non-tech Manager
-- **Mục tiêu:** Muốn đặt câu hỏi bằng ngôn ngữ tự nhiên và nhận câu trả lời dữ liệu tức thì.
-- **Ghi chú:** Persona này sẽ được phục vụ bởi Flow 2 (NL2SQL Query) trong phiên bản tương lai, sử dụng Semantic Layer được xây dựng từ v1.0.
 
 ---
 
@@ -42,24 +38,14 @@
 | **F-06** | Manual Metric Management | Cho phép BA/DA thêm thủ công Business Metric mới (không cần qua LLM), chỉnh sửa, xóa metric đã có trong Library. | **P0 (Must-Have)** |
 | **F-07** | Export Semantic Layer | Xuất Semantic Layer đã duyệt ra file **JSON** hoặc **YAML** để tích hợp với các công cụ BI khác (Metabase, dbt, Looker Studio). | **P1 (Should-Have)** |
 | **F-08** | Connection URL Encryption | Mã hóa Connection URL của Target DB bằng Fernet trước khi lưu vào Metadata Store. Không bao giờ lưu plaintext. | **P0 (Must-Have)** |
-
-### Future (v2.0+) — Out of Scope cho v1.0
-
-| Feature ID | Tên tính năng | Ghi chú |
-|------------|---------------|---------|
-| **F-F01** | Natural Language Query (NL2SQL) | Người dùng đặt câu hỏi tự nhiên → Agent dùng Semantic Layer sinh SQL → validate → execute → trả kết quả |
-| **F-F02** | Fast Path Metric Matching | So khớp câu hỏi với Business Metric đã lưu để dùng SQL Template trực tiếp |
-| **F-F03** | SQL Safety Validation | `sqlparse` kiểm tra SELECT-only, LIMIT 1000, timeout 30s |
-| **F-F04** | Result Formatting | Trả kết quả dạng Text, Markdown table, KPI number |
-| **F-F05** | Chart & Visualization | Sinh biểu đồ từ kết quả query |
-| **F-F06** | Export Data to CSV/Excel | Tải kết quả query về máy |
+| **F-09** | Import Schema Dump | Cho phép BA/DA upload file SQL dump (`.sql`) hoặc schema definition để hệ thống parse schema metadata mà **không cần kết nối live DB**. Hỗ trợ PostgreSQL dump (`pg_dump --schema-only`) và MySQL dump. | **P1 (Should-Have)** |
 
 ---
 
 ## 4. User Stories & Tiêu chí Chấp nhận (Acceptance Criteria)
 
 ### Story 1: Tự động phân tích & đề xuất Semantic Layer
-- **Là một** Business Analyst (Alex),  
+- **Là một** Business Analyst,  
 - **Tôi muốn** cung cấp Connection URL của cơ sở dữ liệu và yêu cầu hệ thống tự phân tích schema,  
 - **Để** tôi có bản phác thảo tên nghiệp vụ và mô tả cột mà không cần gõ tay từ đầu.
 - **Tiêu chí chấp nhận:**
@@ -69,7 +55,7 @@
   - Toàn bộ kết quả trả về dưới dạng Semantic Layer JSON (trạng thái `draft`, chưa lưu).
 
 ### Story 2: Review và Chỉnh sửa Semantic Layer (HITL)
-- **Là một** Business Analyst (Alex),  
+- **Là một** Business Analyst,  
 - **Tôi muốn** chỉnh sửa inline tên nghiệp vụ của bảng/cột và phê duyệt (hoặc từ chối) các Metric được AI gợi ý,  
 - **Để** đảm bảo ngữ cảnh lưu trữ hoàn toàn chuẩn xác với thực tế công ty.
 - **Tiêu chí chấp nhận:**
@@ -78,7 +64,7 @@
   - Dữ liệu sau khi chốt được lưu bền vững trong `semantic_tables`, `semantic_columns`, `semantic_metrics`.
 
 ### Story 3: Quản lý Business Metrics thủ công
-- **Là một** Business Analyst (Alex),  
+- **Là một** Business Analyst,  
 - **Tôi muốn** thêm, sửa, xóa Business Metric thủ công không phụ thuộc vào AI,  
 - **Để** tôi có thể định nghĩa chỉ số phức tạp mà AI chưa đề xuất đúng.
 - **Tiêu chí chấp nhận:**
@@ -88,7 +74,7 @@
   - UI hiển thị danh sách metric với chức năng thêm/sửa/xóa inline.
 
 ### Story 4: Xuất Semantic Layer
-- **Là một** Business Analyst (Alex),  
+- **Là một** Business Analyst,  
 - **Tôi muốn** xuất Semantic Layer của một database ra file JSON hoặc YAML,  
 - **Để** tích hợp định nghĩa nghiệp vụ vào Metabase, dbt hoặc chia sẻ với các team khác.
 - **Tiêu chí chấp nhận:**
@@ -103,6 +89,17 @@
 - **Tiêu chí chấp nhận:**
   - Connection URL được mã hóa Fernet trước khi INSERT vào `semantic_databases.conn_url_enc`.
   - Khi cần introspect lại, hệ thống decrypt trong memory, không log ra plaintext.
+
+### Story 6: Import Schema từ file SQL Dump
+- **Là một** Business Analyst,  
+- **Tôi muốn** upload file SQL dump (`.sql`) của database thay vì cung cấp live Connection URL,  
+- **Để** tôi có thể phân tích schema của DB production mà không cần mở kết nối trực tiếp hoặc khi không có quyền truy cập live DB.
+- **Tiêu chí chấp nhận:**
+  - API `POST /api/v1/semantic/import-dump` nhận file `.sql` upload (multipart/form-data).
+  - Hệ thống parse DDL statements (`CREATE TABLE`, `ALTER TABLE ADD CONSTRAINT`) từ file dump để extract tên bảng, cột, kiểu dữ liệu, FK — **không thực thi SQL**.
+  - Sau khi parse thành công, pipeline tiếp tục từ bước Enrich Node (LLM đặt tên nghiệp vụ) giống Flow 1 thông thường.
+  - Hỗ trợ format: PostgreSQL dump (`pg_dump --schema-only`) và MySQL dump (`mysqldump --no-data`).
+  - Trả về lỗi rõ ràng nếu file không phải SQL dump hợp lệ hoặc không có DDL statement nào.
 
 ---
 
@@ -123,17 +120,3 @@
 - API CRUD (update business_name, add metric): phản hồi trong **< 500ms**.
 
 ---
-
-## 6. Phạm vi Không làm v1.0 (Out of Scope) & Giả định (Assumptions)
-
-### Phạm vi Không làm trong v1.0:
-- Không thực thi câu truy vấn SQL trên Target DB (chỉ đọc schema metadata).
-- Không hỗ trợ Natural Language Query (NL2SQL) — đây là Flow 2 (v2.0+).
-- Không hỗ trợ kết nối NoSQL databases (MongoDB, Cassandra).
-- Không tự động thay đổi cấu trúc bảng (Migration) của Target DB.
-- Không hiển thị data thực từ Target DB trong giao diện.
-
-### Giả định (Assumptions):
-- Target Database có thể truy cập được từ server backend (cùng network hoặc mở port/IP whitelist).
-- Tài khoản DB được cung cấp có quyền truy cập `information_schema` (đọc metadata bảng/cột).
-- BA/DA là người chịu trách nhiệm cuối cùng về độ chính xác của Semantic Layer đã duyệt.

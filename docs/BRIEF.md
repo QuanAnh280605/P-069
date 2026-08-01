@@ -41,9 +41,6 @@ Xây dựng **AI Semantic Layer Agent** — hệ thống AI hỗ trợ BA/DA xâ
 6. Semantic Layer được lưu vào Metadata Store (PostgreSQL)
 7. Export ra JSON/YAML để tích hợp với các tool BI khác
 
-**Future Flow 2 (v2.0+) — Natural Language Query Execution:**
-> Người dùng đặt câu hỏi tự nhiên → Agent dùng Semantic Layer đã xây → sinh SQL → validate → execute → trả kết quả. *Phụ thuộc vào Semantic Layer chất lượng cao từ v1.0.*
-
 ---
 
 ## 4. Phạm vi dự án (Project Scope)
