@@ -1,7 +1,7 @@
 from langgraph.graph import END, StateGraph
 
-from src.agents.nodes.introspect_node import introspect_node
 from src.agents.nodes.enrich_node import enrich_node
+from src.agents.nodes.introspect_node import introspect_node
 from src.agents.nodes.metric_suggest_node import metric_suggest_node
 from src.agents.nodes.save_node import save_node
 from src.agents.state import AgentState
