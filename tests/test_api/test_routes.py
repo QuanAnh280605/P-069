@@ -1,6 +1,7 @@
 """Tests cho API routes — Flow 1 endpoints."""
 
 import pytest
+
 from src.api.auth import create_access_token
 from src.models.db import UserModel
 
