@@ -1,10 +1,8 @@
 """Unit tests for authentication, password hashing, JWT operations, and auth endpoints."""
 
 import pytest
-import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth import (
     create_access_token,
@@ -13,26 +11,8 @@ from src.api.auth import (
     verify_password,
 )
 from src.main import app
-from src.models.db import Base, UserModel
+from src.models.db import UserModel
 from src.services.database import get_db_session
-
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-
-
-@pytest_asyncio.fixture
-async def async_session():
-    """Create in-memory SQLite database session for unit testing."""
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    async_session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with async_session_factory() as session:
-        yield session
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
 
 
 def test_password_hashing() -> None:
