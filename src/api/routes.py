@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from src.api.auth import get_current_user_profile
 from src.models.schemas import (
     ApproveRequest,
     ApproveResponse,
@@ -12,7 +13,7 @@ from src.models.schemas import (
     SemanticTableUpdate,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_profile)])
 
 
 # ---------------------------------------------------------------------------

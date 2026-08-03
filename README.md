@@ -1,201 +1,278 @@
-# 🤖 AI20K Agent Template
+# 🤖 AI Semantic Layer Agent — P-069
 
-Template chính thức cho học viên **VinUni AI20K Build Phase** — cung cấp sẵn cấu trúc dự án, code mẫu, và hướng dẫn kỹ thuật chi tiết để xây dựng AI Agent đạt điểm cao (35+/50).
+> **Dự án thuộc VinUni AI20K Build Phase (Cohort 3)**  
+> **Hệ thống AI Agent hỗ trợ xây dựng và quản trị lớp ngữ nghĩa dữ liệu (Semantic Layer) & định nghĩa chỉ số kinh doanh thống nhất.**
 
-> 📖 **Technical Guidebook:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-FF6F61?style=flat)](https://langchain-ai.github.io/langgraph/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## 🎯 Template này dùng để làm gì?
+---
 
-Khi tham gia AI20K Build Phase, mỗi đội cần xây dựng một AI Agent hoàn chỉnh — từ kiến trúc, code, test, đến deploy. Thay vì bắt đầu từ con số không, template này cung cấp:
+## 📌 Tổng quan bài toán (Problem Statement)
 
-- **Cấu trúc thư mục chuẩn** — đã được thiết kế theo best practices (separation of concerns)
-- **Code mẫu** cho các phần cốt lõi: LangGraph agent, FastAPI API, config, schemas
-- **Docker + CI/CD sẵn** — Dockerfile multi-stage, GitHub Actions workflow
-- **Hướng dẫn kỹ thuật 10 chương** — từ clone template đến nộp bài Demo Day
-- **Checklist 10 deliverables** — đảm bảo không bỏ sót yêu cầu BTC
-- **AI Usage Logging tự động** — Pre-configured hooks cho Claude Code, Cursor, Codex, Gemini CLI, Antigravity, và GitHub Copilot
+Trong các doanh nghiệp, dữ liệu lưu trữ tại cơ sở dữ liệu (PostgreSQL, MySQL, SQLite) thường gặp **2 thách thức lớn**:
 
-## ⚡ Quick Start
+1. **Khoảng cách Ngữ cảnh Nghiệp vụ (Business Context Gap):** Tên bảng và cột mang tính kỹ thuật khô khan (vd: `usr_tbl_01`, `amt_vat_inc`, `ord_sts_cd`), khiến người dùng nghiệp vụ hoặc BA/DA mất thời gian giải thích và diễn giải số liệu.
+2. **Hỗn loạn Định nghĩa Chỉ số (Metric Definition Chaos):** Thiếu một "nguồn sự thật duy nhất" (Single Source of Truth) cho các công thức tính chỉ số (doanh thu, churn rate, conversion rate...). Mỗi phòng ban tự tính theo cách riêng dẫn đến số liệu báo cáo không thống nhất.
 
-### Bước 1: Fork hoặc Clone
+### 💡 Giải pháp: AI Semantic Layer Agent (v1.0)
+**AI Semantic Layer Agent** tự động hóa quy trình **Introspect Schema → AI Đặt tên Nghiệp vụ tiếng Việt & Đề xuất Chỉ số → HITL Review (Người dùng phê duyệt) → Lưu vào Metadata Store → Export JSON/YAML** để tích hợp với các công cụ BI.
 
-```bash
-# Clone template
-git clone https://github.com/AI20K-Build-Cohort-2/starter-code-template.git team-YOUR_TEAM_NAME
-cd team-YOUR_TEAM_NAME
+---
 
-# Xóa git history cũ và khởi tạo lại
-rm -rf .git
-git init
-git add .
-git commit -m "feat: khởi tạo dự án từ template"
+## 🎯 Phạm vi dự án (Project Scope)
+
+### ✅ In-Scope (v1.0 - Flow 1 Pipeline)
+- **Schema Introspection:** Tự động đọc metadata (tables, columns, foreign keys, data types) qua `SQLAlchemy Inspector`. **Tuyệt đối không query/SELECT data** trên Target DB.
+- **AI Business Enrichment:** Dùng LLM (GPT-4o-mini) chuyển đổi tên kỹ thuật sang tên nghiệp vụ chuẩn Tiếng Việt và viết mô tả chi tiết.
+- **Metric Suggestion:** LLM phân tích schema để gợi ý Business Metrics kèm câu lệnh SQL template.
+- **HITL (Human-In-The-Loop) Review:** Giao diện phê duyệt/chỉnh sửa trực tiếp trước khi lưu.
+- **Security:** Mã hóa đối xứng Fernet đối với Connection URL (không lưu plaintext).
+- **Metadata Management & Export:** Thêm/sửa/xóa Business Metrics thủ công và xuất Semantic Layer ra chuẩn **JSON** và **YAML**.
+
+### ❌ Out-of-Scope (v1.0)
+- Không thực thi câu lệnh SQL SELECT trên Target DB.
+- Không hỗ trợ NL2SQL Chatbot / Natural Language Query (dành cho v2.0+).
+- Không dùng Vector Database (ChromaDB, FAISS).
+
+---
+
+## 🏗 Kiến trúc hệ thống (System Architecture)
+
+Hệ thống xây dựng theo mô hình 3-Tier với **LangGraph StateGraph** điều phối pipeline có nút **Interrupt (HITL)**:
+
+```mermaid
+flowchart TD
+    START(["Client / UI Request\n(Connection URL)"]) --> IN
+
+    subgraph Pipeline["⚙️ LangGraph Flow 1 Pipeline"]
+        IN["🔍 Introspect Node\nSQLAlchemy Inspector\n(Schema Metadata Only)"]
+        IN --> EN
+        
+        EN["📝 Enrich Node\nGPT-4o-mini đặt business_name\n& mô tả tiếng Việt"]
+        EN --> MS
+        
+        MS["💡 Metric Suggest Node\nGPT-4o-mini đề xuất\nBusiness Metrics + SQL Template"]
+        MS --> HITL
+        
+        HITL{"👤 HITL Review Node\n(LangGraph Interrupt)\nBA/DA duyệt & chỉnh sửa"}
+        
+        HITL -->|"✅ Approve"| SV["💾 Save Node\nPersist vào Metadata Store"]
+        HITL -->|"🔄 Request Re-enrich"| EN
+    end
+
+    SV --> EX["📤 Export Service\nJSON / YAML File"]
+    EX --> END(["✅ Complete Semantic Layer"])
+
+    IN -.- TARGET[("🗄️ Target DB\n(Postgres/MySQL/SQLite)")]
+    SV -.- METADB[("🗄️ Metadata Store\n(PostgreSQL)")]
 ```
 
-### Bước 2: Setup môi trường
-```bash
-# Tạo virtual environment
-python3.11 -m venv .venv
-source .venv/bin/activate
-
-# Cài dependencies
-pip install -e ".[dev]"
-
-# Cấu hình API keys
-cp .env.example .env
-# Mở .env và thêm OPENAI_API_KEY của bạn
-# Đồng thời cập nhật AI_LOG_API_KEY bằng key riêng từ link mời của BTC
-# (giá trị trong .env.example chỉ là placeholder)
-```
-
-### Bước 3: Cài AI Logging Hooks
-
-```bash
-# Linux / macOS / Git Bash
-bash scripts/setup_hooks.sh
-
-# Windows PowerShell
-# powershell -ExecutionPolicy Bypass -File scripts\setup_hooks.ps1
-```
-
-Hooks tự động log mọi AI prompt khi dùng Claude Code, Cursor, Codex, Gemini CLI, Antigravity, hoặc GitHub Copilot. Không cần thao tác thủ công.
-
-### Bước 4: Chạy server
-
-```bash
-# Chạy FastAPI backend
-uvicorn src.main:app --reload --port 8000
-
-# Mở Swagger UI
-# http://localhost:8000/docs
-```
-
-### Bước 5: Đọc hướng dẫn
-
-📖 Mở **[Technical Guidebook](https://phoenix.note.transformerlabs.ai/technical-book)** và làm theo từng chương.
-
-## 📁 Cấu trúc dự án
-
-```
-├── src/
-│   ├── agents/           # 🧠 LangGraph Agent
-│   │   ├── graph.py      #    State graph (nodes + edges)
-│   │   ├── state.py      #    State schema (TypedDict)
-│   │   ├── nodes/        #    Node functions
-│   │   └── tools/        #    Agent tools (@tool)
-│   ├── api/              # 🌐 FastAPI Backend
-│   │   └── routes.py     #    API endpoints
-│   ├── models/           # 📋 Pydantic schemas
-│   ├── services/         # 🔧 Business logic (LLM, etc.)
-│   ├── config.py         # ⚙️ Pydantic Settings
-│   └── main.py           # 🚀 App entry point
-├── tests/                # 🧪 pytest suite
-│   ├── test_agents/      #    Agent/graph tests
-│   └── test_api/         #    API endpoint tests
-├── scripts/              # 🔌 AI Logging Hooks
-│   ├── log_hook.py       #    Auto-log cho Claude/Cursor/Codex/Gemini/Copilot
-│   ├── log_antigravity.py#    Antigravity IDE prompt scanner
-│   ├── log_manual.py     #    Manual log cho ChatGPT / web tools
-│   ├── submit_log.py     #    Submit logs on git push
-│   └── setup_hooks.sh    #    One-time hook installer
-├── .claude/ .codex/ .cursor/ .gemini/  # Per-tool hook configs
-├── .agents/              # Antigravity rules + workflows
-├── .ai-log/              # 📊 AI usage logs (auto-generated)
-├── docs/
-│   ├── guide/            # 📖 Technical Guidebook (10 chapters)
-│   └── architecture_diagram.md
-├── eval/                 # 📊 Evaluation results
-├── presentation/         # 🎤 Demo Day slides
-├── .github/workflows/    # ⚡ CI/CD (GitHub Actions)
-├── .github/hooks/        # 🪝 Copilot hook config
-├── Dockerfile            # 🐳 Multi-stage build
-├── docker-compose.yml    # 🐙 Full stack orchestration
-└── README_boilerplate.md # 📝 README template cho đội của bạn
-```
-
-## 📚 Technical Guidebook — 10 Chương
-
-| Chương | Nội dung | Thời gian |
-|---------|----------|-----------|
-| 1 | Lời mở đầu — Mục tiêu, cách sử dụng | 15 phút |
-| 2 | Khởi tạo dự án — Clone, setup, git workflow | 4 giờ |
-| 3 | Thiết kế kiến trúc — 3-tier, diagrams, ADR | 6 giờ |
-| 4 | **LangGraph Agent** — State, nodes, edges, tools, RAG | 8 giờ |
-| 5 | FastAPI — Routes, validation, error handling, streaming | 6 giờ |
-| 6 | Giao diện — Next.js + Streamlit quickstart | 6 giờ |
-| 7 | DevOps — Docker, CI/CD, deploy, logging | 6 giờ |
-| 8 | Kiểm thử — Unit test, integration test, RAGAS | 4 giờ |
-| 9 | Demo Day — 10 deliverables, checklist, tips | 2 giờ |
-| 10 | Tài nguyên — Khóa học, docs, BMAD method | tham khảo |
-
-📖 **Đọc online:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
-
-## 📋 10 Deliverables cho Demo Day
-
-| # | Deliverable | File vị trí | Template có sẵn |
-|---|-------------|-------------|:---:|
-| 1 | Source Code | `src/` | ✅ |
-| 2 | README.md | `README_boilerplate.md` → copy thành `README.md` | ✅ |
-| 3 | Architecture Diagram | `ARCHITECTURE.md` | ✅ |
-| 4 | AI Logs | LangSmith (3 env vars) + Auto AI Usage Logging | ✅ |
-| 5 | Live URL | Deploy lên Render/Vercel | ⚡ CI/CD sẵn |
-| 6 | Video Demo | `presentation/` | 📝 |
-| 7 | Pitch Deck | `presentation/` | 📝 |
-| 8 | Development Journal | `JOURNAL.md` | ✅ |
-| 9 | Worklog | `WORKLOG.md` | ✅ |
-| 10 | Evaluation Evidence | `eval/` | 📝 |
+---
 
 ## 🛠 Tech Stack
 
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| AI Agent | LangGraph + LangChain | Latest |
-| Backend | FastAPI + Uvicorn | 0.100+ |
-| LLM | OpenAI GPT-4o-mini | API |
-| Frontend | Next.js / Streamlit | 14+ / 1.30+ |
-| Database | SQLite (dev) / PostgreSQL (prod) | — |
-| DevOps | Docker + GitHub Actions | — |
-| Testing | pytest + pytest-asyncio | 8+ |
+| Thành phần | Công nghệ | Phiên bản | Vai trò |
+|---|---|---|---|
+| **Core & Framework** | Python / FastAPI | 3.11 / ≥ 0.115 | Language & Async REST API |
+| **Agent Orchestration** | LangGraph | ≥ 0.2 | StateGraph & HITL Interrupt |
+| **LLM Provider** | OpenAI GPT-4o-mini | API (Temp = 0.0) | Sinh tên nghiệp vụ & gợi ý metric |
+| **Database Abstraction** | SQLAlchemy | ≥ 2.0 | Metadata Inspector & ORM |
+| **Metadata Store** | PostgreSQL | 16-alpine | Lưu thông tin Semantic Layer |
+| **Security** | Cryptography (Fernet) | Standard | Mã hóa Connection URL |
+| **Export Formats** | PyYAML / JSON | Standard | Đóng gói Semantic Layer cho BI |
+| **DevOps & Quality** | Docker / Docker Compose / Ruff | Standard | Containerization & Linting |
 
-## 📊 AI Usage Logging
+---
 
-Template đã tích hợp sẵn auto-logging hooks cho 7 AI tools:
+## 📁 Cấu trúc thư mục dự án
 
-| Tool | Cơ chế | Config |
-|------|--------|--------|
-| Claude Code | `.claude/settings.json` hooks | Tự động |
-| Cursor | `.cursor/hooks.json` | Tự động |
-| OpenAI Codex CLI | `.codex/hooks.json` | Tự động |
-| Gemini CLI | `.gemini/settings.json` | Tự động |
-| GitHub Copilot | `.github/hooks/hooks.json` | Tự động |
-| OpenCode AI | `.opencode/plugins/ai-logger.ts` & `.opencode/hooks.json` | Tự động |
-| Antigravity IDE | Pre-push scan transcript | Tự động trên `git push` |
-
-Tất cả prompts và tool calls được log vào `.ai-log/session.jsonl` và tự động submit lên grading server mỗi khi `git push`.
-
-**ChatGPT / web tools khác** — log thủ công:
-```bash
-bash scripts/_pyrun.sh scripts/log_manual.py --tool chatgpt --prompt "What you asked"
+```
+P-069/
+├── src/
+│   ├── agents/               # 🧠 LangGraph Agent Pipeline
+│   │   ├── nodes/            #    Các node: introspect, enrich, metric_suggest, save
+│   │   ├── graph.py          #    Định nghĩa StateGraph & Routing logic
+│   │   └── state.py          #    AgentState TypedDict schema
+│   ├── api/                  # 🌐 FastAPI Routes & Endpoints
+│   │   └── routes.py         #    Flow 1 REST endpoints & CRUD Metrics
+│   ├── models/               # 📋 Pydantic Schemas & DB Models
+│   │   └── schemas.py        #    Request/Response Validation Models
+│   ├── services/             # 🔧 Core Services (LLM, Security, Export)
+│   │   └── llm.py            #    get_llm() factory (OpenAI GPT-4o-mini)
+│   ├── config.py             # ⚙️ App Settings (Pydantic-settings)
+│   └── main.py               # 🚀 FastAPI App Entry Point
+├── tests/                    # 🧪 Test Suite (pytest)
+│   ├── test_agents/          #    Unit tests cho từng node & graph
+│   └── test_api/             #    Integration tests cho API endpoints
+├── docs/                     # 📚 Tài liệu chi tiết dự án
+│   ├── BRIEF.md              #    Project Brief
+│   ├── PRD.md                #    Product Requirements Document
+│   ├── UI_FLOW.md            #    Giao diện & HITL Interaction Flow
+│   └── ACTION_PLAN.md        #    Kế hoạch triển khai dự án
+├── scripts/                  # 🔌 AI Usage Logging Hooks
+├── ARCHITECTURE.md           # 🏛 Architecture Specification
+├── AGENTS.md                 # 📜 AI Assistant Rules & Guidelines
+├── docker-compose.dev.yml    # 🐳 Docker Compose cho Development (Hot-reload + Postgres)
+├── docker-compose.yml        # 🐙 Docker Compose cho Production
+├── Dockerfile                # 🐳 Dockerfile Multi-stage Build
+├── requirements.txt          # 📦 Python Dependencies
+└── README.md                 # 📖 Tài liệu dự án (File này)
 ```
 
-> ⚠️ Chạy `bash scripts/setup_hooks.sh` một lần sau khi clone để cài pre-push hook.
+---
 
-## 📖 Đọc Technical Guidebook
+## ⚡ Quick Start & Hướng dẫn cài đặt
 
-**Online (khuyến nghị):** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
+### 1. Yêu cầu tiên quyết
+- **Python:** `3.11+`
+- **Docker & Docker Compose** (nếu chạy container)
+- **Git**
 
-Đăng nhập bằng GitHub (cùng account đã được BTC mời vào org `AI20K-Build-Cohort-2`)
-→ chọn tab **Technical Book** ở sidebar trái → đọc 10 chương + topic sections,
-có table of contents bên phải, hỗ trợ light/dark/cyberpunk theme.
+### 2. Clone repository & Môi trường Virtualenv
 
-**Offline:** mọi chương đều ở thư mục `docs/guide/` trong template này — mở bằng
-bất kỳ markdown viewer/editor nào (VS Code, Obsidian, GitHub UI, …).
+```bash
+# Clone dự án
+git clone https://github.com/AI20K-Build-Phase-Cohort-3/P-069.git
+cd P-069
 
-## 🔗 Liên kết
+# Tạo môi trường ảo
+python -m venv .venv
 
-- 📖 **Technical Guidebook:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
-- 🏫 **AI20K Program:** VinUni AI20K Build Phase
-- 👨‍🏫 **Mentor:** Đặng Hải Lộc
+# Kích hoạt trên Windows PowerShell:
+.\.venv\Scripts\Activate.ps1
+# Hoặc trên Linux/macOS:
+# source .venv/bin/activate
+
+# Cài đặt dependencies
+pip install -r requirements.txt
+```
+
+### 3. Cấu hình biến môi trường (`.env`)
+
+Sao chép file `.env.example` thành `.env` và bổ sung các API Key:
+
+```bash
+cp .env.example .env
+```
+
+Nội dung `.env` chính:
+```env
+APP_ENV=development
+LOG_LEVEL=INFO
+
+# OpenAI API Key (bắt buộc cho LLM Nodes)
+OPENAI_API_KEY=sk-proj-xxxx...
+
+# Secret Key mã hóa Fernet cho Target DB Connection URL
+ENCRYPTION_KEY=your_fernet_base64_key_here
+
+# Metadata Store DB Connection (PostgreSQL with asyncpg driver)
+DATABASE_URL=postgresql+asyncpg://dev:devpassword@localhost:5432/semantic_layer_dev
+```
+
+*(Mẹo: Bạn có thể sinh Fernet Key nhanh bằng Python: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`)*
+
+### 4. Thiết lập AI Usage Logging Hooks (Dành cho Học viên VinUni AI20K)
+
+```bash
+# Windows PowerShell
+powershell -ExecutionPolicy Bypass -File scripts\setup_hooks.ps1
+
+# Linux / macOS / Git Bash
+bash scripts/setup_hooks.sh
+```
+
+---
+
+## 🚀 Chạy ứng dụng
+
+### Cách 1: Chạy trực tiếp qua Uvicorn (Local Dev)
+
+1. Khởi động PostgreSQL Metadata Store qua Docker Compose (hoặc dùng Postgres local):
+```bash
+docker compose -f docker-compose.dev.yml up postgres -d
+```
+
+2. Khởi chạy FastAPI App Server:
+```bash
+uvicorn src.main:app --reload --port 8000
+```
+
+3. Mở tài liệu API Swagger tại: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+### Cách 2: Chạy full-stack với Docker Compose
+
+```bash
+# Development Mode (Hot-reload code + Debug port 5678)
+docker compose -f docker-compose.dev.yml up --build -d
+
+# Xem log server
+docker compose -f docker-compose.dev.yml logs -f backend
+
+# Dừng môi trường dev
+docker compose -f docker-compose.dev.yml down
+```
+
+---
+
+## 🔗 Danh sách API Endpoints chính
+
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| `POST` | `/api/v1/semantic/generate` | Khởi chạy Flow 1 (Introspect DB → Enrich → Suggest Metrics) |
+| `POST` | `/api/v1/semantic/approve` | Xác nhận (Approve) từ HITL review & persist vào Metadata Store |
+| `PUT` | `/api/v1/semantic/{db_id}/table/{table_name}` | Cập nhật tên/mô tả nghiệp vụ của bảng (HITL Inline Edit) |
+| `PUT` | `/api/v1/semantic/{db_id}/column/{table_name}/{column_name}` | Cập nhật tên/mô tả nghiệp vụ của cột (HITL Inline Edit) |
+| `POST` | `/api/v1/semantic/{db_id}/metric` | Tạo mới một Business Metric (AI hoặc Thủ công) |
+| `PUT` | `/api/v1/semantic/{db_id}/metric/{metric_id}` | Cập nhật Business Metric đã tồn tại |
+| `DELETE`| `/api/v1/semantic/{db_id}/metric/{metric_id}` | Xóa Business Metric |
+| `GET` | `/api/v1/semantic/{db_id}/export?format=json\|yaml` | Xuất Semantic Layer đã phê duyệt ra JSON hoặc YAML |
+| `GET` | `/api/v1/status` | Kiểm tra trạng thái sẵn sàng của Agent |
+
+---
+
+## 🧪 Testing & Code Quality
+
+Dự án tuân thủ nghiêm ngặt quy trình kiểm thử (Async unit test & Async API test with mock DB/LLM):
+
+```bash
+# Kiểm tra linting & format bằng Ruff
+ruff check src/
+ruff format src/
+
+# Chạy toàn bộ test suite
+pytest
+
+# Chạy test kèm thông tin chi tiết
+pytest -v -s
+```
+
+---
+
+## 🛡️ Quy tắc An toàn & Bảo mật (Security Guidelines)
+
+1. **Schema Metadata Only:** Động cơ Introspection chỉ gọi `SQLAlchemy Inspector` để lấy cấu trúc dữ liệu (`get_tables`, `get_columns`, `get_foreign_keys`). **Không bao giờ thực thi câu lệnh SQL SELECT data**.
+2. **URL Encryption:** Connection URL của Target DB bắt buộc mã hóa qua `cryptography` Fernet trước khi lưu vào `semantic_databases.conn_url_enc`.
+3. **Human Approval:** Kết quả sinh ra từ AI phải trải qua nút HITL Interrupt trước khi ghi nhận chính thức vào Metadata Store.
+
+---
+
+## 📖 Tài liệu liên quan
+
+- 🏛️ [Architecture Specification](file:///d:/project/P-069/ARCHITECTURE.md)
+- 📜 [Agent Rules & Guidelines](file:///d:/project/P-069/AGENTS.md)
+- 📄 [Project Brief](file:///d:/project/P-069/docs/BRIEF.md)
+- 📋 [Product Requirements Document (PRD)](file:///d:/project/P-069/docs/PRD.md)
+- 🎨 [UI & HITL Flow](file:///d:/project/P-069/docs/UI_FLOW.md)
+- 📅 [Action Plan](file:///d:/project/P-069/docs/ACTION_PLAN.md)
+
+---
 
 ## 📄 License
 
-MIT — Sử dụng tự do cho mục đích giáo dục.
+Dự án được phân phối theo giấy phép **MIT License**.
+

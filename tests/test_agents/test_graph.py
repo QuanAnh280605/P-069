@@ -3,6 +3,7 @@
 LLM và DB đều được mock — không gọi OpenAI API thật,
 không kết nối database thật.
 """
+
 from unittest.mock import AsyncMock, patch
 
 import pytest

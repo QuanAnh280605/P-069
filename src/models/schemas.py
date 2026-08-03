@@ -1,6 +1,55 @@
+from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
+
+# ---------------------------------------------------------------------------
+# User Authentication & RBAC Schemas
+# ---------------------------------------------------------------------------
+
+
+class UserRegisterRequest(BaseModel):
+    """Request payload cho đăng ký tài khoản người dùng mới."""
+
+    email: EmailStr = Field(..., description="Email đăng nhập độc nhất")
+    username: str = Field(..., min_length=3, max_length=50, description="Tên tài khoản (username)")
+    password: str = Field(..., min_length=8, max_length=100, description="Mật khẩu (tối thiểu 8 ký tự)")
+    full_name: str = Field(default="", max_length=200, description="Họ và tên hiển thị")
+
+
+class UserLoginRequest(BaseModel):
+    """Request payload cho đăng nhập người dùng."""
+
+    email_or_username: str = Field(..., min_length=1, description="Email hoặc Tên tài khoản")
+    password: str = Field(..., min_length=1, description="Mật khẩu người dùng")
+
+
+class GoogleAuthRequest(BaseModel):
+    """Request payload cho đăng nhập/đăng ký bằng Google OAuth ID token."""
+
+    credential: str = Field(..., description="Google ID Token từ Client-side OAuth")
+
+
+class TokenResponse(BaseModel):
+    """Response trả về Access Token và Refresh Token JWT."""
+
+    access_token: str = Field(..., description="JWT Access Token")
+    refresh_token: str = Field(..., description="JWT Refresh Token")
+    token_type: str = Field(default="bearer", description="Loại token")
+    expires_in: int = Field(..., description="Thời gian hết hạn Access Token (giây)")
+
+
+class UserProfileResponse(BaseModel):
+    """Thông tin hồ sơ người dùng trả về."""
+
+    id: int
+    email: str
+    username: str
+    full_name: str
+    role: Literal["admin", "analyst", "viewer"]
+    status: Literal["active", "inactive", "suspended"]
+    created_at: datetime
+
 
 # ---------------------------------------------------------------------------
 # DB Connection

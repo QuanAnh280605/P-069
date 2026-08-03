@@ -1,4 +1,3 @@
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -12,7 +11,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dev -d semantic_layer_dev"]
+      test: [ "CMD-SHELL", "pg_isready -U dev -d semantic_layer_dev" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -22,27 +21,41 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     ports:
-      - "8000:8000"    # API
-      - "5678:5678"    # debugpy (Python remote debug)
+      - "8000:8000" # API
+      - "5678:5678" # debugpy (Python remote debug)
     env_file:
       - .env
     environment:
       - APP_ENV=development
       - LOG_LEVEL=DEBUG
-      - DATABASE_URL=postgresql+psycopg2://dev:devpassword@postgres:5432/semantic_layer_dev
+      - DATABASE_URL=postgresql+asyncpg://dev:devpassword@postgres:5432/semantic_layer_dev
     volumes:
-      - .:/app                    # bind mount toàn bộ source — hot-reload
-      - /app/__pycache__          # tránh mount pycache từ host vào container
+      - .:/app # bind mount toàn bộ source — hot-reload
+      - /app/__pycache__ # tránh mount pycache từ host vào container
     depends_on:
       postgres:
-        condition: service_healthy  # đợi postgres sẵn sàng trước
-    restart: "no"                 # dev thường tắt thủ công
+        condition: service_healthy # đợi postgres sẵn sàng trước
+    restart: "no" # dev thường tắt thủ công
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 15s
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 60s
       timeout: 5s
       retries: 3
       start_period: 15s
 
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: p-069-pgweb
+    ports:
+      - "8081:8081" # Quản lý Database Web UI (Không cần mật khẩu khi mở)
+    environment:
+      - DATABASE_URL=postgres://dev:devpassword@postgres:5432/semantic_layer_dev?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
-  postgres_data:                  # persist data giữa các lần restart
+  postgres_data:
+    # persist data giữa các lần restart
+

@@ -111,14 +111,16 @@ flowchart TD
 
 ## DB Schema — Metadata Store
 
-Các bảng trong PostgreSQL **Metadata Store** (không phải Target DB):
+Các bảng trong PostgreSQL **Metadata Store** (bao gồm Quản lý Người dùng & Quản trị Chỉ số):
 
 | Bảng | Mô tả |
 |------|-------|
-| `semantic_databases` | Thông tin Target DB: `id`, `display_name`, `db_type`, `conn_url_enc` (Fernet), `created_at` |
+| `users` | Tài khoản người dùng, email, username, password băm bcrypt, role (`admin`, `analyst`, `viewer`) |
+| `user_sessions` | Quản lý phiên đăng nhập, JWT refresh token hash, IP, user-agent, revoked status |
+| `semantic_databases` | Thông tin Target DB: `id`, `created_by (FK)`, `display_name`, `db_type`, `conn_url_enc` (Fernet), `created_at` |
 | `semantic_tables` | Bảng được enrich: `id`, `db_id (FK)`, `table_name`, `business_name`, `description` |
 | `semantic_columns` | Cột được enrich: `id`, `table_id (FK)`, `column_name`, `data_type`, `business_name`, `description` |
-| `semantic_metrics` | Business Metrics: `id`, `db_id (FK)`, `name`, `description`, `sql_template`, `source (ai\|manual)`, `created_at` |
+| `semantic_metrics` | Business Metrics: `id`, `db_id (FK)`, `created_by (FK)`, `name`, `description`, `sql_template`, `source (ai\|manual)`, `created_at` |
 
 > **Lưu ý:** `conn_url_enc` luôn lưu dưới dạng Fernet ciphertext. Decrypt trong memory khi cần introspect lại — không bao giờ log plaintext.
 

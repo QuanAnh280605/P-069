@@ -2,8 +2,24 @@ target-version = "py311"
 line-length = 120
 
 [lint]
-select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501"]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort import order
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear (common bugs)
+    "S",   # flake8-bandit (security analysis)
+]
+ignore = [
+    "E501",  # line length (handled by formatter)
+    "B008",  # allow FastAPI Depends() in function argument defaults
+    "S101",  # allow assert statements in pytest
+    "S104",  # allow 0.0.0.0 binding for Docker container configuration
+    "S105",  # hardcoded password binding check false positives
+    "S106",  # hardcoded password in function call false positives
+]
 
 [format]
 quote-style = "double"

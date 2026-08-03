@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     cors_origins: str = "http://localhost:3000"
+    secret_key: str = "supersecretjwtkey_semantic_agent_2026"
 
     # LLM
     openai_api_key: str = ""
@@ -26,7 +27,8 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 0.0 for deterministic output
 
     # Metadata Store (PostgreSQL dev/prod, no SQLite)
-    database_url: str = "postgresql+psycopg2://dev:devpassword@localhost:5432/semantic_layer_dev"
+    database_url: str = "postgresql+asyncpg://dev:devpassword@localhost:5432/semantic_layer_dev"
+    encryption_key: str = "dGVzdF9mZXJuZXRfa2V5XzMyX2J5dGVzX2xvbmdfMTIzNDU="  # Base64 Fernet key
 
 
 @lru_cache

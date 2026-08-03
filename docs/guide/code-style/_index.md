@@ -1,11 +1,14 @@
 ---
 title: "Code Style Guide"
-description: "Chuẩn code chất lượng cao"
+description: "Chuẩn code chất lượng cao cho Frontend và Backend"
 weight: 4
 ---
 
-Phần này quy ước chuẩn code Python áp dụng cho toàn bộ dự án AI20K. Bạn sẽ tìm hiểu về type hints, quy tắc viết hàm, cách đặt tên biến, thứ tự import và xử lý lỗi đúng cách. Tất cả đều được tự động kiểm tra bằng Ruff linter. Tuân thủ code style giúp team collaboration hiệu quả và giảm thiểu bug trong quá trình phát triển.
+Phần này quy ước chuẩn code Python / FastAPI và Next.js / TypeScript áp dụng cho toàn bộ dự án AI Semantic Layer. 
 
-## Trang trong mục này
+Tuân thủ code style giúp đội ngũ phát triển cộng tác hiệu quả, đảm bảo tính nhất quán, bảo mật và giảm thiểu tối đa bug trong quá trình phát triển.
 
-- [Python Style Guide](python.md) — Type hints, quy tắc hàm, naming, imports, error handling và Ruff
+## Danh mục Hướng dẫn Code Style
+
+- [Python & FastAPI Style Guide](python.md) — Quy tắc Type hints, Pydantic v2, Async non-blocking, Naming, Error handling và Ruff.
+- [Frontend Style Guide (Next.js & TypeScript)](frontend.md) — Quy tắc React Server Components (RSC), Component modularity, API Client interceptor và UX/UI HITL rules.
