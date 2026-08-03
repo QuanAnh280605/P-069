@@ -11,6 +11,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
+import bcrypt
 import jwt
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from passlib.context import CryptContext
@@ -40,16 +41,26 @@ pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto
 
 def hash_password(password: str) -> str:
     """Hash plaintext password using bcrypt."""
-    return pwd_context.hash(password)
+    pwd_bytes = password.encode("utf-8")[:72]
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify plain password against stored hash (bcrypt or legacy sha256)."""
+    pwd_bytes = plain_password.encode("utf-8")[:72]
+    try:
+        if hashed_password.startswith("$2b$") or hashed_password.startswith("$2a$"):
+            return bcrypt.checkpw(pwd_bytes, hashed_password.encode("utf-8"))
+    except Exception as exc:
+        logger.debug("Bcrypt verification failed: %s", exc)
+
     try:
         if pwd_context.verify(plain_password, hashed_password):
             return True
     except Exception as exc:
-        logger.debug("Bcrypt verification failed, falling back to legacy hash: %s", exc)
+        logger.debug("Passlib verification failed: %s", exc)
+
     legacy_hash = hashlib.sha256(("semantic_salt_2026_" + plain_password).encode("utf-8")).hexdigest()
     return hmac.compare_digest(legacy_hash, hashed_password)
 
