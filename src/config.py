@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # Metadata Store (PostgreSQL dev/prod, no SQLite)
     database_url: str = "postgresql+asyncpg://dev:devpassword@localhost:5432/semantic_layer_dev"
-    encryption_key: str = "dGVzdF9mZXJuZXRfa2V5XzMyX2J5dGVzX2xvbmdfMTIzNDU="  # Base64 Fernet key
+    encryption_key: str = "FiqLMBulPbTUShiUnFKXgt2OHpPv9Y3mBstowcTSKRc="  # Base64 Fernet key
 
 
 @lru_cache

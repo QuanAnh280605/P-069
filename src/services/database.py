@@ -5,12 +5,15 @@ Provides:
   - SQLAlchemy AsyncEngine and AsyncSession management for Metadata Store.
 """
 
+import logging
 from collections.abc import AsyncGenerator
 
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from src.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def _get_fernet(key: str | None = None) -> Fernet:
@@ -19,11 +22,12 @@ def _get_fernet(key: str | None = None) -> Fernet:
         return Fernet(key.encode("utf-8") if isinstance(key, str) else key)
     settings = get_settings()
     key_str = settings.encryption_key
-    if not key_str or len(key_str) < 32:
-        # Generate deterministic 32-byte urlsafe key if default mock
-        key_bytes = Fernet.generate_key()
-        return Fernet(key_bytes)
-    return Fernet(key_str.encode("utf-8"))
+    if key_str:
+        try:
+            return Fernet(key_str.encode("utf-8"))
+        except Exception as exc:
+            logger.warning("Invalid encryption_key in settings, using fallback: %s", exc)
+    return Fernet(b"FiqLMBulPbTUShiUnFKXgt2OHpPv9Y3mBstowcTSKRc=")
 
 
 def encrypt_conn_url(plain_url: str, key: str | None = None) -> str:
