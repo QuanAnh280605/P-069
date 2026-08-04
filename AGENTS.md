@@ -36,6 +36,10 @@ Chỉ có **1 pipeline (Flow 1)**: Introspect DB schema → LLM đề xuất tê
 - **KHÔNG** thực thi bất kỳ câu truy vấn SELECT data nào trên Target DB
 - Connection URL **không bao giờ** lưu plaintext — phải mã hóa Fernet (`cryptography`)
 
+### 🔴 Database & Migrations
+- **Bắt buộc tạo migration mới khi thay đổi DB schema**: Mỗi khi sửa đổi Database schema (models/tables/fields), **PHẢI** tạo 1 file Alembic migration mới (`alembic revision --autogenerate -m "..."`)
+- **KHÔNG** sửa trực tiếp DB schema cũ, không chỉnh sửa migration script cũ đã apply, không drop/recreate database để tránh làm mất/hỏng dữ liệu hoặc ảnh hưởng đến các user khác
+
 ### 🔴 LLM Usage
 - **Luôn dùng `get_llm()`** từ `src/services/llm.py` — không khởi tạo `ChatOpenAI` trực tiếp
 - Temperature = `0.0` cho tất cả node
@@ -72,6 +76,7 @@ Chỉ có **1 pipeline (Flow 1)**: Introspect DB schema → LLM đề xuất tê
 | Cấm | Lý do |
 |-----|-------|
 | Thực thi `SELECT` data trên Target DB | Chỉ đọc schema metadata |
+| Sửa trực tiếp DB schema / Drop DB không qua Alembic migration mới | Tránh mất dữ liệu, làm hỏng DB và ảnh hưởng tới user khác |
 | `eval()` / `exec()` với SQL string | Security risk |
 | Hardcode API key / connection URL | Secret leak |
 | Lưu connection URL plaintext | Phải dùng Fernet encrypt |

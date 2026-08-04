@@ -17,7 +17,7 @@ Cấu trúc dự án tuân theo mô hình phân tầng Domain-Driven Modularity:
 * **`src/api/`**: Chứa FastAPI routes & endpoint controllers. Chỉ nhận request, validate qua Pydantic DTO, gọi Service/Agent và trả về Response.
 * **`src/services/`**: Chứa business logic, LLM wrappers, Export logic.
 * **`src/agents/`**: Chứa các LangGraph nodes & workflow state transitions.
-* **`src/models/`**: Chứa Database ORM models (SQLAlchemy) và Pydantic Schemas.
+* **`src/models/`**: Chứa Database ORM models (SQLAlchemy) và Pydantic Schemas. *(Lưu ý: Khi sửa đổi SQLAlchemy models, bắt buộc phải tạo 1 file migration mới với Alembic, không sửa trực tiếp schema cũ).*
 
 ---
 
