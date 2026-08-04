@@ -32,11 +32,16 @@ logger = logging.getLogger(__name__)
 
 auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-SECRET_KEY = get_settings().secret_key
+DEFAULT_SECRET_KEY = "dev-secret-key-change-in-prod-semantic-layer-2026"
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_SECONDS = 7 * 24 * 3600  # 7 days
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
+
+
+def _get_secret_key() -> str:
+    """Get secret key from settings with default fallback."""
+    return get_settings().secret_key or DEFAULT_SECRET_KEY
 
 
 def hash_password(password: str) -> str:
@@ -78,13 +83,13 @@ def create_access_token(user: UserModel) -> str:
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(seconds=TOKEN_EXPIRE_SECONDS)).timestamp()),
     }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(payload, _get_secret_key(), algorithm=ALGORITHM)
 
 
 def decode_jwt_token(token: str) -> dict:
     """Decode and validate a JWT access token."""
     try:
-        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return jwt.decode(token, _get_secret_key(), algorithms=[ALGORITHM])
     except jwt.ExpiredSignatureError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
