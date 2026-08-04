@@ -1,71 +1,93 @@
 ---
 title: "System Design"
-description: "Tổng quan kiến trúc hệ thống"
+description: "Tổng quan kiến trúc hệ thống P-069"
 weight: 1
 ---
 
-## System Architecture
+## System Architecture — P-069 AI Semantic Layer Agent
 
 ### Overview Diagram
 
 ```mermaid
 graph TB
-    User([User]) --> UI[Frontend<br/>React/Next.js]
-    UI -->|REST API| API[FastAPI Backend]
-    API --> Agent[LangGraph Agent]
-    Agent --> LLM[LLM Service<br/>GPT-4o / Gemini]
-    Agent --> Tools[Agent Tools]
-    Tools --> DB[(Database)]
-    Agent --> VS[Vector Store<br/>ChromaDB]
+    subgraph Client["Client Layer"]
+        UI["Next.js Frontend"]
+    end
+
+    subgraph API["API Layer — FastAPI"]
+        AUTH["Auth: /api/v1/auth/*"]
+        SEM["Semantic: /api/v1/semantic/*"]
+    end
+
+    subgraph Flow1["Flow 1 — Generate Pipeline"]
+        G1["Introspect Node\nSQLAlchemy Inspector"]
+        G2["Enrich Node\nLLM: business_name + description"]
+        G3["Metric Suggest Node\nLLM: Business Metrics"]
+        HITL["Review Node\nHITL Interrupt"]
+        G4["Save Node\nPersist to Metadata Store"]
+        G1 --> G2 --> G3 --> HITL --> G4
+    end
+
+    subgraph Data["Data Layer"]
+        TARGET["Target DB\n(Postgres/MySQL/SQLite)\nSchema only — no data read"]
+        METADB["Metadata Store\nPostgreSQL"]
+    end
+
+    UI --> AUTH --> Flow1
+    UI --> SEM --> Flow1
+    G1 -->|"Inspector API"| TARGET
+    G4 -->|save| METADB
 ```
 
 ## Components
 
-### 1. Frontend (React/Next.js)
+### 1. Frontend (Next.js)
 
-- **Purpose:** User interface cho sản phẩm
-- **Key Features:** Responsive, dark mode, realtime
-- **State Management:** React hooks / Zustand
+- **Purpose:** HITL review UI cho BA/DA
+- **Key Features:** Inline edit business_name, metric review, export
+- **State Management:** React Context (AuthContext)
 
 ### 2. Backend (FastAPI)
 
-- **Purpose:** API server xử lý business logic
-- **API Design:** RESTful endpoints
-- **Auth:** JWT (nếu cần)
+- **Purpose:** API server xử lý auth + semantic layer pipeline
+- **API Design:** RESTful endpoints (`/api/v1/auth/*`, `/api/v1/semantic/*`)
+- **Auth:** JWT + Google OAuth
 
 ### 3. AI Agent (LangGraph)
 
-- **Agent Type:** ReAct / Plan-and-Execute / Custom
-- **State:** TypedDict schema
-- **Nodes:** Xử lý từng bước trong pipeline
-- **Tools:** Search, calculate, API calls
+- **Agent Type:** Linear pipeline with HITL interrupt
+- **State:** `AgentState` TypedDict (`src/agents/state.py`)
+- **Nodes:** introspect → enrich → metric_suggest → save
+- **Tools:** SQLAlchemy Inspector (schema-only, no data query)
 
 ### 4. Database
 
-- **Type:** PostgreSQL (production) / SQLite (dev)
-- **ORM:** SQLAlchemy (nếu cần)
-- **Migrations:** Alembic (nếu cần)
+- **Target DB:** PostgreSQL / MySQL / SQLite (read schema only via Inspector)
+- **Metadata Store:** PostgreSQL (ORM via SQLAlchemy, migrations via Alembic)
+- **Encryption:** Fernet for connection URLs
 
-### 5. Vector Store
+### 5. LLM
 
-- **Type:** ChromaDB (local) / Pinecone (cloud)
-- **Embeddings:** OpenAI embeddings
-- **Purpose:** RAG / similarity search
+- **Model:** GPT-4o-mini via `get_llm()` factory (`src/services/llm.py`)
+- **Temperature:** 0.0 (deterministic)
+- **Usage:** business_name enrichment + metric suggestion
 
 ## Data Flow
 
-1. User gửi request từ Frontend
-2. API route nhận và validate input (Pydantic)
-3. Agent xử lý qua LangGraph pipeline
-4. LLM generate response
-5. Tools thực thi actions (nếu cần)
-6. Response trả về Frontend qua API
+1. User gửi `POST /api/v1/semantic/generate` với `db_id`
+2. Introspect Node đọc schema metadata qua SQLAlchemy Inspector
+3. Enrich Node gọi LLM sinh business_name + description (batch 5 bảng)
+4. Metric Suggest Node gọi LLM đề xuất Business Metrics
+5. HITL interrupt — BA/DA review & approve qua UI
+6. Save Node persist vào Metadata Store
+7. Export Service xuất JSON/YAML
 
 ## Design Decisions
 
 | Decision | Choice | Reason |
 |----------|--------|--------|
 | Framework | FastAPI | Async, auto-docs, type-safe |
-| Agent | LangGraph | Flexible state machine |
-| Database | SQLite→PostgreSQL | Dev dễ, prod mạnh |
-| Frontend | Next.js | Full-stack ready |
+| Agent | LangGraph | StateGraph + HITL Interrupt |
+| DB Access | SQLAlchemy Inspector | Schema-only, no data read risk |
+| LLM | GPT-4o-mini, T=0.0 | Cost-efficient, deterministic |
+| Credential Storage | Fernet encryption | Reversible, symmetric key |

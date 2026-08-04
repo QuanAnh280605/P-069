@@ -38,7 +38,6 @@ def build_graph() -> StateGraph:
     graph.set_entry_point("introspect")
     graph.add_conditional_edges("introspect", route_after_introspect)
     graph.add_edge("enrich", "metric_suggest")
-    graph.add_edge("metric_suggest", END)  # LangGraph Interrupt happens here (HITL)
     graph.add_conditional_edges("metric_suggest", route_after_hitl)
     graph.add_edge("save", END)
 

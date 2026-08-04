@@ -103,7 +103,7 @@ lsof -i :8000
 kill -9 <PID>
 
 # Hoặc dùng port khác
-uvicorn src.api.main:app --reload --port 8001
+uvicorn src.main:app --reload --port 8001
 ```
 
 ### `openai.AuthenticationError: Invalid API Key`

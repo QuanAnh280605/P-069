@@ -100,3 +100,27 @@ Tài liệu này chi tiết hóa toàn bộ **Quy tắc thiết kế code, kiế
    * Chỉ số do User tự tạo: `<Badge variant="outline">Manual</Badge>`
 3. **1-Click HITL Interactive**: Mọi thông tin tên nghiệp vụ, mô tả cột, business metrics cho phép sửa trực tiếp (inline edit với icon ✏️) không mở popup/trang mới.
 4. **Badge phân biệt Trạng thái Lưu**: Hiển thị rõ bản nháp chưa commit (`Draft`) và bản đã lưu vào Metadata Store (`Saved`).
+
+---
+
+## 7. Quy tắc Viết Test cho Frontend (Frontend Testing Rules)
+
+1. **Bắt buộc viết Unit / Integration Test khi implement Component / Hook mới (Code + Test Mandatory)**:
+   * Mọi feature, component (trong `src/components/features/` và `src/components/ui/`), custom hook (`src/hooks/`), hoặc utility function (`src/lib/`) khi tạo mới hoặc sửa đổi logic **bắt buộc phải đi kèm file test tương ứng**.
+   * File test phải nằm trong thư mục `__tests__/` đồng cấp hoặc đặt kế bên file component với đuôi `.test.tsx` / `.test.ts` (ví dụ: `MetricEditorTable.test.tsx`).
+
+2. **Công cụ Kiểm thử Chuẩn hoá**:
+   * Sử dụng **Vitest** / **Jest** kết hợp với **React Testing Library (`@testing-library/react`)** và `@testing-library/user-event`.
+
+3. **Mặt hàng & Tiêu chí Test (Coverage Focus)**:
+   * **UI Components**: Verify rendering đúng elements/text, test các trạng thái `Loading` (Skeleton), `Error` alert, và `Empty` state.
+   * **Interactive UI**: Test tương tác người dùng (user action: `click`, `change`, `inline edit`, `submit form`).
+   * **Custom Hooks / Lib Utilities**: Test logic hàm, data transformers, validation với đầy đủ edge cases.
+   * **API / Context Mocking**: Sử dụng Mock Service Worker (MSW) hoặc `vi.fn()` / `jest.fn()` để mock API responses. **Tuyệt đối không gọi API backend thật trong unit tests**.
+
+4. **Định nghĩa Hoàn thành (Definition of Done - DoD)**:
+   * Một component hay tính năng UI chỉ được coi là hoàn thành (Ready for Review/Merge) khi:
+     * Không có lỗi Lint (`npm run lint`).
+     * Không có lỗi Type check (`tsc --noEmit`).
+     * Tất cả các Unit Tests frontend chạy qua thành công (`npm run test`).
+

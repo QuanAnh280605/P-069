@@ -110,7 +110,7 @@ Tài liệu này quy định chi tiết các Đặc tả tính năng (Feature Sp
 
 | Trường thông tin | Giá trị |
 |---|---|
-| **Mã User Story liên quan** | `[US-002]` / `[F-03 & F-10]` |
+| **Mã User Story liên quan** | `[US-002]` / `[F-03]` |
 | **Tên tính năng** | **Business Metric Suggestion & Dedupe Conflict Engine (Đề xuất Chỉ số & Cảnh báo Mâu thuẫn)** |
 | **Người viết** | Đội ngũ Phát triển P-069 (Dev C & Lead) |
 | **Ngày tạo** | 03/08/2026 |
@@ -137,7 +137,7 @@ Tài liệu này quy định chi tiết các Đặc tả tính năng (Feature Sp
 ### 2. THIẾT KẾ (DESIGN)
 
 * **Kiến trúc hệ thống:**  
-  Gồm 2 Node nối tiếp trong LangGraph Pipeline: `MetricSuggestNode` $\rightarrow$ `DedupeNode`.
+  Gồm 2 Node nối tiếp trong LangGraph Pipeline: `MetricSuggestNode` $\rightarrow$ `DedupeNode` (DedupeNode là tính năng planned, chưa implement trong v1.0 MVP).
   ```mermaid
   graph LR
       EnrichNode -->|enriched_schema| MetricSuggestNode

@@ -17,17 +17,17 @@ logger = logging.getLogger(__name__)
 
 
 def _get_fernet(key: str | None = None) -> Fernet:
-    """Instantiate a Fernet cipher instance using provided key or settings."""
+    """Instantiate a Fernet cipher instance using provided key or settings.
+
+    Raises ValueError if no valid encryption key is configured.
+    """
     if key:
         return Fernet(key.encode("utf-8") if isinstance(key, str) else key)
     settings = get_settings()
     key_str = settings.encryption_key
-    if key_str:
-        try:
-            return Fernet(key_str.encode("utf-8"))
-        except Exception as exc:
-            logger.warning("Invalid encryption_key in settings, using fallback: %s", exc)
-    return Fernet(b"FiqLMBulPbTUShiUnFKXgt2OHpPv9Y3mBstowcTSKRc=")
+    if not key_str:
+        raise ValueError("encryption_key is not configured. Set ENCRYPTION_KEY in .env file.")
+    return Fernet(key_str.encode("utf-8"))
 
 
 def encrypt_conn_url(plain_url: str, key: str | None = None) -> str:

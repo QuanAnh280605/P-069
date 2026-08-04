@@ -1,3 +1,4 @@
+
 # 🗄️ THIẾT KẾ CƠ SỞ DỮ LIỆU / DATABASE DESIGN SPECIFICATION — METADATA STORE & USER AUTHENTICATION (v1.1)
 
 Tài liệu thiết kế chi tiết cho **Metadata Store** và **Hệ thống Quản lý Người dùng (User Authentication & RBAC)** của dự án **P-069: AI Semantic Layer Agent**.
@@ -21,7 +22,7 @@ erDiagram
         string username "Tên tài khoản (UNIQUE)"
         string hashed_password "Mật khẩu mã hóa bcrypt"
         string full_name "Họ và tên người dùng"
-        string role "admin | analyst "
+        string role "admin | analyst"
         string status "active | inactive | suspended"
         timestamp created_at "UTC"
         timestamp updated_at "UTC"
@@ -104,7 +105,7 @@ Lưu trữ thông tin tài khoản, mật khẩu băm và phân quyền người
 | `username` | `VARCHAR(100)` | `UNIQUE`, `NOT NULL` | Tên tài khoản độc nhất |
 | `hashed_password` | `VARCHAR(255)` | `NOT NULL` | Mật khẩu băm (Bcrypt hash) |
 | `full_name` | `VARCHAR(200)` | `NOT NULL`, `DEFAULT ''` | Họ và tên hiển thị |
-| `role` | `VARCHAR(50)` | `NOT NULL`, `DEFAULT 'analyst'` | Vai trò (`admin`, `analyst`, `viewer`) |
+| `role` | `VARCHAR(50)` | `NOT NULL`, `DEFAULT 'analyst'` | Vai trò (`admin`, `analyst`) |
 | `status` | `VARCHAR(50)` | `NOT NULL`, `DEFAULT 'active'` | Trạng thái (`active`, `inactive`, `suspended`) |
 | `created_at` | `DATETIME / TIMESTAMPTZ` | `NOT NULL` | Thời gian tạo tài khoản (UTC) |
 | `updated_at` | `DATETIME / TIMESTAMPTZ` | `NOT NULL` | Thời gian cập nhật (UTC) |
@@ -223,7 +224,6 @@ Thư viện Business Metrics chính thức của doanh nghiệp (Single Source o
 3. **Phân quyền dựa trên Vai trò (Role-Based Access Control - RBAC):**
    - `admin`: Quyền cao nhất, quản lý người dùng, xem và cấu hình toàn bộ databases & metrics.
    - `analyst`: Tạo và quản lý ngữ cảnh DB của chính mình, chạy Flow 1 AI Enrichment, chỉnh sửa HITL, định nghĩa metrics.
-   - `viewer`: Chỉ xem danh sách bảng, cột và metrics đã được duyệt (HITL approved), xuất file JSON/YAML.
 
 4. **Cô lập Dữ liệu Multi-Tenancy:**
    - Trường `created_by` trong `semantic_databases` giúp lọc danh sách DB theo người tạo. User thông thường chỉ truy cập được DB do chính mình sở hữu trừ khi được chia sẻ hoặc bởi `admin`.

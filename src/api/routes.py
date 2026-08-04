@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.auth import get_current_user_profile
+from src.api.auth import get_current_user
 from src.models.schemas import (
     ApproveRequest,
     ApproveResponse,
@@ -12,8 +14,10 @@ from src.models.schemas import (
     SemanticColumnUpdate,
     SemanticTableUpdate,
 )
+from src.services.database import get_db_session
+from src.services.export_service import build_semantic_layer_dict, serialize_to_json, serialize_to_yaml
 
-router = APIRouter(dependencies=[Depends(get_current_user_profile)])
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 # ---------------------------------------------------------------------------
@@ -99,15 +103,31 @@ async def delete_metric(db_id: int, metric_id: int) -> None:
 
 
 @router.get("/semantic/{db_id}/export")
-async def export_semantic_layer(db_id: int, format: str = "json") -> dict:
+async def export_semantic_layer(
+    db_id: int,
+    format: str = "json",
+    db: AsyncSession = Depends(get_db_session),
+) -> PlainTextResponse:
     """Export approved Semantic Layer as JSON or YAML file download.
 
     Query param: format=json|yaml
     """
     if format not in ("json", "yaml"):
         raise HTTPException(status_code=400, detail="format must be 'json' or 'yaml'")
-    # TODO: read from Metadata Store and serialize
-    raise HTTPException(status_code=501, detail="Export not yet implemented")
+
+    try:
+        layer = await build_semantic_layer_dict(db, db_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if format == "yaml":
+        content = serialize_to_yaml(layer)
+        media_type = "text/yaml"
+    else:
+        content = serialize_to_json(layer)
+        media_type = "application/json"
+
+    return PlainTextResponse(content=content, media_type=media_type)
 
 
 # ---------------------------------------------------------------------------

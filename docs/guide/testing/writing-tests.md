@@ -1,6 +1,6 @@
----
+﻿---
 title: "Writing Tests"
-description: "Cách viết tests cho agent và API"
+description: "Cach viet tests cho P-069 Semantic Layer Agent"
 weight: 1
 ---
 
@@ -8,11 +8,14 @@ weight: 1
 
 ```
 tests/
-├── conftest.py           ← Fixtures dùng chung
+├── conftest.py              ← Fixtures dung chung (async_session, client, mock_llm)
+├── test_auth.py             ← Auth unit + integration tests
 ├── test_agents/
-│   └── test_graph.py     ← Test agent flow
-└── test_api/
-    └── test_routes.py    ← Test API endpoints
+│   └── test_graph.py        ← AgentState + node tests
+├── test_api/
+│   └── test_routes.py       ← API endpoint tests
+└── test_models/
+    └── test_db_models.py    ← ORM model + Fernet encryption tests
 ```
 
 ## API Tests
@@ -21,54 +24,41 @@ tests/
 import pytest
 
 @pytest.mark.asyncio
-async def test_chat_endpoint(client):
-    response = await client.post(
-        "/api/v1/chat",
-        json={"message": "Hello"}
-    )
+async def test_health(client):
+    response = await client.get("/api/v1/health")
     assert response.status_code == 200
-    data = response.json()
-    assert "response" in data
 
 @pytest.mark.asyncio
-async def test_empty_message_rejected(client):
-    response = await client.post(
-        "/api/v1/chat",
-        json={"message": ""}
-    )
+async def test_generate_requires_db_id(client):
+    response = await client.post("/api/v1/semantic/generate", json={})
     assert response.status_code == 422
+
+@pytest.mark.asyncio
+async def test_export_invalid_format(client):
+    response = await client.get("/api/v1/semantic/1/export?format=csv")
+    assert response.status_code == 400
 ```
 
 ## Agent Tests
 
 ```python
-@pytest.mark.asyncio
-async def test_agent_returns_response():
-    result = await agent.ainvoke({"query": "test query"})
-    assert "response" in result
-    assert len(result["response"]) > 0
+from unittest.mock import AsyncMock, patch
 
 @pytest.mark.asyncio
-async def test_agent_handles_empty_query():
-    result = await agent.ainvoke({"query": ""})
-    assert "error" in result or "response" in result
-```
+async def test_agent_state_has_required_fields():
+    from src.agents.state import AgentState
+    fields = AgentState.__annotations__
+    assert "db_id" in fields
+    assert "raw_schema" in fields
+    assert "enriched_schema" in fields
+    assert "suggested_metrics" in fields
 
-## Fixtures (conftest.py)
-
-```python
-import pytest
-from httpx import ASGITransport, AsyncClient
-from src.main import app
-
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport,
-        base_url="http://test"
-    ) as ac:
-        yield ac
+@pytest.mark.asyncio
+async def test_introspect_node_returns_raw_schema():
+    with patch("src.agents.nodes.introspect_node.introspect_node", new_callable=AsyncMock) as mock:
+        mock.return_value = {"raw_schema": {"users": {"columns": []}}}
+        result = await mock(state={"db_id": 1})
+        assert "raw_schema" in result
 ```
 
 ## Run Tests
@@ -86,6 +76,8 @@ pytest tests/ --cov=src --cov-report=term-missing
 
 ## Minimum Requirements
 
-- Tối thiểu **3 test cases** cho API
-- Tối thiểu **2 test cases** cho Agent
-- Tất cả tests phải pass trước khi push
+- Toi thieu 3 test cases cho API
+- Toi thieu 2 test cases cho Agent
+- Mock LLM trong tests - khong goi OpenAI API that
+- Mock DB - dung SQLite in-memory
+- Tat ca tests phai pass truoc khi push

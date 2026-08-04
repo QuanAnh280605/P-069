@@ -46,7 +46,7 @@ class UserProfileResponse(BaseModel):
     email: str
     username: str
     full_name: str
-    role: Literal["admin", "analyst", "viewer"]
+    role: Literal["admin", "analyst"]
     status: Literal["active", "inactive", "suspended"]
     created_at: datetime
 

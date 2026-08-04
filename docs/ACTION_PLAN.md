@@ -1,6 +1,10 @@
 # 📋 Kế hoạch Hành động (Action Plan) — Căn chỉnh  AI Semantic Layer
 
-Tài liệu này đối chiếu **hiện trạng tài liệu dự án** (như PRD, ARCHITECTURE, AGENTS.md) với **yêu cầu gốc của đề bài **. 
+> **⚠️ Lưu ý:** Đây là tài liệu phân tích nội bộ, đề xuất mở rộng scope trong tương lai.
+> **Scope chính thức của v1.0** được xác định bởi `AGENTS.md`, `PRD.md` và `ARCHITECTURE.md`.
+> Các tính năng NL2SQL (Flow 2), Vector DB, DedupeNode **không thuộc v1.0 MVP**.
+
+Tài liệu này đối chiếu **hiện trạng tài liệu dự án** (như PRD, ARCHITECTURE, AGENTS.md) với **yêu cầu gốc của đề bài**. 
 Hiện trạng dự án đang được giới hạn (scope down), dẫn đến việc cắt bỏ hoàn toàn những tính năng đắt giá nhất mà đề bài yêu cầu. Tài liệu này chỉ ra 3 lỗ hổng logic lớn nhất và đề xuất các đầu việc cần làm để khắc phục.
 
 ---

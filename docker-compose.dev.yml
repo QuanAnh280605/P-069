@@ -23,6 +23,7 @@ services:
     ports:
       - "8000:8000" # API
       - "5678:5678" # debugpy (Python remote debug)
+    command: sh -c "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src"
     env_file:
       - .env
     environment:

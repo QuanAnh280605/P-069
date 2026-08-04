@@ -91,7 +91,7 @@ flowchart TD
 | Container | **Docker** multi-stage | — | Dev/prod separation |
 | CI/CD | **GitHub Actions** | — | Auto test + deploy |
 | Testing | **pytest + pytest-asyncio + httpx** | — | Async API testing |
-| Monitoring | **Langfuse** | ≥ 2.0 | LLM observability: traces, token cost, HITL quality |
+| Monitoring | **LangSmith** | ≥ 0.1 | LLM observability: traces, token cost |
 
 ---
 
@@ -115,7 +115,7 @@ Các bảng trong PostgreSQL **Metadata Store** (bao gồm Quản lý Người d
 
 | Bảng | Mô tả |
 |------|-------|
-| `users` | Tài khoản người dùng, email, username, password băm bcrypt, role (`admin`, `analyst`, `viewer`) |
+| `users` | Tài khoản người dùng, email, username, password băm bcrypt, role (`admin`, `analyst`) |
 | `user_sessions` | Quản lý phiên đăng nhập, JWT refresh token hash, IP, user-agent, revoked status |
 | `semantic_databases` | Thông tin Target DB: `id`, `created_by (FK)`, `display_name`, `db_type`, `conn_url_enc` (Fernet), `created_at` |
 | `semantic_tables` | Bảng được enrich: `id`, `db_id (FK)`, `table_name`, `business_name`, `description` |

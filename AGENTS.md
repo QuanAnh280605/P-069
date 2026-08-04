@@ -10,6 +10,8 @@
 |------|-----------------|
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Cần hiểu kiến trúc, folder structure, API endpoints, DB schema, tech stack |
 | [`docs/PRD.md`](./docs/PRD.md) | Cần hiểu tính năng, User Stories, Acceptance Criteria |
+| [`docs/BRIEF.md`](./docs/BRIEF.md) | Cần hiểu tổng quan dự án, mục tiêu, scope |
+| [`docs/ACTION_PLAN.md`](./docs/ACTION_PLAN.md) | Cần biết tiến độ, task list, timeline |
 | [`docs/guide/langgraph/nodes-and-edges.md`](./docs/guide/langgraph/nodes-and-edges.md) | Đang viết LangGraph nodes hoặc edges |
 | [`docs/guide/langgraph/state.md`](./docs/guide/langgraph/state.md) | Đang định nghĩa hoặc sửa State TypedDict |
 | [`docs/guide/code-style/python.md`](./docs/guide/code-style/python.md) | Không chắc về convention Python trong project |

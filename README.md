@@ -98,21 +98,30 @@ P-069/
 │   │   ├── graph.py          #    Định nghĩa StateGraph & Routing logic
 │   │   └── state.py          #    AgentState TypedDict schema
 │   ├── api/                  # 🌐 FastAPI Routes & Endpoints
+│   │   ├── auth.py           #    Authentication routes (register, login, Google OAuth)
 │   │   └── routes.py         #    Flow 1 REST endpoints & CRUD Metrics
 │   ├── models/               # 📋 Pydantic Schemas & DB Models
+│   │   ├── db.py             #    SQLAlchemy ORM models
 │   │   └── schemas.py        #    Request/Response Validation Models
 │   ├── services/             # 🔧 Core Services (LLM, Security, Export)
+│   │   ├── database.py       #    Fernet encryption + AsyncEngine/Session
+│   │   ├── export_service.py #    JSON/YAML export
 │   │   └── llm.py            #    get_llm() factory (OpenAI GPT-4o-mini)
 │   ├── config.py             # ⚙️ App Settings (Pydantic-settings)
 │   └── main.py               # 🚀 FastAPI App Entry Point
 ├── tests/                    # 🧪 Test Suite (pytest)
 │   ├── test_agents/          #    Unit tests cho từng node & graph
-│   └── test_api/             #    Integration tests cho API endpoints
+│   ├── test_api/             #    Integration tests cho API endpoints
+│   └── test_models/          #    ORM model & encryption tests
 ├── docs/                     # 📚 Tài liệu chi tiết dự án
 │   ├── BRIEF.md              #    Project Brief
 │   ├── PRD.md                #    Product Requirements Document
 │   ├── UI_FLOW.md            #    Giao diện & HITL Interaction Flow
 │   └── ACTION_PLAN.md        #    Kế hoạch triển khai dự án
+├── alembic/                  # 🗄️ Alembic Database Migration scripts
+│   ├── versions/             #    Chứa các file migration (.py)
+│   └── env.py                #    Cấu hình AsyncEngine migration
+├── alembic.ini               # ⚙️ alembic configuration
 ├── scripts/                  # 🔌 AI Usage Logging Hooks
 ├── ARCHITECTURE.md           # 🏛 Architecture Specification
 ├── AGENTS.md                 # 📜 AI Assistant Rules & Guidelines
@@ -188,13 +197,60 @@ bash scripts/setup_hooks.sh
 
 ---
 
+## 🗄️ Hướng dẫn Khởi tạo & Quản trị Cơ sở Dữ liệu (Database Setup & Management)
+
+Hệ thống phân biệt rõ ràng **2 nhóm Cơ sở Dữ liệu**:
+* **Metadata Store (PostgreSQL / SQLite):** Lưu thông tin người dùng, phiên đăng nhập, kết nối Target DB (đã mã hóa), bảng/cột được enrich và Business Metrics.
+* **Target DB (Chỉ đọc Schema):** Cơ sở dữ liệu nghiệp vụ của doanh nghiệp. Agent chỉ kết nối qua `SQLAlchemy Inspector` để đọc cấu trúc (Tables/Columns/FKs), **không thực thi truy vấn đọc dữ liệu (SELECT)**.
+
+### 1. Khởi tạo Metadata Store với Docker & PgWeb
+
+Khởi chạy PostgreSQL 16 và giao diện quản trị Web GUI (PgWeb):
+
+```bash
+# Khởi chạy Postgres DB & PgWeb UI trong background
+docker compose -f docker-compose.dev.yml up postgres pgweb -d
+```
+
+* **PostgreSQL:** `localhost:5432` | User: `dev` | Password: `devpassword` | DB: `semantic_layer_dev`
+* **PgWeb UI (Giao diện Web xem DB):** Mở trình duyệt tại [http://localhost:8081](http://localhost:8081)
+
+### 2. Quản trị Migration Cấu trúc Database (Alembic)
+
+Dự án tích hợp sẵn **Alembic** để tự động hóa migration cho Metadata Store (PostgreSQL / SQLite).
+
+```bash
+# 1. Cập nhật DB Schema lên phiên bản mới nhất (chạy khi setup ban đầu)
+alembic upgrade head
+
+# 2. (Dành cho Dev) Tự động sinh file migration mới khi chỉnh sửa SQLAlchemy ORM Model (src/models/db.py)
+alembic revision --autogenerate -m "describe_your_changes"
+
+# 3. Xem lịch sử các bản migration đã áp dụng
+alembic history --verbose
+
+# 4. Rollback 1 bản migration gần nhất
+alembic downgrade -1
+```
+
+### 3. Tạo Secret Key mã hóa Connection URL (Fernet Encryption)
+
+Chuỗi kết nối (`conn_url`) đến Target DB **không bao giờ lưu ở dạng plaintext**. Bạn cần sinh `ENCRYPTION_KEY` và điền vào `.env`:
+
+```bash
+# Sinh Fernet Key bằng Python
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+---
+
 ## 🚀 Chạy ứng dụng
 
 ### Cách 1: Chạy trực tiếp qua Uvicorn (Local Dev)
 
 1. Khởi động PostgreSQL Metadata Store qua Docker Compose (hoặc dùng Postgres local):
 ```bash
-docker compose -f docker-compose.dev.yml up postgres -d
+docker compose -f docker-compose.dev.yml up postgres pgweb -d
 ```
 
 2. Khởi chạy FastAPI App Server:
@@ -215,6 +271,9 @@ docker compose -f docker-compose.dev.yml logs -f backend
 
 # Dừng môi trường dev
 docker compose -f docker-compose.dev.yml down
+
+# Xóa image cũ
+docker image prune -f
 ```
 
 ---

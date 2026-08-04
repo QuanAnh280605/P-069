@@ -16,6 +16,7 @@ from src.models.schemas import (
     DBConnectionResponse,
     GenerateRequest,
     GenerateResponse,
+    GoogleAuthRequest,
     MetricCreate,
     MetricResponse,
     MetricUpdate,
@@ -48,6 +49,7 @@ __all__ = [
     "MetricResponse",
     "GenerateRequest",
     "GenerateResponse",
+    "GoogleAuthRequest",
     "ApproveRequest",
     "ApproveResponse",
 ]

@@ -1,20 +1,31 @@
 ---
 title: "Nodes & Edges"
-description: "Định nghĩa nodes và edges trong LangGraph graph"
+description: "Định nghĩa nodes và edges trong LangGraph Flow 1 pipeline"
 weight: 2
 ---
 
-## Nodes
+## Nodes — P-069 Flow 1
 
 Mỗi node là một hàm async nhận state, trả về dict:
 
 ```python
-async def analyze_node(state: AgentState) -> dict:
-    """Phân tích query từ user."""
-    query = state.get("query", "")
-    analysis = await process_query(query)
-    return {"analysis": analysis}
+async def enrich_node(state: AgentState) -> dict:
+    """Enrich schema with business_name + description via LLM."""
+    raw_schema = state.get("raw_schema", {})
+    if not raw_schema:
+        return {"error": "raw_schema is empty"}
+    enriched = await llm_enrich_batch(raw_schema)
+    return {"enriched_schema": enriched}
 ```
+
+### Flow 1 Pipeline Nodes
+
+| Node | File | Responsibility |
+|------|------|---------------|
+| `introspect_node` | `src/agents/nodes/introspect_node.py` | SQLAlchemy Inspector → raw_schema |
+| `enrich_node` | `src/agents/nodes/enrich_node.py` | LLM → business_name + description |
+| `metric_suggest_node` | `src/agents/nodes/metric_suggest_node.py` | LLM → Business Metrics |
+| `save_node` | `src/agents/nodes/save_node.py` | Persist to Metadata Store |
 
 ### Node Best Practices
 
@@ -22,16 +33,17 @@ async def analyze_node(state: AgentState) -> dict:
 2. **Return chỉ fields cần update** — Không return toàn bộ state
 3. **Error handling** — Luôn có try/except và set error field
 4. **Docstring** — Mô tả node làm gì
+5. **Dùng `get_llm()`** từ `src/services/llm.py` — không tạo ChatOpenAI trực tiếp
 
 ```python
-async def safe_analyze_node(state: AgentState) -> dict:
-    """Phân tích query, handle errors gracefully."""
+async def safe_enrich_node(state: AgentState) -> dict:
+    """Enrich schema, handle errors gracefully."""
     try:
-        query = state.get("query", "")
-        result = await llm_service.analyze(query)
-        return {"analysis": result}
+        raw_schema = state.get("raw_schema", {})
+        result = await llm_enrich(raw_schema)
+        return {"enriched_schema": result}
     except Exception as e:
-        return {"error": f"Analysis failed: {e}"}
+        return {"error": f"Enrich failed: {e}"}
 ```
 
 ## Edges
@@ -39,20 +51,19 @@ async def safe_analyze_node(state: AgentState) -> dict:
 ### Linear Edges
 
 ```python
-graph.add_edge("analyze", "respond")
+graph.add_edge("enrich", "metric_suggest")
 ```
 
 ### Conditional Edges (Routing)
 
 ```python
-def route_after_analyze(state: AgentState) -> str:
-    if state.get("error"):
-        return "respond"
-    if state.get("needs_search"):
-        return "search"
-    return "respond"
+def route_after_hitl(state: AgentState) -> str:
+    """Route based on HITL decision."""
+    if state.get("hitl_approved"):
+        return "save"
+    return "enrich"  # Re-enrich if rejected
 
-graph.add_conditional_edges("analyze", route_after_analyze)
+graph.add_conditional_edges("metric_suggest", route_after_hitl)
 ```
 
 ## Graph Construction
@@ -63,40 +74,30 @@ from langgraph.graph import END, StateGraph
 def build_graph() -> StateGraph:
     graph = StateGraph(AgentState)
 
-    # 1. Add nodes
-    graph.add_node("analyze", analyze_node)
-    graph.add_node("search", search_node)
-    graph.add_node("respond", respond_node)
+    # Add nodes
+    graph.add_node("introspect", introspect_node)
+    graph.add_node("enrich", enrich_node)
+    graph.add_node("metric_suggest", metric_suggest_node)
+    graph.add_node("save", save_node)
 
-    # 2. Set entry point
-    graph.set_entry_point("analyze")
-
-    # 3. Add edges
-    graph.add_conditional_edges("analyze", route_after_analyze)
-    graph.add_edge("search", "respond")
-    graph.add_edge("respond", END)
+    # Edges
+    graph.set_entry_point("introspect")
+    graph.add_conditional_edges("introspect", route_after_introspect)
+    graph.add_edge("enrich", "metric_suggest")
+    graph.add_conditional_edges("metric_suggest", route_after_hitl)
+    graph.add_edge("save", END)
 
     return graph.compile()
-
-agent = build_graph()
 ```
 
-## Agent Patterns
-
-### ReAct Pattern (Recommended)
+## Pipeline Flow
 
 ```
-Query → Analyze → [Call Tool → Observe → Re-analyze]* → Respond
-```
-
-### Plan-and-Execute Pattern
-
-```
-Query → Plan → [Execute Step 1 → ... → Step N] → Respond
-```
-
-### Multi-Agent Pattern
-
-```
-Query → Router → [Agent A | Agent B | Agent C] → Synthesize → Respond
+DB Connection URL
+    → Introspect Node (SQLAlchemy Inspector)
+    → Enrich Node (LLM batch)
+    → Metric Suggest Node (LLM)
+    → HITL Interrupt (BA/DA review)
+    → Save Node (persist to Metadata Store)
+    → Semantic Layer (JSON/YAML)
 ```

@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     cors_origins: str = "http://localhost:3000"
-    secret_key: str = "supersecretjwtkey_semantic_agent_2026"
+    secret_key: str = ""
 
     # LLM
     openai_api_key: str = ""
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # Metadata Store (PostgreSQL dev/prod, no SQLite)
     database_url: str = "postgresql+asyncpg://dev:devpassword@localhost:5432/semantic_layer_dev"
-    encryption_key: str = "FiqLMBulPbTUShiUnFKXgt2OHpPv9Y3mBstowcTSKRc="  # Base64 Fernet key
+    encryption_key: str = ""  # Base64 Fernet key — must be set via .env
 
 
 @lru_cache
