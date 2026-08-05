@@ -1,4 +1,4 @@
-import Cookies from 'js-cookie';
+﻿import Cookies from 'js-cookie';
 
 export interface UserPayload {
   id: string;
@@ -10,6 +10,7 @@ export interface UserPayload {
 }
 
 const TOKEN_KEY = 'semantic_auth_token';
+const REFRESH_TOKEN_KEY = 'semantic_refresh_token';
 
 // Create a client-side JWT token (Base64 signature for client state)
 export function createJWTToken(user: UserPayload): string {
@@ -21,7 +22,9 @@ export function createJWTToken(user: UserPayload): string {
   };
 
   const encodedHeader = btoa(JSON.stringify(header));
-  const encodedPayload = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+  const encodedPayload = btoa(
+    unescape(encodeURIComponent(JSON.stringify(payload)))
+  );
   const mockSignature = btoa(`sig_${Date.now()}`);
 
   return `${encodedHeader}.${encodedPayload}.${mockSignature}`;
@@ -53,7 +56,12 @@ export function parseJWTToken(token: string): UserPayload | null {
     return {
       id: String(payload.sub || payload.id || `usr_${Date.now()}`),
       email: payload.email || '',
-      name: payload.name || payload.full_name || payload.username || payload.email || 'User',
+      name:
+        payload.name ||
+        payload.full_name ||
+        payload.username ||
+        payload.email ||
+        'User',
       avatar: payload.avatar,
       provider: payload.provider || 'credentials',
       role: payload.role || 'analyst',
@@ -63,6 +71,8 @@ export function parseJWTToken(token: string): UserPayload | null {
     return null;
   }
 }
+
+// ---- Access Token ----
 
 export function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -79,4 +89,26 @@ export function removeStoredToken(): void {
   if (typeof window === 'undefined') return;
   Cookies.remove(TOKEN_KEY, { path: '/' });
   localStorage.removeItem(TOKEN_KEY);
+}
+
+// ---- Refresh Token ----
+
+export function getStoredRefreshToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export function setStoredRefreshToken(token: string): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(REFRESH_TOKEN_KEY, token);
+}
+
+export function removeStoredRefreshToken(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+export function removeStoredTokens(): void {
+  removeStoredToken();
+  removeStoredRefreshToken();
 }

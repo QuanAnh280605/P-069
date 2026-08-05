@@ -32,6 +32,12 @@ class GoogleAuthRequest(BaseModel):
     credential: str = Field(..., description="Google ID Token từ Client-side OAuth")
 
 
+class RefreshTokenRequest(BaseModel):
+    """Request payload cho refresh JWT token."""
+
+    refresh_token: str = Field(..., min_length=1, description="JWT Refresh Token")
+
+
 class TokenResponse(BaseModel):
     """Response trả về Access Token và Refresh Token JWT."""
 
