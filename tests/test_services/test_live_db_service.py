@@ -1,13 +1,13 @@
 """Tests for Live Target Database Service and Introspection."""
 
 import os
-import tempfile
 import sqlite3
+import tempfile
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.schema_metadata import SchemaDialect
-from src.services.database import decrypt_conn_url
 from src.services.live_db_service import (
     create_live_target_db,
     delete_live_target_db,

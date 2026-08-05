@@ -1,9 +1,9 @@
 import os
 from unittest.mock import AsyncMock
 
-from cryptography.fernet import Fernet
 import pytest
 import pytest_asyncio
+from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
