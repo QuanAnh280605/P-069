@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
+from src.models.schema_metadata import ParseCompleteness, ParseDiagnostic, RawSchemaMetadata
+
 # ---------------------------------------------------------------------------
 # User Authentication & RBAC Schemas
 # ---------------------------------------------------------------------------
@@ -143,7 +145,9 @@ class GenerateResponse(BaseModel):
 
     db_id: int
     status: Literal["draft", "pending_review", "saved"] = "draft"
-    raw_schema: dict[str, Any] = Field(default_factory=dict)
+    raw_schema: RawSchemaMetadata | None = None
+    diagnostics: tuple[ParseDiagnostic, ...] = ()
+    parse_completeness: ParseCompleteness | None = None
     enriched_schema: dict[str, Any] = Field(default_factory=dict)
     suggested_metrics: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -159,3 +163,29 @@ class ApproveResponse(BaseModel):
 
     semantic_layer_id: int
     message: str = "Semantic Layer saved successfully"
+
+
+# ---------------------------------------------------------------------------
+# Experimental SQL Dump Preview (in-memory, never persisted)
+# ---------------------------------------------------------------------------
+
+
+class SqlDumpPreviewResponse(BaseModel):
+    """Owner-bound in-memory preview returned after safe dump parsing."""
+
+    draft_id: str = Field(min_length=20, max_length=100)
+    status: Literal["pending_review", "approved_preview"]
+    source_mode: Literal["dump"] = "dump"
+    dialect: Literal["postgresql", "mysql"]
+    raw_schema: RawSchemaMetadata
+    diagnostics: tuple[ParseDiagnostic, ...] = ()
+    parse_completeness: ParseCompleteness
+    expires_at: datetime
+    persistence: Literal["none"] = "none"
+
+
+class SqlDumpPreviewApprovalResponse(BaseModel):
+    """Explicit non-persistent approval result for the preview workflow."""
+
+    draft: SqlDumpPreviewResponse
+    message: str = "Preview approved in memory; no semantic records were persisted"

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.state import AgentState
+from src.models.schema_metadata import ParseCompleteness, RawSchemaMetadata, SchemaDialect
 
 
 @pytest.mark.asyncio
@@ -17,7 +18,11 @@ async def test_agent_state_has_required_fields():
     state: AgentState = {
         "db_id": 1,
         "conn_url_enc": "encrypted-url",
-        "raw_schema": {},
+        "source_mode": "live",
+        "dialect": SchemaDialect.POSTGRESQL,
+        "raw_schema": RawSchemaMetadata(dialect=SchemaDialect.POSTGRESQL),
+        "diagnostics": (),
+        "parse_completeness": ParseCompleteness.INCOMPLETE,
         "enriched_schema": {},
         "suggested_metrics": [],
         "hitl_approved": False,

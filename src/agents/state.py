@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
+
+from src.models.schema_metadata import (
+    ParseCompleteness,
+    ParseDiagnostic,
+    RawSchemaMetadata,
+    SchemaDialect,
+)
 
 
 class AgentState(TypedDict, total=False):
@@ -22,10 +29,20 @@ class AgentState(TypedDict, total=False):
     """Connection URL đã được Fernet encrypt — không bao giờ plaintext."""
 
     # Flow 1 — Introspect Node output
-    raw_schema: dict[str, Any]
-    """Schema kỹ thuật thô từ SQLAlchemy Inspector.
-    Format: {table_name: {columns: [...], foreign_keys: [...]}}.
-    """
+    source_mode: Literal["live", "dump"]
+    """Acquisition adapter used to produce canonical metadata."""
+
+    dialect: SchemaDialect
+    """SQL dialect attached to canonical metadata."""
+
+    raw_schema: RawSchemaMetadata
+    """Canonical technical metadata shared by Inspector and dump adapters."""
+
+    diagnostics: tuple[ParseDiagnostic, ...]
+    """Safe acquisition diagnostics, kept outside raw_schema."""
+
+    parse_completeness: ParseCompleteness
+    """Whether the adapter proved completeness of supported core metadata."""
 
     # Flow 1 — Enrich Node output
     enriched_schema: dict[str, Any]

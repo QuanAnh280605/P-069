@@ -159,3 +159,122 @@ export function deleteLayer(id: string): void {
   const filtered = layers.filter((l) => l.id !== id);
   saveLocalLayers(filtered);
 }
+
+// Experimental SQL dump preview. Drafts remain in backend process memory only.
+
+export interface PreviewIdentifier {
+  raw_name: string;
+  normalized_name: string;
+  quoted: boolean;
+}
+
+export interface PreviewColumn {
+  column_name: PreviewIdentifier;
+  ordinal_position: number;
+  raw_data_type: string;
+  data_type: string;
+  nullable: boolean;
+  default_expression: string | null;
+  primary_key: boolean;
+}
+
+export interface PreviewForeignKey {
+  constraint_name: PreviewIdentifier | null;
+  constrained_columns: PreviewIdentifier[];
+  referred_schema: PreviewIdentifier;
+  referred_table: PreviewIdentifier;
+  referred_columns: PreviewIdentifier[];
+}
+
+export interface PreviewTable {
+  schema_name: PreviewIdentifier;
+  table_name: PreviewIdentifier;
+  columns: PreviewColumn[];
+  foreign_keys: PreviewForeignKey[];
+}
+
+export interface PreviewDiagnostic {
+  severity: 'info' | 'warning' | 'error';
+  code: string;
+  message: string;
+  statement_index: number | null;
+  line: number | null;
+  column: number | null;
+}
+
+interface PreviewErrorDetail {
+  code?: string;
+  message?: string;
+  line?: number | null;
+  column?: number | null;
+}
+
+export interface SqlDumpPreview {
+  draft_id: string;
+  status: 'pending_review' | 'approved_preview';
+  dialect: 'postgresql' | 'mysql';
+  raw_schema: { tables: PreviewTable[] };
+  diagnostics: PreviewDiagnostic[];
+  parse_completeness: 'complete' | 'incomplete';
+  expires_at: string;
+  persistence: 'none';
+}
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+
+export async function uploadSqlDumpPreview(
+  file: File,
+  dialect: '' | 'postgresql' | 'mysql',
+  token: string,
+): Promise<SqlDumpPreview> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/sql',
+    'X-Filename': encodeURIComponent(file.name),
+  };
+  if (dialect) headers['X-SQL-Dialect'] = dialect;
+  return requestPreview('/api/v1/semantic/import/preview', token, {
+    method: 'POST',
+    headers,
+    body: file,
+  });
+}
+
+export async function getSqlDumpPreview(draftId: string, token: string): Promise<SqlDumpPreview> {
+  return requestPreview(`/api/v1/semantic/import/drafts/${encodeURIComponent(draftId)}`, token);
+}
+
+export async function approveSqlDumpPreview(draftId: string, token: string): Promise<SqlDumpPreview> {
+  const response = await requestPreview<{ draft: SqlDumpPreview }>(
+    `/api/v1/semantic/import/drafts/${encodeURIComponent(draftId)}/approve`,
+    token,
+    { method: 'POST' },
+  );
+  return response.draft;
+}
+
+async function requestPreview<T = SqlDumpPreview>(
+  path: string,
+  token: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, ...init.headers },
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(formatPreviewError(data?.detail));
+  }
+  return data as T;
+}
+
+function formatPreviewError(detail: PreviewErrorDetail | string | undefined): string {
+  if (typeof detail === 'string') return detail;
+  if (!detail) return 'Không thể xử lý SQL dump preview';
+  const prefix = detail.code ? `${detail.code}: ` : '';
+  const location = detail.line
+    ? ` (dòng ${detail.line}${detail.column ? `, cột ${detail.column}` : ''})`
+    : '';
+  return `${prefix}${detail.message || 'Không thể xử lý SQL dump preview'}${location}`;
+}

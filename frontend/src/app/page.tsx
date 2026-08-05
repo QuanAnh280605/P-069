@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import SqlDumpPreviewUploader from '@/components/SqlDumpPreviewUploader';
 import { getLocalLayers, updateLayer, deleteLayer, SemanticLayerData } from '@/lib/api';
 import {
   Database,
@@ -215,6 +216,8 @@ export default function DashboardPage() {
           </p>
         </div>
       </div>
+
+      <SqlDumpPreviewUploader />
 
       {/* Section 1: Connect New Database Form */}
       <div className="glass-card rounded-2xl p-6 md:p-8 border border-indigo-500/20 shadow-xl">

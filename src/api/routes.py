@@ -1,8 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated, NoReturn
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth import get_current_user
+from src.config import get_settings
+from src.models.db import UserModel
+from src.models.schema_metadata import DiagnosticCode, SchemaDialect
 from src.models.schemas import (
     ApproveRequest,
     ApproveResponse,
@@ -13,16 +18,116 @@ from src.models.schemas import (
     MetricUpdate,
     SemanticColumnUpdate,
     SemanticTableUpdate,
+    SqlDumpPreviewApprovalResponse,
+    SqlDumpPreviewResponse,
 )
 from src.services.database import get_db_session
 from src.services.export_service import build_semantic_layer_dict, serialize_to_json, serialize_to_yaml
+from src.services.preview_draft_store import (
+    InMemoryPreviewDraftStore,
+    PreviewDraftCapacityError,
+    PreviewDraftNotFoundError,
+    get_preview_draft_store,
+)
+from src.services.schema_ingestion import create_sql_dump_preview
+from src.services.sql_dump_parser import SqlDumpParseError
+from src.services.sql_dump_scanner import SqlDumpScanError
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+PreviewStore = Annotated[InMemoryPreviewDraftStore, Depends(get_preview_draft_store)]
+CurrentUser = Annotated[UserModel, Depends(get_current_user)]
 
 
 # ---------------------------------------------------------------------------
 # Flow 1 — Generate & HITL
 # ---------------------------------------------------------------------------
+
+
+@router.post("/semantic/import/preview", response_model=SqlDumpPreviewResponse, status_code=202)
+async def import_sql_dump_preview(
+    request: Request,
+    current_user: CurrentUser,
+    draft_store: PreviewStore,
+    filename: str = Header(..., alias="X-Filename", min_length=1, max_length=255),
+    dialect: SchemaDialect | None = Header(default=None, alias="X-SQL-Dialect"),
+) -> SqlDumpPreviewResponse:
+    """Parse a raw SQL file body into an owner-bound non-persistent preview."""
+    _require_preview_enabled()
+    _validate_preview_content_type(request)
+    try:
+        return await create_sql_dump_preview(request.stream(), filename, current_user.id, draft_store, dialect)
+    except (SqlDumpScanError, SqlDumpParseError) as error:
+        _raise_preview_parse_error(error)
+    except PreviewDraftCapacityError as error:
+        raise HTTPException(status_code=503, detail="Preview draft capacity reached") from error
+
+
+@router.get("/semantic/import/drafts/{draft_id}", response_model=SqlDumpPreviewResponse)
+async def get_sql_dump_preview(
+    draft_id: str,
+    current_user: CurrentUser,
+    draft_store: PreviewStore,
+) -> SqlDumpPreviewResponse:
+    """Return a live preview only to its authenticated owner."""
+    _require_preview_enabled()
+    try:
+        return await draft_store.get(current_user.id, draft_id)
+    except PreviewDraftNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Preview draft not found or expired") from error
+
+
+@router.post(
+    "/semantic/import/drafts/{draft_id}/approve",
+    response_model=SqlDumpPreviewApprovalResponse,
+)
+async def approve_sql_dump_preview(
+    draft_id: str,
+    current_user: CurrentUser,
+    draft_store: PreviewStore,
+) -> SqlDumpPreviewApprovalResponse:
+    """Approve a preview in memory without invoking Save Node or persistence."""
+    _require_preview_enabled()
+    try:
+        draft = await draft_store.approve(current_user.id, draft_id)
+    except PreviewDraftNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Preview draft not found or expired") from error
+    return SqlDumpPreviewApprovalResponse(draft=draft)
+
+
+def _require_preview_enabled() -> None:
+    settings = get_settings()
+    if not settings.sql_dump_preview_enabled or settings.app_env == "production":
+        raise HTTPException(status_code=404, detail="SQL dump preview is disabled")
+
+
+def _validate_preview_content_type(request: Request) -> None:
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+    allowed = {"application/sql", "text/plain", "application/octet-stream"}
+    if content_type not in allowed:
+        raise HTTPException(status_code=415, detail="Preview expects a raw SQL file body")
+
+
+def _raise_preview_parse_error(error: SqlDumpScanError | SqlDumpParseError) -> NoReturn:
+    diagnostic = error.diagnostic
+    status_code = 413 if diagnostic.code == DiagnosticCode.FILE_TOO_LARGE else 422
+    validation_codes = {
+        DiagnosticCode.EMPTY_FILE,
+        DiagnosticCode.INVALID_EXTENSION,
+        DiagnosticCode.INVALID_ENCODING,
+    }
+    if diagnostic.code in validation_codes:
+        status_code = 400
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "code": diagnostic.code.value,
+            "message": diagnostic.message,
+            "statement_index": diagnostic.statement_index,
+            "line": diagnostic.line,
+            "column": diagnostic.column,
+        },
+    ) from error
 
 
 @router.post("/semantic/generate", response_model=GenerateResponse, status_code=202)
