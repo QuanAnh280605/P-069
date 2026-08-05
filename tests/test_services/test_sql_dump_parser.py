@@ -10,7 +10,8 @@ from src.models.schema_metadata import (
     ParseCompleteness,
     SchemaDialect,
 )
-from src.services.sql_dump_parser import SqlDumpParseError, parse_sql_dump
+from src.services.sql_dump_parser import parse_sql_dump
+from src.services.sql_dump_parser_models import SqlDumpParseError
 from src.services.sql_dump_scanner import scan_sql_dump
 from src.services.sql_dump_scanner_models import ScannedStatement, ScannerLimits, ScanResult, StatementKind
 

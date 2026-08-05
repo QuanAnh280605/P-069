@@ -1,9 +1,9 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from src.models.schema_metadata import ParseCompleteness, ParseDiagnostic, RawSchemaMetadata
+from src.models.schema_metadata import ParseDiagnostic, RawSchemaMetadata, SchemaDialect
 
 # ---------------------------------------------------------------------------
 # User Authentication & RBAC Schemas
@@ -151,9 +151,7 @@ class GenerateResponse(BaseModel):
 
     db_id: int
     status: Literal["draft", "pending_review", "saved"] = "draft"
-    raw_schema: RawSchemaMetadata | None = None
-    diagnostics: tuple[ParseDiagnostic, ...] = ()
-    parse_completeness: ParseCompleteness | None = None
+    raw_schema: dict[str, Any] = Field(default_factory=dict)
     enriched_schema: dict[str, Any] = Field(default_factory=dict)
     suggested_metrics: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -171,27 +169,42 @@ class ApproveResponse(BaseModel):
     message: str = "Semantic Layer saved successfully"
 
 
-# ---------------------------------------------------------------------------
-# Experimental SQL Dump Preview (in-memory, never persisted)
-# ---------------------------------------------------------------------------
-
-
 class SqlDumpPreviewResponse(BaseModel):
-    """Owner-bound in-memory preview returned after safe dump parsing."""
+    """Technical schema metadata parsed from a SQL dump."""
 
-    draft_id: str = Field(min_length=20, max_length=100)
-    status: Literal["pending_review", "approved_preview"]
-    source_mode: Literal["dump"] = "dump"
-    dialect: Literal["postgresql", "mysql"]
+    dialect: SchemaDialect
     raw_schema: RawSchemaMetadata
     diagnostics: tuple[ParseDiagnostic, ...] = ()
-    parse_completeness: ParseCompleteness
-    expires_at: datetime
-    persistence: Literal["none"] = "none"
 
 
-class SqlDumpPreviewApprovalResponse(BaseModel):
-    """Explicit non-persistent approval result for the preview workflow."""
+class ImportedSchemaCreateRequest(BaseModel):
+    """Request to persist parsed technical schema metadata."""
 
-    draft: SqlDumpPreviewResponse
-    message: str = "Preview approved in memory; no semantic records were persisted"
+    display_name: str = Field(min_length=1, max_length=200)
+    raw_schema: RawSchemaMetadata
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        """Trim and reject an empty display name."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Display name cannot be empty")
+        return normalized
+
+
+class ImportedSchemaSummaryResponse(BaseModel):
+    """List item for one persisted SQL dump schema."""
+
+    id: int
+    display_name: str
+    dialect: SchemaDialect
+    table_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ImportedSchemaResponse(ImportedSchemaSummaryResponse):
+    """Full persisted SQL dump schema metadata."""
+
+    raw_schema: RawSchemaMetadata

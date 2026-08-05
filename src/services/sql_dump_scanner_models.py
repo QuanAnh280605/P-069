@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from pathlib import PurePath
 
 from pydantic import Field
 
 from src.config import get_settings
-from src.models.schema_metadata import CanonicalModel, ParseDiagnostic, SchemaDialect
+from src.models.schema_metadata import (
+    CanonicalModel,
+    DiagnosticCode,
+    DiagnosticSeverity,
+    ParseDiagnostic,
+    SchemaDialect,
+)
 
 HARD_MAX_FILE_BYTES = 20 * 1024 * 1024
 HARD_MAX_STATEMENT_BYTES = 1024 * 1024
@@ -94,3 +101,26 @@ class StatementCategory(StrEnum):
     UNSUPPORTED = "unsupported"
     DIRECTIVE = "directive"
     NAMESPACE = "namespace"
+
+
+def validate_extension(filename: str) -> None:
+    """Reject uploads whose declared filename is not an SQL file."""
+    if PurePath(filename).suffix.lower() != ".sql":
+        raise scan_error(DiagnosticCode.INVALID_EXTENSION, "SQL dump filename must use the .sql extension")
+
+
+def validate_file_size(total_bytes: int, limits: ScannerLimits) -> None:
+    """Reject a stream immediately after it exceeds the configured limit."""
+    if total_bytes > limits.max_file_bytes:
+        raise scan_error(DiagnosticCode.FILE_TOO_LARGE, "SQL dump exceeds configured file limit")
+
+
+def scan_error(code: DiagnosticCode, message: str) -> SqlDumpScanError:
+    """Build a scanner exception with a safe fatal diagnostic."""
+    diagnostic = ParseDiagnostic(
+        severity=DiagnosticSeverity.ERROR,
+        code=code,
+        message=message,
+        recoverable=False,
+    )
+    return SqlDumpScanError(diagnostic)

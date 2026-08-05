@@ -160,16 +160,14 @@ export function deleteLayer(id: string): void {
   saveLocalLayers(filtered);
 }
 
-// Experimental SQL dump preview. Drafts remain in backend process memory only.
-
-export interface PreviewIdentifier {
+export interface SqlIdentifier {
   raw_name: string;
   normalized_name: string;
   quoted: boolean;
 }
 
-export interface PreviewColumn {
-  column_name: PreviewIdentifier;
+export interface SqlDumpColumn {
+  column_name: SqlIdentifier;
   ordinal_position: number;
   raw_data_type: string;
   data_type: string;
@@ -178,46 +176,48 @@ export interface PreviewColumn {
   primary_key: boolean;
 }
 
-export interface PreviewForeignKey {
-  constraint_name: PreviewIdentifier | null;
-  constrained_columns: PreviewIdentifier[];
-  referred_schema: PreviewIdentifier;
-  referred_table: PreviewIdentifier;
-  referred_columns: PreviewIdentifier[];
+export interface SqlDumpForeignKey {
+  constrained_columns: SqlIdentifier[];
+  referred_schema: SqlIdentifier;
+  referred_table: SqlIdentifier;
+  referred_columns: SqlIdentifier[];
 }
 
-export interface PreviewTable {
-  schema_name: PreviewIdentifier;
-  table_name: PreviewIdentifier;
-  columns: PreviewColumn[];
-  foreign_keys: PreviewForeignKey[];
+export interface SqlDumpTable {
+  schema_name: SqlIdentifier;
+  table_name: SqlIdentifier;
+  columns: SqlDumpColumn[];
+  foreign_keys: SqlDumpForeignKey[];
 }
 
-export interface PreviewDiagnostic {
+export interface ParseDiagnostic {
   severity: 'info' | 'warning' | 'error';
   code: string;
   message: string;
-  statement_index: number | null;
   line: number | null;
   column: number | null;
 }
 
-interface PreviewErrorDetail {
-  code?: string;
-  message?: string;
-  line?: number | null;
-  column?: number | null;
+export interface SqlDumpPreview {
+  dialect: 'postgresql' | 'mysql';
+  raw_schema: {
+    contract_version: '1.0';
+    tables: SqlDumpTable[];
+  };
+  diagnostics: ParseDiagnostic[];
 }
 
-export interface SqlDumpPreview {
-  draft_id: string;
-  status: 'pending_review' | 'approved_preview';
+export interface ImportedSchemaSummary {
+  id: number;
+  display_name: string;
   dialect: 'postgresql' | 'mysql';
-  raw_schema: { tables: PreviewTable[] };
-  diagnostics: PreviewDiagnostic[];
-  parse_completeness: 'complete' | 'incomplete';
-  expires_at: string;
-  persistence: 'none';
+  table_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ImportedSchemaRecord extends ImportedSchemaSummary {
+  raw_schema: SqlDumpPreview['raw_schema'];
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
@@ -230,51 +230,69 @@ export async function uploadSqlDumpPreview(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/sql',
-    'X-Filename': encodeURIComponent(file.name),
+    'X-Filename': file.name,
   };
   if (dialect) headers['X-SQL-Dialect'] = dialect;
-  return requestPreview('/api/v1/semantic/import/preview', token, {
+  const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/preview`, {
     method: 'POST',
     headers,
     body: file,
   });
+  if (!response.ok) throw new Error(await readPreviewError(response));
+  return response.json() as Promise<SqlDumpPreview>;
 }
 
-export async function getSqlDumpPreview(draftId: string, token: string): Promise<SqlDumpPreview> {
-  return requestPreview(`/api/v1/semantic/import/drafts/${encodeURIComponent(draftId)}`, token);
+async function readPreviewError(response: Response): Promise<string> {
+  const payload = (await response.json().catch(() => null)) as {
+    detail?: string | { message?: string };
+  } | null;
+  if (typeof payload?.detail === 'string') return payload.detail;
+  return payload?.detail?.message || `Upload failed (${response.status})`;
 }
 
-export async function approveSqlDumpPreview(draftId: string, token: string): Promise<SqlDumpPreview> {
-  const response = await requestPreview<{ draft: SqlDumpPreview }>(
-    `/api/v1/semantic/import/drafts/${encodeURIComponent(draftId)}/approve`,
-    token,
-    { method: 'POST' },
-  );
-  return response.draft;
+export async function saveImportedSchema(
+  displayName: string,
+  preview: SqlDumpPreview,
+  token: string,
+): Promise<ImportedSchemaRecord> {
+  return requestImportedSchema('/api/v1/semantic/import/saved', token, {
+    method: 'POST',
+    body: JSON.stringify({ display_name: displayName, raw_schema: preview.raw_schema }),
+  });
 }
 
-async function requestPreview<T = SqlDumpPreview>(
+export async function listImportedSchemas(token: string): Promise<ImportedSchemaSummary[]> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/saved`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(await readPreviewError(response));
+  return response.json() as Promise<ImportedSchemaSummary[]>;
+}
+
+export async function getImportedSchema(id: number, token: string): Promise<ImportedSchemaRecord> {
+  return requestImportedSchema(`/api/v1/semantic/import/saved/${id}`, token);
+}
+
+export async function deleteImportedSchema(id: number, token: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/saved/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(await readPreviewError(response));
+}
+
+async function requestImportedSchema(
   path: string,
   token: string,
   init: RequestInit = {},
-): Promise<T> {
+): Promise<ImportedSchemaRecord> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { Authorization: `Bearer ${token}`, ...init.headers },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
   });
-  const data = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(formatPreviewError(data?.detail));
-  }
-  return data as T;
-}
-
-function formatPreviewError(detail: PreviewErrorDetail | string | undefined): string {
-  if (typeof detail === 'string') return detail;
-  if (!detail) return 'Không thể xử lý SQL dump preview';
-  const prefix = detail.code ? `${detail.code}: ` : '';
-  const location = detail.line
-    ? ` (dòng ${detail.line}${detail.column ? `, cột ${detail.column}` : ''})`
-    : '';
-  return `${prefix}${detail.message || 'Không thể xử lý SQL dump preview'}${location}`;
+  if (!response.ok) throw new Error(await readPreviewError(response));
+  return response.json() as Promise<ImportedSchemaRecord>;
 }

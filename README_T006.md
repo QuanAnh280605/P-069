@@ -1,64 +1,27 @@
-# [T006] Import SQL Dump và xem trước Technical Schema
+# [T006] Import SQL Dump và trả về Schema Metadata
 
-## 1. TL;DR
+## TL;DR
 
-Task T006 bổ sung luồng tải lên PostgreSQL/MySQL schema dump, parse DDL an toàn mà không thực thi SQL và hiển thị technical schema preview. Preview hiện chỉ lưu trong RAM, chưa chạy LLM/HITL Save Node và chưa ghi vào Metadata Store.
+Cho phép tải file PostgreSQL/MySQL `.sql`, parse DDL thành technical schema metadata, hiển thị preview và lưu lại theo tên gợi nhớ. Hệ thống không thực thi SQL, không đọc row data và không gọi LLM.
 
-## 2. Chuẩn bị môi trường
+## Chuẩn bị môi trường
 
-### Yêu cầu
+Yêu cầu: Python 3.11, Node.js, npm và Docker Desktop.
 
-- Python 3.11.
-- Node.js/npm tương thích Next.js 16.
-- Docker Desktop và Docker Compose.
-- Các port `3000`, `5432`, `8000`, `8081` đang trống.
-
-### Cấu hình backend
-
-Tại thư mục gốc repository, tạo `.env` và virtual environment:
+Tại thư mục gốc:
 
 ```bash
 cp .env.example .env
 python -m venv .venv
+source .venv/Scripts/activate  # Git Bash
+python -m pip install -r requirements.txt
 ```
 
-Kích hoạt virtual environment bằng Git Bash:
-
-```bash
-source .venv/Scripts/activate
-```
-
-Hoặc bằng PowerShell:
+PowerShell dùng lệnh kích hoạt sau:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
-
-Sau khi thấy `(.venv)` ở đầu terminal, cài dependencies:
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-Sinh Fernet key:
-
-```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-Cập nhật `.env`:
-
-```dotenv
-APP_ENV=development
-DATABASE_URL=postgresql+asyncpg://dev:devpassword@localhost:5432/semantic_layer_dev
-ENCRYPTION_KEY=<fernet-key-vừa-sinh>
-SQL_DUMP_PREVIEW_ENABLED=true
-CORS_ORIGINS=http://localhost:3000
-```
-
-Preview không gọi LLM nên không cần OpenAI API để test luồng này.
-
-### Cấu hình frontend
 
 Tạo `frontend/.env.local`:
 
@@ -66,39 +29,21 @@ Tạo `frontend/.env.local`:
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ```
 
-## 3. Hướng dẫn chạy hệ thống
+## Hướng dẫn chạy
 
-### Data — PostgreSQL Metadata Store
+### Data và Backend
+
+Các lệnh dưới đây chạy được trong Git Bash lẫn PowerShell khi virtual environment đã active:
 
 ```bash
 docker compose -f docker-compose.dev.yml up postgres pgweb -d
 python -m alembic upgrade head
-```
-
-- PostgreSQL: `localhost:5432`.
-- PgWeb: `http://localhost:8081`.
-- T006 không thay đổi ORM/database schema nên không có migration mới.
-
-### Backend
-
-```bash
 python -m uvicorn src.main:app --reload --reload-dir src --host 0.0.0.0 --port 8000
 ```
 
-- Health check: `http://localhost:8000/health`.
-- Swagger: `http://localhost:8000/docs`.
-
-Hoặc chạy backend bằng Docker:
-
-```bash
-docker compose -f docker-compose.dev.yml up postgres backend pgweb --build
-```
-
-Không chạy đồng thời backend local và Docker trên port `8000`.
+Không dùng đường dẫn Windows như `.\.venv\Scripts\uvicorn.exe` trong Git Bash vì ký tự `\` bị shell xử lý. Swagger: `http://localhost:8000/docs`.
 
 ### Frontend
-
-Mở terminal khác:
 
 ```bash
 cd frontend
@@ -106,118 +51,67 @@ npm ci
 npm run dev
 ```
 
-Truy cập `http://localhost:3000`.
+Mở `http://localhost:3000` và đăng nhập.
 
-## 4. What's New / Changelog
+## What's New / Changelog
 
 | Tên file | Nội dung chính |
 |---|---|
-| `src/models/schema_metadata.py` | Canonical models cho schema, table, column, PK/FK, diagnostics và completeness. |
-| `src/models/schemas.py` | Response models cho preview và approval. |
-| `src/agents/state.py` | Typed raw schema, source mode, dialect và parse diagnostics. |
-| `src/config.py` | Giới hạn file/statement, feature flag, TTL và draft capacity. |
-| `src/services/sql_dump_scanner_models.py` | Models và limits cho scanner. |
-| `src/services/sql_dump_scanner.py` | Đọc bounded chunks, nhận diện dialect, loại row data và giữ core DDL. |
-| `src/services/sql_dump_parser_models.py` | Internal builders và safe parser errors. |
-| `src/services/sql_dump_parser.py` | Parse table/column/default/PK/FK; hỗ trợ ALTER constraints và column defaults. |
-| `src/services/schema_ingestion.py` | Orchestrate scanner → parser → preview draft. |
-| `src/services/preview_draft_store.py` | In-memory owner-bound drafts với TTL và capacity. |
-| `src/api/routes.py` | Upload/get/approve preview APIs và structured error mapping. |
-| `frontend/src/components/SqlDumpPreviewUploader.tsx` | Form chọn file, dialect, upload và error/loading states. |
-| `frontend/src/app/page.tsx` | Gắn Import SQL Dump card vào dashboard. |
-| `frontend/src/lib/api.ts` | Types, API client và format diagnostic location. |
-| `frontend/src/app/semantic/drafts/[draft_id]/review/page.tsx` | Trang technical schema review. |
-| `requirements.txt` | Pin `sqlglot==30.13.0`. |
-| `tests/fixtures/sql_dumps/` | PostgreSQL/MySQL golden dumps và các fixture regression. |
-| `tests/test_models/test_schema_metadata.py` | Test canonical metadata invariants. |
-| `tests/test_services/test_sql_dump_*.py` | Test scanner, parser, fixtures và SQLGlot compatibility. |
-| `tests/test_services/test_preview_draft_store.py` | Test TTL, capacity và owner isolation. |
-| `tests/test_api/test_import_dump_preview.py` | Test preview API, authentication và no-persistence boundary. |
+| `src/models/schema_metadata.py` | Contract metadata cho schema, table, column, PK/FK và diagnostic. |
+| `src/services/sql_dump_scanner*.py` | Đọc file có giới hạn, nhận diện dialect và loại row data. |
+| `src/services/sql_dump_parser*.py` | Parse DDL PostgreSQL/MySQL bằng SQLGlot thành canonical metadata. |
+| `src/services/schema_ingestion.py` | Điều phối scanner → parser → response. |
+| `src/models/db.py`, `alembic/versions/d87dc6a5afe1_*.py` | Bảng `imported_schemas` và migration lưu metadata theo user. |
+| `src/services/imported_schema_service.py` | Lưu, liệt kê, mở lại và xóa imported schema. |
+| `src/api/routes.py` | API preview và CRUD saved schema. |
+| `frontend/src/components/SqlDump*.tsx` | Form upload, tên gợi nhớ, nút lưu và technical preview. |
+| `frontend/src/components/ImportedSchemaList.tsx` | Bảng danh sách schema đã lưu, mở preview và xóa. |
+| `frontend/src/lib/api.ts` | Kiểu dữ liệu và API client cho upload/saved schemas. |
+| `tests/fixtures/sql_dumps/`, `tests/test_*` | Fixtures và regression tests cho scanner/parser/API. |
+| `requirements.txt` | Thêm `sqlglot`. |
 
-## 5. Kết quả trực quan
+## Kết quả trực quan
 
-### Dashboard
+Trong card Import SQL Dump, ô **Tên gợi nhớ** nằm trên hàng chọn file/dialect. Khi lưu thành công, preview tự đóng. Component **Danh sách schema đã lưu** được tách riêng và đặt sau card kết nối database; danh sách cho phép mở lại hoặc xóa schema. Các diagnostic `UNSUPPORTED_STATEMENT` vẫn được giữ trong API nhưng không hiển thị trên UI.
 
-Card **Import SQL Dump — Experimental Preview** có:
-
-- File picker `.sql` và giới hạn client 20 MiB.
-- Chọn `Tự nhận diện`, `PostgreSQL` hoặc `MySQL`.
-- Nút **Upload & Preview** cùng loading state.
-- Banner đỏ cho fatal errors.
-- Ghi chú draft chỉ nằm trong RAM.
-
-### Review page
-
-Route: `/semantic/drafts/{draft_id}/review`.
-
-- Hiển thị dialect, `RAM ONLY` và thời gian hết hạn.
-- Hiển thị diagnostics kèm code, dòng và cột.
-- Hiển thị schema-qualified tables, columns, types, nullability và PK/FK count.
-- Nút **Phê duyệt preview** chỉ đổi trạng thái trong RAM, không gọi Save Node.
-
-## 6. How to Test
+## How to Test
 
 ### Kiểm tra nhanh
 
-1. Chạy Data, Backend và Frontend theo mục 3.
-2. Mở `http://localhost:3000` và đăng nhập.
+1. Chạy Data, Backend và Frontend theo hướng dẫn trên.
+2. Mở dashboard và đăng nhập.
 3. Chọn `tests/fixtures/sql_dumps/postgresql_schema.sql`.
-4. Giữ **Tự nhận diện**, bấm **Upload & Preview**.
-5. Xác nhận chuyển tới `/semantic/drafts/{draft_id}/review`.
-6. Kiểm tra dialect, tables, columns, PK/FK và diagnostics.
-7. Bấm **Phê duyệt preview** và xác nhận nút đổi trạng thái.
+4. Giữ **Auto detect**, bấm **Upload & Preview**.
+5. Nhập tên gợi nhớ, bấm **Lưu schema** và kiểm tra bản ghi xuất hiện trong danh sách.
+6. Bấm **Mở preview** để tải lại metadata đã lưu; bấm biểu tượng thùng rác để xóa.
 
-### Các kịch bản chính
+### Kịch bản chính
 
-| Kịch bản | File/thao tác | Kết quả mong đợi |
-|---|---|---|
-| PostgreSQL auto-detect | `postgresql_schema.sql` | Preview thành công, dialect PostgreSQL. |
-| PostgreSQL owner/sequence | `postgresql_dump_schema.sql` | Không còn lỗi `unsupported AST`; sequence defaults được giữ. |
-| MySQL auto-detect | `mysql_schema.sql` | Preview thành công, dialect MySQL. |
-| Ambiguous dialect | `test_schema_dump.sql`, để auto | Trả `DIALECT_AMBIGUOUS`. |
-| Explicit dialect | `test_schema_dump.sql`, chọn dialect | Có preview; có thể kèm warning non-core/FK actions. |
-| Owner isolation | User B mở draft của User A | Trả `Preview draft not found or expired`. |
-| Restart backend | Mở lại draft sau restart | Draft không còn vì store chỉ nằm trong RAM. |
-| No persistence | Approve rồi kiểm tra Metadata Store | Không có semantic records mới. |
+| Kịch bản | Kết quả mong đợi |
+|---|---|
+| `postgresql_schema.sql`, auto | Parse thành công, dialect PostgreSQL. |
+| `mysql_schema.sql`, auto | Parse thành công, dialect MySQL. |
+| `postgresql_dump_schema.sql`, chọn PostgreSQL | Có preview đúng table/column/PK/FK; warning ngoài phạm vi không hiển thị trên UI. |
+| `test_schema_dump.sql`, auto | HTTP 422 `DIALECT_AMBIGUOUS` vì file trộn dấu hiệu nhiều dialect. |
+| `test_schema_dump.sql`, chọn dialect | Có thể preview phần DDL tương thích; phần không biểu diễn được tạo warning. |
+| File có `INSERT` | Row payload bị bỏ qua và không xuất hiện trong response. |
+| Chỉ upload/preview | Không tạo bản ghi mới. |
+| Bấm Lưu schema | Tạo bản ghi `imported_schemas` thuộc user hiện tại. |
+| User khác mở/xóa schema | Trả HTTP 404. |
 
-`test_schema_dump.sql` trộn `SERIAL` và `AUTO_INCREMENT`; explicit override chỉ chọn parser dialect, không chứng nhận file chạy được trên database thật.
-
-## 7. Automated Tests
-
-### Regression tests T006
-
-```bash
-python -m pytest tests/test_models/test_schema_metadata.py -q
-python -m pytest tests/test_services/test_sql_dump_scanner.py -q
-python -m pytest tests/test_services/test_sql_dump_parser.py -q
-python -m pytest tests/test_services/test_preview_draft_store.py -q
-python -m pytest tests/test_api/test_import_dump_preview.py -q
-```
-
-### Full backend checks
+### Automated checks
 
 ```bash
 python -m pytest -q
 python -m ruff check src tests
 python -m ruff format --check src tests
-```
-
-Kết quả tham chiếu: `134 tests passed`, Ruff check/format passed.
-
-### Frontend checks
-
-```bash
 cd frontend
 npm run lint
 npm run build
 ```
 
-Kết quả tham chiếu: ESLint không có error; Next.js production build passed.
+## Giới hạn
 
-## 8. Giới hạn hiện tại
-
-- Chỉ hỗ trợ PostgreSQL/MySQL trong phạm vi fixtures đã kiểm thử.
-- Index, sequence objects, UNIQUE/CHECK và FK actions chưa được canonical IR biểu diễn đầy đủ.
-- Draft chỉ nằm trong RAM của một backend process và bị tắt trong production.
-- Chưa có multipart production endpoint.
-- Chưa có Enrich/Metric nodes, HITL checkpoint hoặc persistence chính thức.
+- Chỉ hỗ trợ PostgreSQL và MySQL trong phạm vi DDL đã kiểm thử.
+- Index, sequence object, UNIQUE/CHECK và FK actions chưa được canonical metadata biểu diễn đầy đủ nên có thể tạo warning.
+- Chỉ technical metadata được lưu; không có draft approval, LLM enrichment, HITL hoặc semantic metrics.

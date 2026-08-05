@@ -1,5 +1,3 @@
-"""SQLGlot AST extraction into the persistence-free canonical schema IR."""
-
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +7,6 @@ from sqlglot import Dialect, ErrorLevel, exp
 from sqlglot.errors import SqlglotError
 
 from src.models.schema_metadata import (
-    ColumnMetadata,
     DiagnosticCode,
     DiagnosticSeverity,
     ForeignKeyMetadata,
@@ -18,7 +15,6 @@ from src.models.schema_metadata import (
     ParseDiagnostic,
     ParseResult,
     PrimaryKeyMetadata,
-    QualifiedIdentifier,
     RawSchemaMetadata,
     SchemaDialect,
     SchemaMetadata,
@@ -31,8 +27,16 @@ from src.services.sql_dump_parser_models import (
     ForeignKeySpec,
     PrimaryKeySpec,
     SourceLocation,
-    SqlDumpParseError,
     TableBuilder,
+)
+from src.services.sql_dump_parser_models import (
+    build_column as _build_column,
+)
+from src.services.sql_dump_parser_models import (
+    fatal_parse_error as _fatal,
+)
+from src.services.sql_dump_parser_models import (
+    target_has_columns as _target_has_columns,
 )
 from src.services.sql_dump_scanner_models import ScannedStatement, ScanResult, StatementKind
 
@@ -440,24 +444,6 @@ def _reject_duplicate_foreign_keys(table: TableBuilder) -> None:
         raise _fatal(table.source, DiagnosticCode.CONFLICTING_CONSTRAINT, "Duplicate foreign key constraint", table)
 
 
-def _target_has_columns(table: TableBuilder, columns: tuple[Identifier, ...]) -> bool:
-    target_names = {item.name.normalized_name for item in table.columns}
-    return bool(columns) and all(item.normalized_name in target_names for item in columns)
-
-
-def _build_column(column: ColumnBuilder, primary_names: set[str]) -> ColumnMetadata:
-    primary = column.name.normalized_name in primary_names
-    return ColumnMetadata(
-        column_name=column.name,
-        ordinal_position=column.ordinal_position,
-        raw_data_type=column.raw_data_type,
-        data_type=column.data_type,
-        nullable=column.nullable and not primary,
-        default_expression=column.default_expression,
-        primary_key=primary,
-    )
-
-
 def _table_identifiers(
     node: object,
     context: _ParseContext,
@@ -512,25 +498,3 @@ def _add_warning(context: _ParseContext, source: SourceLocation, message: str) -
             recoverable=True,
         )
     )
-
-
-def _fatal(
-    source: SourceLocation,
-    code: DiagnosticCode,
-    message: str,
-    table: TableBuilder | None = None,
-) -> SqlDumpParseError:
-    object_name = None
-    if table is not None:
-        object_name = QualifiedIdentifier(schema_name=table.schema_name, object_name=table.table_name)
-    diagnostic = ParseDiagnostic(
-        severity=DiagnosticSeverity.ERROR,
-        code=code,
-        message=message,
-        statement_index=source.statement_index,
-        line=source.line,
-        column=source.column,
-        object_name=object_name,
-        recoverable=False,
-    )
-    return SqlDumpParseError((diagnostic,))

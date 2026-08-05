@@ -6,7 +6,6 @@ import codecs
 import re
 from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
-from pathlib import PurePath
 
 from src.models.schema_metadata import (
     DiagnosticCode,
@@ -22,6 +21,15 @@ from src.services.sql_dump_scanner_models import (
     SqlDumpScanError,
     StatementCategory,
     StatementKind,
+)
+from src.services.sql_dump_scanner_models import (
+    scan_error as _scan_error,
+)
+from src.services.sql_dump_scanner_models import (
+    validate_extension as _validate_extension,
+)
+from src.services.sql_dump_scanner_models import (
+    validate_file_size as _validate_file_size,
 )
 
 _CONTROL_PREVIEW_LIMIT = 512
@@ -486,23 +494,3 @@ async def scan_sql_dump(
     if decoded_characters == 0:
         raise _scan_error(DiagnosticCode.EMPTY_FILE, "SQL dump is empty")
     return scanner.finish(total_bytes, dialect_override)
-
-
-def _validate_extension(filename: str) -> None:
-    if PurePath(filename).suffix.lower() != ".sql":
-        raise _scan_error(DiagnosticCode.INVALID_EXTENSION, "SQL dump filename must use the .sql extension")
-
-
-def _validate_file_size(total_bytes: int, limits: ScannerLimits) -> None:
-    if total_bytes > limits.max_file_bytes:
-        raise _scan_error(DiagnosticCode.FILE_TOO_LARGE, "SQL dump exceeds configured file limit")
-
-
-def _scan_error(code: DiagnosticCode, message: str) -> SqlDumpScanError:
-    diagnostic = ParseDiagnostic(
-        severity=DiagnosticSeverity.ERROR,
-        code=code,
-        message=message,
-        recoverable=False,
-    )
-    return SqlDumpScanError(diagnostic)

@@ -2,28 +2,13 @@
 
 from src.models.db import (
     Base,
+    ImportedSchemaModel,
     SemanticColumnModel,
     SemanticDatabaseModel,
     SemanticMetricModel,
     SemanticTableModel,
     UserModel,
     UserSessionModel,
-)
-from src.models.schema_metadata import (
-    ColumnMetadata,
-    DiagnosticCode,
-    DiagnosticSeverity,
-    ForeignKeyMetadata,
-    Identifier,
-    ParseCompleteness,
-    ParseDiagnostic,
-    ParseResult,
-    PrimaryKeyMetadata,
-    QualifiedIdentifier,
-    RawSchemaMetadata,
-    SchemaDialect,
-    SchemaMetadata,
-    TableMetadata,
 )
 from src.models.schemas import (
     ApproveRequest,
@@ -47,6 +32,7 @@ from src.models.schemas import (
 
 __all__ = [
     "Base",
+    "ImportedSchemaModel",
     "UserModel",
     "UserSessionModel",
     "SemanticDatabaseModel",
@@ -70,18 +56,4 @@ __all__ = [
     "RefreshTokenRequest",
     "ApproveRequest",
     "ApproveResponse",
-    "SchemaDialect",
-    "Identifier",
-    "QualifiedIdentifier",
-    "SchemaMetadata",
-    "ColumnMetadata",
-    "PrimaryKeyMetadata",
-    "ForeignKeyMetadata",
-    "TableMetadata",
-    "RawSchemaMetadata",
-    "DiagnosticSeverity",
-    "DiagnosticCode",
-    "ParseDiagnostic",
-    "ParseCompleteness",
-    "ParseResult",
 ]
