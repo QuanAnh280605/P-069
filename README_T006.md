@@ -15,18 +15,35 @@ Task T006 bổ sung luồng tải lên PostgreSQL/MySQL schema dump, parse DDL a
 
 ### Cấu hình backend
 
-Tại thư mục gốc repository:
+Tại thư mục gốc repository, tạo `.env` và virtual environment:
+
+```bash
+cp .env.example .env
+python -m venv .venv
+```
+
+Kích hoạt virtual environment bằng Git Bash:
+
+```bash
+source .venv/Scripts/activate
+```
+
+Hoặc bằng PowerShell:
 
 ```powershell
-Copy-Item .env.example .env
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\Activate.ps1
+```
+
+Sau khi thấy `(.venv)` ở đầu terminal, cài dependencies:
+
+```bash
+python -m pip install -r requirements.txt
 ```
 
 Sinh Fernet key:
 
-```powershell
-.\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 Cập nhật `.env`:
@@ -53,9 +70,9 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 
 ### Data — PostgreSQL Metadata Store
 
-```powershell
+```bash
 docker compose -f docker-compose.dev.yml up postgres pgweb -d
-.\.venv\Scripts\alembic.exe upgrade head
+python -m alembic upgrade head
 ```
 
 - PostgreSQL: `localhost:5432`.
@@ -64,8 +81,8 @@ docker compose -f docker-compose.dev.yml up postgres pgweb -d
 
 ### Backend
 
-```powershell
-.\.venv\Scripts\uvicorn.exe src.main:app --reload --reload-dir src --host 0.0.0.0 --port 8000
+```bash
+python -m uvicorn src.main:app --reload --reload-dir src --host 0.0.0.0 --port 8000
 ```
 
 - Health check: `http://localhost:8000/health`.
@@ -73,7 +90,7 @@ docker compose -f docker-compose.dev.yml up postgres pgweb -d
 
 Hoặc chạy backend bằng Docker:
 
-```powershell
+```bash
 docker compose -f docker-compose.dev.yml up postgres backend pgweb --build
 ```
 
@@ -83,8 +100,8 @@ Không chạy đồng thời backend local và Docker trên port `8000`.
 
 Mở terminal khác:
 
-```powershell
-Set-Location frontend
+```bash
+cd frontend
 npm ci
 npm run dev
 ```
@@ -169,28 +186,28 @@ Route: `/semantic/drafts/{draft_id}/review`.
 
 ### Regression tests T006
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_models/test_schema_metadata.py -q
-.\.venv\Scripts\python.exe -m pytest tests/test_services/test_sql_dump_scanner.py -q
-.\.venv\Scripts\python.exe -m pytest tests/test_services/test_sql_dump_parser.py -q
-.\.venv\Scripts\python.exe -m pytest tests/test_services/test_preview_draft_store.py -q
-.\.venv\Scripts\python.exe -m pytest tests/test_api/test_import_dump_preview.py -q
+```bash
+python -m pytest tests/test_models/test_schema_metadata.py -q
+python -m pytest tests/test_services/test_sql_dump_scanner.py -q
+python -m pytest tests/test_services/test_sql_dump_parser.py -q
+python -m pytest tests/test_services/test_preview_draft_store.py -q
+python -m pytest tests/test_api/test_import_dump_preview.py -q
 ```
 
 ### Full backend checks
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\ruff.exe check src tests
-.\.venv\Scripts\ruff.exe format --check src tests
+```bash
+python -m pytest -q
+python -m ruff check src tests
+python -m ruff format --check src tests
 ```
 
 Kết quả tham chiếu: `134 tests passed`, Ruff check/format passed.
 
 ### Frontend checks
 
-```powershell
-Set-Location frontend
+```bash
+cd frontend
 npm run lint
 npm run build
 ```
