@@ -1,9 +1,15 @@
+import os
 from unittest.mock import AsyncMock
 
+from cryptography.fernet import Fernet
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+# Ensure ENCRYPTION_KEY is configured for unit/integration tests
+if not os.environ.get("ENCRYPTION_KEY"):
+    os.environ["ENCRYPTION_KEY"] = Fernet.generate_key().decode("utf-8")
 
 from src.main import app
 from src.models.db import Base, UserModel

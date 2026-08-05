@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import ImportedSchemaList from '@/components/ImportedSchemaList';
+import LiveDbList from '@/components/LiveDbList';
 import SqlDumpPreviewUploader from '@/components/SqlDumpPreviewUploader';
-import { getLocalLayers, updateLayer, deleteLayer, SemanticLayerData } from '@/lib/api';
+import { getLocalLayers, updateLayer, deleteLayer, connectLiveTargetDb, SemanticLayerData } from '@/lib/api';
 import {
   Database,
   PlusCircle,
@@ -35,18 +36,38 @@ export default function DashboardPage() {
   const [connUrl, setConnUrl] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<number>(0); // 0: Idle, 1: Introspect, 2: Enrich, 3: Metrics, 4: Done
+  const [liveDbRevision, setLiveDbRevision] = useState(0);
+  const [liveDbError, setLiveDbError] = useState('');
 
   useEffect(() => {
     setMounted(true);
     setLayers(getLocalLayers());
   }, []);
 
-  const handleStartAnalysis = (e: React.FormEvent) => {
+  const handleStartAnalysis = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!dbName.trim() || !connUrl.trim()) return;
 
     setIsAnalyzing(true);
     setAnalysisStep(1);
+    setLiveDbError('');
+
+    if (token) {
+      try {
+        await connectLiveTargetDb(dbName.trim(), dbType, connUrl.trim(), token);
+        setAnalysisStep(4);
+        setLiveDbRevision((rev) => rev + 1);
+        setDbName('');
+        setConnUrl('');
+        setIsAnalyzing(false);
+        return;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Kết nối và trích xuất schema thất bại';
+        setLiveDbError(msg);
+        setIsAnalyzing(false);
+        return;
+      }
+    }
 
     // Simulate 3-step progress feedback: Introspect -> Enrich -> Metrics
     setTimeout(() => {
@@ -221,6 +242,8 @@ export default function DashboardPage() {
 
       <SqlDumpPreviewUploader onSaved={() => setSavedSchemaRevision((value) => value + 1)} />
 
+      {token && <ImportedSchemaList token={token} refreshKey={savedSchemaRevision} />}
+
       {/* Section 1: Connect New Database Form */}
       <div className="glass-card rounded-2xl p-6 md:p-8 border border-indigo-500/20 shadow-xl">
         <div className="flex items-center gap-3 pb-4 mb-6 border-b border-slate-800">
@@ -334,6 +357,11 @@ export default function DashboardPage() {
               </>
             )}
           </button>
+          {liveDbError && (
+            <p className="mt-2 text-xs font-semibold text-red-400 bg-red-500/10 border border-red-500/20 p-2.5 rounded-xl">
+              ❌ {liveDbError}
+            </p>
+          )}
         </form>
 
         {/* Progress Feedback Indicator */}
@@ -401,7 +429,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {token && <ImportedSchemaList token={token} refreshKey={savedSchemaRevision} />}
+      {token && <LiveDbList token={token} refreshKey={liveDbRevision} />}
 
       {/* Section 2: List of Created Semantic Layers */}
       <div className="glass-card rounded-2xl p-6 md:p-8 border border-indigo-500/20 shadow-xl">

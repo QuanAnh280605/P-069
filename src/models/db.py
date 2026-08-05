@@ -65,6 +65,9 @@ class UserModel(Base):
     imported_schemas: Mapped[list["ImportedSchemaModel"]] = relationship(
         "ImportedSchemaModel", back_populates="creator", cascade="all, delete-orphan"
     )
+    live_target_dbs: Mapped[list["LiveTargetDbModel"]] = relationship(
+        "LiveTargetDbModel", back_populates="creator", cascade="all, delete-orphan"
+    )
     created_metrics: Mapped[list["SemanticMetricModel"]] = relationship("SemanticMetricModel", back_populates="creator")
 
 
@@ -106,6 +109,26 @@ class ImportedSchemaModel(Base):
     )
 
     creator: Mapped["UserModel"] = relationship("UserModel", back_populates="imported_schemas")
+
+
+class LiveTargetDbModel(Base):
+    """Persisted technical schema metadata introspected from a live target database."""
+
+    __tablename__ = "live_target_databases"
+    __table_args__ = (Index("idx_live_target_dbs_owner_updated", "created_by", "updated_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    dialect: Mapped[str] = mapped_column(String(50), nullable=False)
+    conn_url_enc: Mapped[str] = mapped_column(Text, nullable=False)
+    schema_metadata: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    creator: Mapped["UserModel"] = relationship("UserModel", back_populates="live_target_dbs")
 
 
 class SemanticDatabaseModel(Base):

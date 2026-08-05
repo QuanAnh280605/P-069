@@ -208,3 +208,43 @@ class ImportedSchemaResponse(ImportedSchemaSummaryResponse):
     """Full persisted SQL dump schema metadata."""
 
     raw_schema: RawSchemaMetadata
+
+
+# ---------------------------------------------------------------------------
+# Live Target DB Schemas
+# ---------------------------------------------------------------------------
+
+
+class LiveDbConnectRequest(BaseModel):
+    """Request payload to connect and introspect a live target database."""
+
+    display_name: str = Field(..., min_length=1, max_length=200)
+    dialect: SchemaDialect
+    conn_url: str = Field(..., min_length=5, max_length=500)
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        """Trim and reject empty display name."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Display name cannot be empty")
+        return normalized
+
+
+class LiveDbSummaryResponse(BaseModel):
+    """Summary representation of a persisted live target database connection."""
+
+    id: int
+    display_name: str
+    dialect: SchemaDialect
+    table_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class LiveDbResponse(LiveDbSummaryResponse):
+    """Full representation of a persisted live target database including raw schema."""
+
+    raw_schema: RawSchemaMetadata
+

@@ -15,6 +15,9 @@ from src.models.schemas import (
     ImportedSchemaCreateRequest,
     ImportedSchemaResponse,
     ImportedSchemaSummaryResponse,
+    LiveDbConnectRequest,
+    LiveDbResponse,
+    LiveDbSummaryResponse,
     MetricCreate,
     MetricResponse,
     MetricUpdate,
@@ -29,6 +32,12 @@ from src.services.imported_schema_service import (
     delete_imported_schema,
     get_imported_schema,
     list_imported_schemas,
+)
+from src.services.live_db_service import (
+    create_live_target_db,
+    delete_live_target_db,
+    get_live_target_db,
+    list_live_target_dbs,
 )
 from src.services.schema_ingestion import parse_sql_dump_preview
 from src.services.sql_dump_parser_models import SqlDumpParseError
@@ -114,6 +123,63 @@ async def remove_saved_imported_schema(
     """Delete one user-owned imported schema."""
     if not await delete_imported_schema(db, current_user.id, schema_id):
         raise HTTPException(status_code=404, detail="Saved schema not found")
+
+
+# ---------------------------------------------------------------------------
+# Live Target Database Management (Zero-Data Introspection)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/semantic/db/connect", response_model=LiveDbResponse, status_code=201)
+async def connect_live_target_db(
+    body: LiveDbConnectRequest,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> LiveDbResponse:
+    """Connect to a live target database, encrypt URL, introspect schema without SELECT data, and persist."""
+    try:
+        return await create_live_target_db(
+            db,
+            current_user.id,
+            body.display_name,
+            body.dialect,
+            body.conn_url,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to connect and introspect target database: {exc}") from exc
+
+
+@router.get("/semantic/db/saved", response_model=list[LiveDbSummaryResponse])
+async def get_saved_live_target_dbs(
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> list[LiveDbSummaryResponse]:
+    """List live target databases connected and saved by the user."""
+    return await list_live_target_dbs(db, current_user.id)
+
+
+@router.get("/semantic/db/saved/{db_id}", response_model=LiveDbResponse)
+async def get_saved_live_target_db(
+    db_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> LiveDbResponse:
+    """Get details and raw schema metadata of a saved live target database."""
+    record = await get_live_target_db(db, current_user.id, db_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Saved live database not found")
+    return record
+
+
+@router.delete("/semantic/db/saved/{db_id}", status_code=204)
+async def remove_saved_live_target_db(
+    db_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    """Delete a saved live target database connection."""
+    if not await delete_live_target_db(db, current_user.id, db_id):
+        raise HTTPException(status_code=404, detail="Saved live database not found")
 
 
 # ---------------------------------------------------------------------------
