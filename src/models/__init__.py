@@ -20,6 +20,7 @@ from src.models.schemas import (
     MetricCreate,
     MetricResponse,
     MetricUpdate,
+    RefreshTokenRequest,
     SemanticColumnUpdate,
     SemanticTableUpdate,
     TokenResponse,
@@ -50,6 +51,7 @@ __all__ = [
     "GenerateRequest",
     "GenerateResponse",
     "GoogleAuthRequest",
+    "RefreshTokenRequest",
     "ApproveRequest",
     "ApproveResponse",
 ]

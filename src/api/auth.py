@@ -1,6 +1,6 @@
-"""Authentication routes for User Registration, Login, and Google OAuth.
+﻿"""Authentication routes for User Registration, Login, and Google OAuth.
 
-Provides JWT token issuance and user management persisted to Metadata Store DB.
+Provides JWT access token and refresh token issuance with session management.
 """
 
 import hashlib
@@ -22,6 +22,7 @@ from src.config import get_settings
 from src.models.db import UserModel, UserSessionModel
 from src.models.schemas import (
     GoogleAuthRequest,
+    RefreshTokenRequest,
     UserLoginRequest,
     UserProfileResponse,
     UserRegisterRequest,
@@ -34,7 +35,8 @@ auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 DEFAULT_SECRET_KEY = "dev-secret-key-change-in-prod-semantic-layer-2026"
 ALGORITHM = "HS256"
-TOKEN_EXPIRE_SECONDS = 7 * 24 * 3600  # 7 days
+ACCESS_TOKEN_EXPIRE_SECONDS = 7 * 24 * 3600  # 7 days
+REFRESH_TOKEN_EXPIRE_SECONDS = 30 * 24 * 3600  # 30 days
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
 
@@ -70,24 +72,40 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return hmac.compare_digest(legacy_hash, hashed_password)
 
 
-def create_access_token(user: UserModel) -> str:
-    """Create a signed JWT access token for user model."""
+def _build_jwt_payload(user: UserModel, token_type: str, expires_in: int) -> dict:
+    """Build common JWT payload dict for access or refresh token."""
     now = datetime.now(UTC)
-    payload = {
+    return {
         "sub": str(user.id),
-        "email": user.email,
-        "username": user.username,
-        "name": user.full_name or user.username,
-        "role": user.role,
+        "type": token_type,
         "jti": uuid.uuid4().hex,
         "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(seconds=TOKEN_EXPIRE_SECONDS)).timestamp()),
+        "exp": int((now + timedelta(seconds=expires_in)).timestamp()),
     }
+
+
+def create_access_token(user: UserModel) -> str:
+    """Create a signed JWT access token for user model."""
+    payload = _build_jwt_payload(user, "access", ACCESS_TOKEN_EXPIRE_SECONDS)
+    payload.update(
+        {
+            "email": user.email,
+            "username": user.username,
+            "name": user.full_name or user.username,
+            "role": user.role,
+        }
+    )
+    return jwt.encode(payload, _get_secret_key(), algorithm=ALGORITHM)
+
+
+def create_refresh_token(user: UserModel) -> str:
+    """Create a signed JWT refresh token with longer expiry (30 days)."""
+    payload = _build_jwt_payload(user, "refresh", REFRESH_TOKEN_EXPIRE_SECONDS)
     return jwt.encode(payload, _get_secret_key(), algorithm=ALGORITHM)
 
 
 def decode_jwt_token(token: str) -> dict:
-    """Decode and validate a JWT access token."""
+    """Decode and validate a JWT token."""
     try:
         return jwt.decode(token, _get_secret_key(), algorithms=[ALGORITHM])
     except jwt.ExpiredSignatureError as err:
@@ -121,15 +139,20 @@ def _verify_google_credential(credential: str) -> dict:
             ) from err
 
 
+def _hash_token(token: str) -> str:
+    """SHA-256 hash a token string for session lookup."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 async def _record_user_session(
     db: AsyncSession,
     user_id: int,
-    token: str,
+    refresh_token: str,
     request: Request,
 ) -> UserSessionModel:
-    """Create and persist a UserSessionModel record into Metadata Store DB."""
-    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    expires_at = datetime.now(UTC) + timedelta(seconds=TOKEN_EXPIRE_SECONDS)
+    """Create and persist a session record with refresh token hash."""
+    token_hash = _hash_token(refresh_token)
+    expires_at = datetime.now(UTC) + timedelta(seconds=REFRESH_TOKEN_EXPIRE_SECONDS)
     user_agent = request.headers.get("user-agent", "Unknown Browser")
     ip_address = request.client.host if request.client else "127.0.0.1"
 
@@ -147,12 +170,13 @@ async def _record_user_session(
     return session
 
 
-def _build_token_response(token: str, user: UserModel) -> dict:
-    """Build standard token response payload."""
+def _build_token_response(access_token: str, refresh_token: str, user: UserModel) -> dict:
+    """Build standard token response with both access and refresh tokens."""
     return {
-        "access_token": token,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
-        "expires_in": TOKEN_EXPIRE_SECONDS,
+        "expires_in": ACCESS_TOKEN_EXPIRE_SECONDS,
         "user": {
             "id": user.id,
             "email": user.email,
@@ -188,23 +212,44 @@ async def _create_user(db: AsyncSession, email: str, username: str, password: st
     return user
 
 
+def _issue_tokens(user: UserModel) -> tuple[str, str]:
+    """Create access and refresh token pair for user."""
+    return create_access_token(user), create_refresh_token(user)
+
+
+async def _find_session_by_refresh_token(db: AsyncSession, refresh_token: str) -> UserSessionModel | None:
+    """Look up session by refresh token hash."""
+    token_hash = _hash_token(refresh_token)
+    stmt = select(UserSessionModel).where(UserSessionModel.refresh_token_hash == token_hash)
+    res = await db.execute(stmt)
+    return res.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Auth Endpoints
+# ---------------------------------------------------------------------------
+
+
 @auth_router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def register_user(
     body: UserRegisterRequest,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Register a new user account and persist to Metadata Store DB."""
+    """Register a new user and issue JWT access + refresh tokens."""
     stmt = select(UserModel).where(UserModel.email == body.email)
     existing_email = await db.execute(stmt)
     if existing_email.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email đã được đăng ký")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered",
+        )
 
     username = await _ensure_unique_username(db, body.username)
     user = await _create_user(db, body.email, username, body.password, body.full_name or username)
-    token = create_access_token(user)
-    await _record_user_session(db, user.id, token, request)
-    return _build_token_response(token, user)
+    access_token, refresh_token = _issue_tokens(user)
+    await _record_user_session(db, user.id, refresh_token, request)
+    return _build_token_response(access_token, refresh_token, user)
 
 
 @auth_router.post("/login", response_model=dict)
@@ -213,7 +258,7 @@ async def login_user(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Authenticate user credentials and issue JWT access token."""
+    """Authenticate user credentials and issue JWT access + refresh tokens."""
     stmt = select(UserModel).where(
         (UserModel.email == body.email_or_username) | (UserModel.username == body.email_or_username)
     )
@@ -223,12 +268,12 @@ async def login_user(
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email/Tên tài khoản hoặc mật khẩu không chính xác",
+            detail="Invalid credentials",
         )
 
-    token = create_access_token(user)
-    await _record_user_session(db, user.id, token, request)
-    return _build_token_response(token, user)
+    access_token, refresh_token = _issue_tokens(user)
+    await _record_user_session(db, user.id, refresh_token, request)
+    return _build_token_response(access_token, refresh_token, user)
 
 
 async def _get_or_create_google_user(db: AsyncSession, email: str, name: str) -> UserModel:
@@ -261,21 +306,79 @@ async def google_auth(
         )
 
     user = await _get_or_create_google_user(db, email, name)
-    token = create_access_token(user)
-    await _record_user_session(db, user.id, token, request)
-    return _build_token_response(token, user)
+    access_token, refresh_token = _issue_tokens(user)
+    await _record_user_session(db, user.id, refresh_token, request)
+    return _build_token_response(access_token, refresh_token, user)
+
+
+@auth_router.post("/refresh", response_model=dict)
+async def refresh_tokens(
+    body: RefreshTokenRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Rotate tokens: validate refresh token, revoke old session, issue new pair."""
+    payload = decode_jwt_token(body.refresh_token)
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type: expected refresh token",
+        )
+
+    session = await _find_session_by_refresh_token(db, body.refresh_token)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token session not found",
+        )
+    if session.revoked:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked",
+        )
+    expires = session.expires_at.replace(tzinfo=UTC) if session.expires_at.tzinfo is None else session.expires_at
+    if expires < datetime.now(UTC):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token expired",
+        )
+
+    session.revoked = True
+    await db.commit()
+
+    user = await db.get(UserModel, session.user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    access_token, refresh_token = _issue_tokens(user)
+    await _record_user_session(db, user.id, refresh_token, request)
+    return _build_token_response(access_token, refresh_token, user)
 
 
 async def get_current_user(
     authorization: Annotated[str | None, Header()] = None,
     db: AsyncSession = Depends(get_db_session),
 ) -> UserModel:
-    """Dependency: validate Bearer token and return the authenticated UserModel."""
+    """Dependency: validate Bearer access token and return the authenticated user."""
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Bearer token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Bearer token",
+        )
 
     token = authorization.split(" ")[1]
     payload = decode_jwt_token(token)
+
+    if payload.get("type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type: expected access token",
+        )
+
     try:
         user_id = int(payload["sub"])
     except (KeyError, ValueError) as err:
@@ -286,7 +389,10 @@ async def get_current_user(
 
     user = await db.get(UserModel, user_id)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
     return user
 
 
@@ -309,17 +415,36 @@ async def get_current_user_profile(
 
 @auth_router.post("/logout", status_code=status.HTTP_200_OK)
 async def logout_user(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Revoke active user session in Metadata Store DB upon logout."""
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ")[1]
-        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    """Revoke active user session upon logout.
+
+    Accepts refresh_token in request body or falls back to Bearer token in header.
+    """
+    refresh_token = None
+    try:
+        body_bytes = await request.body()
+        if body_bytes:
+            import json
+
+            parsed = json.loads(body_bytes)
+            refresh_token = parsed.get("refresh_token")
+    except Exception:
+        logger.debug("Could not parse logout request body")
+
+    if not refresh_token and authorization and authorization.startswith("Bearer "):
+        refresh_token = authorization.split(" ")[1]
+
+    if refresh_token:
+        token_hash = _hash_token(refresh_token)
         stmt = select(UserSessionModel).where(UserSessionModel.refresh_token_hash == token_hash)
         res = await db.execute(stmt)
         sess = res.scalar_one_or_none()
         if sess:
             sess.revoked = True
             await db.commit()
+
     return {"message": "Logged out successfully"}
+
