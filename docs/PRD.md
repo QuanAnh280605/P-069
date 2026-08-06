@@ -30,7 +30,7 @@
 
 | Feature ID | Tên tính năng | Mô tả chi tiết | Mức ưu tiên |
 |------------|---------------|----------------|-------------|
-| **F-01** | Database Schema Introspection | Tự động kết nối Target DB (Postgres/MySQL/SQLite), dùng SQLAlchemy Inspector lấy tên bảng, cột, kiểu dữ liệu, khóa ngoại và giá trị mẫu. **Chỉ đọc schema metadata — không thực thi query data.** | **P0 (Must-Have)** |
+| **F-01** | Database Schema Introspection | Tự động kết nối Target DB (Postgres/MySQL/SQLite), dùng SQLAlchemy Inspector lấy tên bảng, cột, kiểu dữ liệu, khóa chính và khóa ngoại. **Chỉ đọc schema metadata — không thực thi query data hoặc lấy giá trị mẫu.** | **P0 (Must-Have)** |
 | **F-02** | LLM Business Name Enrichment | AI phân tích tên bảng/cột kỹ thuật và sinh tên nghiệp vụ (`business_name`) tiếng Việt rõ nghĩa kèm mô tả chi tiết cho từng bảng và cột. | **P0 (Must-Have)** |
 | **F-03** | Business Metric Suggestion | AI phân tích cấu trúc bảng/cột để tự động đề xuất chỉ số kinh doanh (VD: "Tổng doanh thu", "Tỷ lệ chuyển đổi đơn hàng") kèm SQL template tham chiếu. | **P0 (Must-Have)** |
 | **F-04** | HITL Review & Editing | Giao diện/API cho phép BA/DA xem lại toàn bộ draft AI đề xuất, chỉnh sửa inline tên nghiệp vụ, mô tả cột và duyệt/từ chối/chỉnh sửa các Business Metrics trước khi lưu chính thức. | **P0 (Must-Have)** |

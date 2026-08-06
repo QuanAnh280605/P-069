@@ -1,0 +1,199 @@
+"""Tests for zero-data live schema extraction."""
+
+from __future__ import annotations
+
+import sqlite3
+from datetime import datetime
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import Integer
+from sqlalchemy.engine import URL, Connection
+from sqlalchemy.engine.reflection import Inspector
+from sqlalchemy.exc import SQLAlchemyError
+
+from src.models.raw_schema import LiveSchemaRequest, SchemaExtractionResult, TableMetadata
+from src.services.database import decrypt_conn_url, encrypt_conn_url
+from src.services.introspection import (
+    ConnectionIntrospectionError,
+    SchemaIntrospectionError,
+    UnsupportedDatabaseTypeError,
+    _normalize_url,
+    _read_live_schema,
+    extract_raw_schema,
+)
+
+TEST_FERNET_KEY = "FiqLMBulPbTUShiUnFKXgt2OHpPv9Y3mBstowcTSKRc="
+SQLITE_SCHEMA = """
+CREATE TABLE customers (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT DEFAULT 'none@example.com'
+);
+CREATE UNIQUE INDEX idx_cust_email ON customers (email);
+CREATE TABLE orders (
+    order_id INTEGER NOT NULL,
+    customer_id INTEGER NOT NULL,
+    amount NUMERIC DEFAULT 0.00,
+    PRIMARY KEY (order_id, customer_id),
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+"""
+
+
+@pytest.fixture
+def sqlite_memory_url() -> str:
+    """Keep a named in-memory SQLite database alive for async inspection."""
+    database_name = f"raw_schema_{uuid4().hex}"
+    memory_uri = f"file:{database_name}?mode=memory&cache=shared"
+    anchor = sqlite3.connect(memory_uri, uri=True)
+    anchor.executescript(SQLITE_SCHEMA)
+    try:
+        yield f"sqlite:///file:{database_name}?mode=memory&cache=shared&uri=true"
+    finally:
+        anchor.close()
+
+
+def _table(tables: list[TableMetadata], name: str) -> TableMetadata:
+    return next(table for table in tables if table["table_name"] == name)
+
+
+async def _extract_sqlite(url: str) -> SchemaExtractionResult:
+    encrypted_url = encrypt_conn_url(url, key=TEST_FERNET_KEY)
+    request: LiveSchemaRequest = {
+        "conn_url_enc": encrypted_url,
+        "db_type": "sqlite",
+        "connection_id": 42,
+    }
+    with patch("src.services.introspection.decrypt_conn_url") as decrypt:
+        decrypt.side_effect = lambda value: decrypt_conn_url(value, key=TEST_FERNET_KEY)
+        return await extract_raw_schema(request)
+
+
+def _inspector() -> MagicMock:
+    inspector = MagicMock(spec=Inspector)
+    inspector.default_schema_name = "public"
+    inspector.get_table_names.return_value = ["orders"]
+    inspector.get_columns.return_value = [{"name": "id", "type": Integer(), "nullable": False, "default": None}]
+    inspector.get_pk_constraint.return_value = {"constrained_columns": ["id"]}
+    inspector.get_foreign_keys.return_value = []
+    inspector.get_indexes.return_value = []
+    return inspector
+
+
+@pytest.mark.asyncio
+async def test_live_sqlite_returns_complete_zero_data_contract(sqlite_memory_url: str) -> None:
+    """Return normalized metadata without row counts or sample values."""
+    result = await _extract_sqlite(sqlite_memory_url)
+    raw_schema = result["raw_schema"]
+    source = raw_schema["source"]
+    assert source["type"] == "live_connection"
+    assert source["connection_id"] == 42
+    assert datetime.fromisoformat(source["extracted_at"].replace("Z", "+00:00")).tzinfo
+    orders = _table(raw_schema["tables"], "orders")
+    assert orders["schema_name"] == "main"
+    assert orders["primary_keys"] == ["order_id", "customer_id"]
+    assert orders["row_count_estimate"] is None
+    customer_id = next(item for item in orders["columns"] if item["column_name"] == "customer_id")
+    assert customer_id["sample_values"] is None
+    assert customer_id["is_foreign_key"] is True
+    assert customer_id["references"] == {"table": "customers", "column": "id", "schema": "main"}
+
+
+@pytest.mark.asyncio
+async def test_live_sqlite_returns_explicit_index_and_relationship(sqlite_memory_url: str) -> None:
+    """Preserve explicit indexes and derive one relationship per FK pair."""
+    result = await _extract_sqlite(sqlite_memory_url)
+    raw_schema = result["raw_schema"]
+    customers = _table(raw_schema["tables"], "customers")
+    assert customers["indexes"] == [{"index_name": "idx_cust_email", "columns": ["email"], "is_unique": True}]
+    assert raw_schema["relationships"] == [
+        {
+            "from_table": "orders",
+            "from_column": "customer_id",
+            "to_table": "customers",
+            "to_column": "id",
+            "relationship_type": "many_to_one",
+        }
+    ]
+
+
+def test_mysql_inspector_uses_only_schema_metadata_methods() -> None:
+    """Pass current database to the allowed SQLAlchemy Inspector methods."""
+    inspector = _inspector()
+    connection = cast(
+        Connection,
+        SimpleNamespace(engine=SimpleNamespace(url=URL.create("mysql", database="sales"))),
+    )
+    request: LiveSchemaRequest = {
+        "conn_url_enc": "ciphertext",
+        "db_type": "mysql",
+        "connection_id": 7,
+    }
+    with patch("src.services.introspection.inspect", return_value=inspector):
+        result = _read_live_schema(connection, request)
+    assert result["raw_schema"]["tables"][0]["schema_name"] == "sales"
+    inspector.get_table_names.assert_called_once_with(schema="sales")
+    inspector.get_columns.assert_called_once_with("orders", schema="sales")
+    inspector.get_pk_constraint.assert_called_once_with("orders", schema="sales")
+    inspector.get_foreign_keys.assert_called_once_with("orders", schema="sales")
+    inspector.get_indexes.assert_called_once_with("orders", schema="sales")
+
+
+def test_partial_live_introspection_returns_sanitized_warning() -> None:
+    """Skip one inaccessible table while preserving successful metadata."""
+    inspector = _inspector()
+    inspector.get_table_names.return_value = ["denied", "orders"]
+    inspector.get_columns.side_effect = [
+        SQLAlchemyError("permission denied for secret"),
+        [{"name": "id", "type": Integer(), "nullable": False, "default": None}],
+    ]
+    connection = cast(Connection, SimpleNamespace(engine=SimpleNamespace(url=URL.create("postgresql"))))
+    request: LiveSchemaRequest = {
+        "conn_url_enc": "ciphertext",
+        "db_type": "postgresql",
+        "connection_id": 8,
+    }
+    with patch("src.services.introspection.inspect", return_value=inspector):
+        result = _read_live_schema(connection, request)
+    assert [table["table_name"] for table in result["raw_schema"]["tables"]] == ["orders"]
+    assert result["warnings"] == ["Could not inspect table 'denied' (SQLAlchemyError)."]
+    assert "secret" not in result["warnings"][0]
+
+
+def test_all_live_tables_failing_raises_schema_error() -> None:
+    """Fail the extraction when no listed table can be inspected."""
+    inspector = _inspector()
+    inspector.get_columns.side_effect = SQLAlchemyError("permission denied")
+    connection = cast(Connection, SimpleNamespace(engine=SimpleNamespace(url=URL.create("postgresql"))))
+    request: LiveSchemaRequest = {
+        "conn_url_enc": "ciphertext",
+        "db_type": "postgresql",
+        "connection_id": 8,
+    }
+    with (
+        patch("src.services.introspection.inspect", return_value=inspector),
+        pytest.raises(SchemaIntrospectionError),
+    ):
+        _read_live_schema(connection, request)
+
+
+def test_normalize_url_rejects_mismatched_database_type() -> None:
+    """Reject a URL whose dialect conflicts with the declared type."""
+    with pytest.raises(UnsupportedDatabaseTypeError):
+        _normalize_url("sqlite:///:memory:", "postgresql")
+
+
+@pytest.mark.asyncio
+async def test_live_extraction_rejects_non_positive_connection_id() -> None:
+    """Require the persisted semantic database ID in the source contract."""
+    request: LiveSchemaRequest = {
+        "conn_url_enc": "ciphertext",
+        "db_type": "sqlite",
+        "connection_id": 0,
+    }
+    with pytest.raises(ConnectionIntrospectionError, match="valid connection ID"):
+        await extract_raw_schema(request)

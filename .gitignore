@@ -59,4 +59,9 @@ out/
 .ai-log/*.jsonl
 .ai-log/archive/
 
+# Plan files
+plan*.md
+plan_*.md
+
 .hyper
+
