@@ -2,6 +2,7 @@
 
 from src.models.db import (
     Base,
+    ImportedSchemaModel,
     SemanticColumnModel,
     SemanticDatabaseModel,
     SemanticMetricModel,
@@ -31,6 +32,7 @@ from src.models.schemas import (
 
 __all__ = [
     "Base",
+    "ImportedSchemaModel",
     "UserModel",
     "UserSessionModel",
     "SemanticDatabaseModel",

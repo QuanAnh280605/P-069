@@ -12,6 +12,7 @@ Includes tables:
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -61,6 +62,9 @@ class UserModel(Base):
         "UserSessionModel", back_populates="user", cascade="all, delete-orphan"
     )
     databases: Mapped[list["SemanticDatabaseModel"]] = relationship("SemanticDatabaseModel", back_populates="creator")
+    imported_schemas: Mapped[list["ImportedSchemaModel"]] = relationship(
+        "ImportedSchemaModel", back_populates="creator", cascade="all, delete-orphan"
+    )
     created_metrics: Mapped[list["SemanticMetricModel"]] = relationship("SemanticMetricModel", back_populates="creator")
 
 
@@ -83,6 +87,25 @@ class UserSessionModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     user: Mapped["UserModel"] = relationship("UserModel", back_populates="sessions")
+
+
+class ImportedSchemaModel(Base):
+    """Persisted technical schema metadata imported from an SQL dump."""
+
+    __tablename__ = "imported_schemas"
+    __table_args__ = (Index("idx_imported_schemas_owner_updated", "created_by", "updated_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    dialect: Mapped[str] = mapped_column(String(50), nullable=False)
+    schema_metadata: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    creator: Mapped["UserModel"] = relationship("UserModel", back_populates="imported_schemas")
 
 
 class SemanticDatabaseModel(Base):

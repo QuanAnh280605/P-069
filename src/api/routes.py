@@ -1,23 +1,119 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import NoReturn
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth import get_current_user
+from src.models.db import UserModel
+from src.models.schema_metadata import DiagnosticCode, SchemaDialect
 from src.models.schemas import (
     ApproveRequest,
     ApproveResponse,
     GenerateRequest,
     GenerateResponse,
+    ImportedSchemaCreateRequest,
+    ImportedSchemaResponse,
+    ImportedSchemaSummaryResponse,
     MetricCreate,
     MetricResponse,
     MetricUpdate,
     SemanticColumnUpdate,
     SemanticTableUpdate,
+    SqlDumpPreviewResponse,
 )
 from src.services.database import get_db_session
 from src.services.export_service import build_semantic_layer_dict, serialize_to_json, serialize_to_yaml
+from src.services.imported_schema_service import (
+    create_imported_schema,
+    delete_imported_schema,
+    get_imported_schema,
+    list_imported_schemas,
+)
+from src.services.schema_ingestion import parse_sql_dump_preview
+from src.services.sql_dump_parser_models import SqlDumpParseError
+from src.services.sql_dump_scanner_models import SqlDumpScanError
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+
+@router.post("/semantic/import/preview", response_model=SqlDumpPreviewResponse)
+async def import_sql_dump_preview(
+    request: Request,
+    filename: str = Header(..., alias="X-Filename"),
+    dialect: SchemaDialect | None = Header(default=None, alias="X-SQL-Dialect"),
+) -> SqlDumpPreviewResponse:
+    """Parse an SQL dump body into technical schema metadata."""
+    _validate_preview_content_type(request)
+    try:
+        return await parse_sql_dump_preview(request.stream(), filename, dialect)
+    except (SqlDumpScanError, SqlDumpParseError) as error:
+        _raise_preview_parse_error(error)
+
+
+def _validate_preview_content_type(request: Request) -> None:
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+    if content_type not in {"application/sql", "text/plain"}:
+        raise HTTPException(status_code=415, detail="SQL dump content type is required")
+
+
+def _raise_preview_parse_error(error: SqlDumpScanError | SqlDumpParseError) -> NoReturn:
+    diagnostic = error.diagnostic
+    raise HTTPException(
+        status_code=_preview_error_status(diagnostic.code),
+        detail=diagnostic.model_dump(mode="json"),
+    ) from error
+
+
+def _preview_error_status(code: DiagnosticCode) -> int:
+    if code in {DiagnosticCode.FILE_TOO_LARGE, DiagnosticCode.STATEMENT_TOO_LARGE}:
+        return 413
+    if code in {DiagnosticCode.EMPTY_FILE, DiagnosticCode.INVALID_EXTENSION, DiagnosticCode.INVALID_ENCODING}:
+        return 400
+    return 422
+
+
+@router.post("/semantic/import/saved", response_model=ImportedSchemaResponse, status_code=201)
+async def save_imported_schema(
+    body: ImportedSchemaCreateRequest,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ImportedSchemaResponse:
+    """Persist parsed schema metadata under a user-provided display name."""
+    return await create_imported_schema(db, current_user.id, body.display_name, body.raw_schema)
+
+
+@router.get("/semantic/import/saved", response_model=list[ImportedSchemaSummaryResponse])
+async def get_saved_imported_schemas(
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> list[ImportedSchemaSummaryResponse]:
+    """List imported schemas owned by the authenticated user."""
+    return await list_imported_schemas(db, current_user.id)
+
+
+@router.get("/semantic/import/saved/{schema_id}", response_model=ImportedSchemaResponse)
+async def get_saved_imported_schema(
+    schema_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ImportedSchemaResponse:
+    """Load one user-owned imported schema for preview."""
+    record = await get_imported_schema(db, current_user.id, schema_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Saved schema not found")
+    return record
+
+
+@router.delete("/semantic/import/saved/{schema_id}", status_code=204)
+async def remove_saved_imported_schema(
+    schema_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    """Delete one user-owned imported schema."""
+    if not await delete_imported_schema(db, current_user.id, schema_id):
+        raise HTTPException(status_code=404, detail="Saved schema not found")
 
 
 # ---------------------------------------------------------------------------

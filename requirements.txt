@@ -28,6 +28,9 @@ aiosqlite>=0.20.0
 # Export & Utilities
 pyyaml>=6.0.0
 
+# SQL Dump Parsing
+sqlglot==30.13.0
+
 # Dev tools
 ruff>=0.8.0
 pytest>=8.0.0

@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import ImportedSchemaList from '@/components/ImportedSchemaList';
+import SqlDumpPreviewUploader from '@/components/SqlDumpPreviewUploader';
 import { getLocalLayers, updateLayer, deleteLayer, SemanticLayerData } from '@/lib/api';
 import {
   Database,
@@ -22,8 +24,9 @@ import {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, isLoading } = useAuth();
+  const { user, token, isLoading } = useAuth();
   const [layers, setLayers] = useState<SemanticLayerData[]>([]);
+  const [savedSchemaRevision, setSavedSchemaRevision] = useState(0);
   const [mounted, setMounted] = useState(false);
 
   // Form State
@@ -216,6 +219,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      <SqlDumpPreviewUploader onSaved={() => setSavedSchemaRevision((value) => value + 1)} />
+
       {/* Section 1: Connect New Database Form */}
       <div className="glass-card rounded-2xl p-6 md:p-8 border border-indigo-500/20 shadow-xl">
         <div className="flex items-center gap-3 pb-4 mb-6 border-b border-slate-800">
@@ -395,6 +400,8 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {token && <ImportedSchemaList token={token} refreshKey={savedSchemaRevision} />}
 
       {/* Section 2: List of Created Semantic Layers */}
       <div className="glass-card rounded-2xl p-6 md:p-8 border border-indigo-500/20 shadow-xl">

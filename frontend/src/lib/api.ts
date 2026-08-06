@@ -159,3 +159,140 @@ export function deleteLayer(id: string): void {
   const filtered = layers.filter((l) => l.id !== id);
   saveLocalLayers(filtered);
 }
+
+export interface SqlIdentifier {
+  raw_name: string;
+  normalized_name: string;
+  quoted: boolean;
+}
+
+export interface SqlDumpColumn {
+  column_name: SqlIdentifier;
+  ordinal_position: number;
+  raw_data_type: string;
+  data_type: string;
+  nullable: boolean;
+  default_expression: string | null;
+  primary_key: boolean;
+}
+
+export interface SqlDumpForeignKey {
+  constrained_columns: SqlIdentifier[];
+  referred_schema: SqlIdentifier;
+  referred_table: SqlIdentifier;
+  referred_columns: SqlIdentifier[];
+}
+
+export interface SqlDumpTable {
+  schema_name: SqlIdentifier;
+  table_name: SqlIdentifier;
+  columns: SqlDumpColumn[];
+  foreign_keys: SqlDumpForeignKey[];
+}
+
+export interface ParseDiagnostic {
+  severity: 'info' | 'warning' | 'error';
+  code: string;
+  message: string;
+  line: number | null;
+  column: number | null;
+}
+
+export interface SqlDumpPreview {
+  dialect: 'postgresql' | 'mysql';
+  raw_schema: {
+    contract_version: '1.0';
+    tables: SqlDumpTable[];
+  };
+  diagnostics: ParseDiagnostic[];
+}
+
+export interface ImportedSchemaSummary {
+  id: number;
+  display_name: string;
+  dialect: 'postgresql' | 'mysql';
+  table_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ImportedSchemaRecord extends ImportedSchemaSummary {
+  raw_schema: SqlDumpPreview['raw_schema'];
+}
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+
+export async function uploadSqlDumpPreview(
+  file: File,
+  dialect: '' | 'postgresql' | 'mysql',
+  token: string,
+): Promise<SqlDumpPreview> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/sql',
+    'X-Filename': file.name,
+  };
+  if (dialect) headers['X-SQL-Dialect'] = dialect;
+  const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/preview`, {
+    method: 'POST',
+    headers,
+    body: file,
+  });
+  if (!response.ok) throw new Error(await readPreviewError(response));
+  return response.json() as Promise<SqlDumpPreview>;
+}
+
+async function readPreviewError(response: Response): Promise<string> {
+  const payload = (await response.json().catch(() => null)) as {
+    detail?: string | { message?: string };
+  } | null;
+  if (typeof payload?.detail === 'string') return payload.detail;
+  return payload?.detail?.message || `Upload failed (${response.status})`;
+}
+
+export async function saveImportedSchema(
+  displayName: string,
+  preview: SqlDumpPreview,
+  token: string,
+): Promise<ImportedSchemaRecord> {
+  return requestImportedSchema('/api/v1/semantic/import/saved', token, {
+    method: 'POST',
+    body: JSON.stringify({ display_name: displayName, raw_schema: preview.raw_schema }),
+  });
+}
+
+export async function listImportedSchemas(token: string): Promise<ImportedSchemaSummary[]> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/saved`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(await readPreviewError(response));
+  return response.json() as Promise<ImportedSchemaSummary[]>;
+}
+
+export async function getImportedSchema(id: number, token: string): Promise<ImportedSchemaRecord> {
+  return requestImportedSchema(`/api/v1/semantic/import/saved/${id}`, token);
+}
+
+export async function deleteImportedSchema(id: number, token: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/saved/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(await readPreviewError(response));
+}
+
+async function requestImportedSchema(
+  path: string,
+  token: string,
+  init: RequestInit = {},
+): Promise<ImportedSchemaRecord> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!response.ok) throw new Error(await readPreviewError(response));
+  return response.json() as Promise<ImportedSchemaRecord>;
+}

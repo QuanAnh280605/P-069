@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from src.models.schema_metadata import ParseDiagnostic, RawSchemaMetadata, SchemaDialect
 
 # ---------------------------------------------------------------------------
 # User Authentication & RBAC Schemas
@@ -165,3 +167,44 @@ class ApproveResponse(BaseModel):
 
     semantic_layer_id: int
     message: str = "Semantic Layer saved successfully"
+
+
+class SqlDumpPreviewResponse(BaseModel):
+    """Technical schema metadata parsed from a SQL dump."""
+
+    dialect: SchemaDialect
+    raw_schema: RawSchemaMetadata
+    diagnostics: tuple[ParseDiagnostic, ...] = ()
+
+
+class ImportedSchemaCreateRequest(BaseModel):
+    """Request to persist parsed technical schema metadata."""
+
+    display_name: str = Field(min_length=1, max_length=200)
+    raw_schema: RawSchemaMetadata
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        """Trim and reject an empty display name."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Display name cannot be empty")
+        return normalized
+
+
+class ImportedSchemaSummaryResponse(BaseModel):
+    """List item for one persisted SQL dump schema."""
+
+    id: int
+    display_name: str
+    dialect: SchemaDialect
+    table_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ImportedSchemaResponse(ImportedSchemaSummaryResponse):
+    """Full persisted SQL dump schema metadata."""
+
+    raw_schema: RawSchemaMetadata

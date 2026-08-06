@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     model_name: str = "gpt-4o-mini"
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 0.0 for deterministic output
 
+    # SQL dump parsing limits
+    sql_dump_max_file_bytes: int = Field(default=20 * 1024 * 1024, gt=0, le=20 * 1024 * 1024)
+    sql_dump_max_statement_bytes: int = Field(default=1024 * 1024, gt=0, le=1024 * 1024)
+    sql_dump_max_diagnostics: int = Field(default=100, ge=1, le=1000)
+    sql_dump_max_nesting_depth: int = Field(default=128, ge=1, le=512)
+
     # Metadata Store (PostgreSQL dev/prod, no SQLite)
     database_url: str = "postgresql+asyncpg://dev:devpassword@localhost:5432/semantic_layer_dev"
     encryption_key: str = ""  # Base64 Fernet key — must be set via .env
