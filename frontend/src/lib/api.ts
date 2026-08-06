@@ -199,7 +199,7 @@ export interface ParseDiagnostic {
 }
 
 export interface SqlDumpPreview {
-  dialect: 'postgresql' | 'mysql';
+  dialect: 'postgresql' | 'mysql' | 'sqlite';
   raw_schema: {
     contract_version: '1.0';
     tables: SqlDumpTable[];
@@ -210,7 +210,7 @@ export interface SqlDumpPreview {
 export interface ImportedSchemaSummary {
   id: number;
   display_name: string;
-  dialect: 'postgresql' | 'mysql';
+  dialect: 'postgresql' | 'mysql' | 'sqlite';
   table_count: number;
   created_at: string;
   updated_at: string;
@@ -295,4 +295,63 @@ async function requestImportedSchema(
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
   return response.json() as Promise<ImportedSchemaRecord>;
+}
+
+export interface LiveDbSummary {
+  id: number;
+  display_name: string;
+  dialect: 'postgresql' | 'mysql' | 'sqlite';
+  table_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LiveDbRecord extends LiveDbSummary {
+  raw_schema: SqlDumpPreview['raw_schema'];
+}
+
+export async function connectLiveTargetDb(
+  displayName: string,
+  dialect: 'postgresql' | 'mysql' | 'sqlite',
+  connUrl: string,
+  token: string,
+): Promise<LiveDbRecord> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/connect`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      display_name: displayName,
+      dialect,
+      conn_url: connUrl,
+    }),
+  });
+  if (!response.ok) throw new Error(await readPreviewError(response));
+  return response.json() as Promise<LiveDbRecord>;
+}
+
+export async function listLiveTargetDbs(token: string): Promise<LiveDbSummary[]> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/saved`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(await readPreviewError(response));
+  return response.json() as Promise<LiveDbSummary[]>;
+}
+
+export async function getLiveTargetDb(id: number, token: string): Promise<LiveDbRecord> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/saved/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(await readPreviewError(response));
+  return response.json() as Promise<LiveDbRecord>;
+}
+
+export async function deleteLiveTargetDb(id: number, token: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/saved/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(await readPreviewError(response));
 }
