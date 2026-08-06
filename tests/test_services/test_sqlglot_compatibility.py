@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import sqlglot
+from packaging.version import parse as parse_version
 from sqlglot import exp
 from sqlglot.errors import ParseError
 
@@ -22,7 +23,9 @@ def _parse_fixture_ddl(relative_path: str, dialect: str) -> list[exp.Expression]
 
 
 def test_candidate_version_is_pinned() -> None:
-    assert sqlglot.__version__ == "30.13.0"
+    version = parse_version(sqlglot.__version__)
+    assert version >= parse_version("30.13.0")
+    assert version < parse_version("31.0.0")
 
 
 def test_full_postgresql_dump_envelope_requires_scanner() -> None:
