@@ -17,6 +17,7 @@ class SchemaDialect(StrEnum):
 
     POSTGRESQL = "postgresql"
     MYSQL = "mysql"
+    SQLITE = "sqlite"
 
 
 class ParseCompleteness(StrEnum):
@@ -63,7 +64,7 @@ def normalize_identifier(name: str, dialect: SchemaDialect, quoted: bool) -> str
     """Return the deterministic exact-match key for an SQL identifier."""
     if quoted:
         return name
-    if dialect in (SchemaDialect.POSTGRESQL, SchemaDialect.MYSQL):
+    if dialect in (SchemaDialect.POSTGRESQL, SchemaDialect.MYSQL, SchemaDialect.SQLITE):
         return name.lower()
     raise ValueError(f"Unsupported dialect: {dialect}")
 

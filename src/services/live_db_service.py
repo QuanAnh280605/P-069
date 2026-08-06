@@ -73,7 +73,9 @@ def _introspect_table(
     )
 
 
-def _build_columns(raw_columns: list[dict[str, Any]], pk_cols: set[str], dialect: SchemaDialect) -> list[ColumnMetadata]:
+def _build_columns(
+    raw_columns: list[dict[str, Any]], pk_cols: set[str], dialect: SchemaDialect
+) -> list[ColumnMetadata]:
     """Convert inspector raw columns to canonical ColumnMetadata list."""
     columns = []
     for idx, col in enumerate(raw_columns, start=1):
@@ -106,7 +108,9 @@ def _build_pk(pk_info: dict[str, Any], schema: Identifier, dialect: SchemaDialec
     return PrimaryKeyMetadata(constraint_name=name_ident, constrained_columns=cols)
 
 
-def _build_fks(raw_fks: list[dict[str, Any]], default_schema: Identifier, dialect: SchemaDialect) -> list[ForeignKeyMetadata]:
+def _build_fks(
+    raw_fks: list[dict[str, Any]], default_schema: Identifier, dialect: SchemaDialect
+) -> list[ForeignKeyMetadata]:
     """Build ForeignKeyMetadata list from inspector foreign keys dicts."""
     fks = []
     for fk in raw_fks:
@@ -131,20 +135,57 @@ def _build_fks(raw_fks: list[dict[str, Any]], default_schema: Identifier, dialec
     return fks
 
 
+def resolve_and_validate_dialect(conn_url: str, dialect_choice: str | SchemaDialect | None) -> SchemaDialect:
+    """Auto-detect dialect from connection URL if auto, or strictly validate match if explicitly specified."""
+    url_lower = conn_url.strip().lower()
+    detected: SchemaDialect | None = None
+    if url_lower.startswith(("postgresql://", "postgresql+")):
+        detected = SchemaDialect.POSTGRESQL
+    elif url_lower.startswith(("mysql://", "mysql+", "mariadb+")):
+        detected = SchemaDialect.MYSQL
+    elif url_lower.startswith(("sqlite://", "sqlite+")):
+        detected = SchemaDialect.SQLITE
+
+    raw_choice = (
+        dialect_choice.value
+        if isinstance(dialect_choice, SchemaDialect)
+        else (dialect_choice or "auto").strip().lower()
+    )
+
+    if raw_choice in ("auto", "none", ""):
+        if detected is None:
+            raise ValueError(
+                "Cannot auto-detect database dialect from connection URL. Please specify the dialect manually."
+            )
+        return detected
+
+    try:
+        chosen_dialect = SchemaDialect(raw_choice)
+    except ValueError as exc:
+        raise ValueError(f"Unsupported database dialect '{raw_choice}'") from exc
+
+    if detected is not None and detected != chosen_dialect:
+        raise ValueError(
+            f"Connection URL scheme does not match selected dialect '{chosen_dialect.value}' (detected '{detected.value}')"
+        )
+    return chosen_dialect
+
+
 async def create_live_target_db(
     db: AsyncSession,
     user_id: int,
     display_name: str,
-    dialect: SchemaDialect,
+    dialect: str | SchemaDialect | None,
     conn_url: str,
 ) -> LiveDbResponse:
     """Introspect live database, encrypt connection URL, and save record."""
-    raw_schema = introspect_live_database(conn_url, dialect)
+    resolved_dialect = resolve_and_validate_dialect(conn_url, dialect)
+    raw_schema = introspect_live_database(conn_url, resolved_dialect)
     conn_url_enc = encrypt_conn_url(conn_url)
     model = LiveTargetDbModel(
         created_by=user_id,
         display_name=display_name,
-        dialect=dialect.value,
+        dialect=resolved_dialect.value,
         conn_url_enc=conn_url_enc,
         schema_metadata=raw_schema.model_dump(mode="json"),
     )

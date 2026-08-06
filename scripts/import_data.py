@@ -19,7 +19,7 @@ if hasattr(sys.stdout, "reconfigure"):
 # Load environment variables from .env if present
 load_dotenv()
 
-DEFAULT_DB_URL = os.getenv("TARGET_DATABASE_URL", "")
+DEFAULT_DB_URL = os.getenv("MYSQL_DATABASE_URL", "")
 DEFAULT_DATA_DIR = os.getenv("CSV_DATA_DIR", "")
 
 

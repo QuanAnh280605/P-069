@@ -17,6 +17,8 @@ sqlalchemy>=2.0.0
 alembic>=1.14.0
 psycopg2-binary>=2.9.0
 asyncpg>=0.29.0
+pymysql>=1.1.0
+aiomysql>=0.2.0
 # Auth & Encryption
 pyjwt>=2.8.0
 passlib>=1.7.4
@@ -27,6 +29,7 @@ aiosqlite>=0.20.0
 
 # Export & Utilities
 pyyaml>=6.0.0
+pandas>=2.0.0
 
 # SQL Dump Parsing
 sqlglot==30.13.0

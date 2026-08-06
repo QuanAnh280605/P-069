@@ -77,7 +77,7 @@ async def test_create_and_manage_live_target_db(async_session: AsyncSession, tem
         db=async_session,
         user_id=user_id,
         display_name=display_name,
-        dialect=SchemaDialect.POSTGRESQL,
+        dialect=SchemaDialect.SQLITE,
         conn_url=conn_url,
     )
     assert created.id > 0
@@ -102,3 +102,21 @@ async def test_create_and_manage_live_target_db(async_session: AsyncSession, tem
     # Verify deleted
     fetched_after = await get_live_target_db(async_session, user_id, created.id)
     assert fetched_after is None
+
+
+def test_resolve_and_validate_dialect_auto_and_strict():
+    """Test auto-detection and strict matching validation logic."""
+    from src.services.live_db_service import resolve_and_validate_dialect
+
+    # Auto detect tests
+    assert resolve_and_validate_dialect("postgresql://localhost/db", "auto") == SchemaDialect.POSTGRESQL
+    assert resolve_and_validate_dialect("mysql+pymysql://localhost/db", "auto") == SchemaDialect.MYSQL
+    assert resolve_and_validate_dialect("sqlite:///test.db", None) == SchemaDialect.SQLITE
+
+    # Strict match success
+    assert resolve_and_validate_dialect("mysql+pymysql://localhost/db", "mysql") == SchemaDialect.MYSQL
+    assert resolve_and_validate_dialect("postgresql://localhost/db", "postgresql") == SchemaDialect.POSTGRESQL
+
+    # Strict match failure (mismatched URL scheme)
+    with pytest.raises(ValueError, match="does not match selected dialect"):
+        resolve_and_validate_dialect("postgresql://localhost/db", "mysql")
