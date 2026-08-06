@@ -17,7 +17,18 @@ async def test_agent_state_has_required_fields():
     state: AgentState = {
         "db_id": 1,
         "conn_url_enc": "encrypted-url",
-        "raw_schema": {},
+        "db_type": "sqlite",
+        "raw_schema": {
+            "source": {
+                "type": "live_connection",
+                "db_engine": "sqlite",
+                "connection_id": 1,
+                "extracted_at": "2026-08-05T00:00:00Z",
+            },
+            "tables": [],
+            "relationships": [],
+        },
+        "introspection_warnings": [],
         "enriched_schema": {},
         "suggested_metrics": [],
         "hitl_approved": False,
@@ -29,16 +40,6 @@ async def test_agent_state_has_required_fields():
     assert "enriched_schema" in state
     assert "suggested_metrics" in state
     assert "semantic_layer_id" in state
-
-
-@pytest.mark.asyncio
-@patch("src.agents.nodes.introspect_node.introspect_node", new_callable=AsyncMock)
-async def test_introspect_node_returns_raw_schema(mock_introspect):
-    """Introspect node phải trả về raw_schema khi thành công."""
-    mock_introspect.return_value = {"raw_schema": {"orders": {"columns": []}}}
-    result = await mock_introspect({"db_id": 1, "conn_url_enc": "enc"})
-    assert "raw_schema" in result
-    assert not result.get("error")
 
 
 @pytest.mark.asyncio
