@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from src.models.raw_schema import DatabaseType, RawSchema
+
 
 class AgentState(TypedDict, total=False):
     """State schema cho LangGraph Flow 1 pipeline.
@@ -21,11 +23,15 @@ class AgentState(TypedDict, total=False):
     conn_url_enc: str
     """Connection URL đã được Fernet encrypt — không bao giờ plaintext."""
 
+    db_type: DatabaseType
+    """Declared target database type: postgresql, mysql, or sqlite."""
+
     # Flow 1 — Introspect Node output
-    raw_schema: dict[str, Any]
-    """Schema kỹ thuật thô từ SQLAlchemy Inspector.
-    Format: {table_name: {columns: [...], foreign_keys: [...]}}.
-    """
+    raw_schema: RawSchema
+    """Schema kỹ thuật thô từ Live Introspection hoặc DDL Dump parsing."""
+
+    introspection_warnings: list[str]
+    """Recoverable table-level schema introspection warnings."""
 
     # Flow 1 — Enrich Node output
     enriched_schema: dict[str, Any]

@@ -1,39 +1,59 @@
-"""Introspect Node — Flow 1 Step 1.
-
-Kết nối Target DB qua Fernet-decrypted URL, dùng SQLAlchemy Inspector
-để đọc schema metadata (tên bảng, cột, FK, kiểu dữ liệu).
-KHÔNG thực thi bất kỳ câu truy vấn SELECT data nào.
-"""
+"""Introspect Node — Flow 1 Step 1."""
 
 from __future__ import annotations
 
+import logging
+
 from src.agents.state import AgentState
-from src.models.schema_metadata import SchemaDialect
-from src.services.database import decrypt_conn_url
-from src.services.live_db_service import introspect_live_database
+from src.services.introspection import (
+    ConnectionIntrospectionError,
+    IntrospectionError,
+    InvalidCredentialError,
+    LiveSchemaRequest,
+    UnsupportedDatabaseTypeError,
+    extract_raw_schema,
+)
+
+logger = logging.getLogger(__name__)
 
 
-async def introspect_node(state: AgentState) -> dict:
-    """Read schema metadata from Target DB using SQLAlchemy Inspector.
-
-    Input state fields: conn_url_enc | conn_url, dialect
-    Output state fields: raw_schema | error
-    """
-    conn_url = state.get("conn_url")
-    conn_url_enc = state.get("conn_url_enc")
-    if not conn_url and conn_url_enc:
-        try:
-            conn_url = decrypt_conn_url(conn_url_enc)
-        except Exception as exc:
-            return {"raw_schema": {}, "error": f"Failed to decrypt connection URL: {exc}"}
-
-    if not conn_url:
-        return {"raw_schema": {}, "error": "Missing connection URL for introspection"}
-
-    dialect_str = state.get("dialect", "postgresql")
+async def introspect_node(state: AgentState) -> dict[str, object]:
+    """Read target schema metadata through the introspection interface."""
+    if not state.get("conn_url_enc") or not state.get("db_type"):
+        return {"error": "Database connection settings are required."}
+    if not state.get("db_id") or state["db_id"] <= 0:
+        return {"error": "Database connection ID is required."}
+    req: LiveSchemaRequest = {
+        "conn_url_enc": state["conn_url_enc"],
+        "db_type": state["db_type"],
+        "connection_id": state["db_id"],
+    }
     try:
-        dialect = SchemaDialect(dialect_str)
-        raw_schema = introspect_live_database(conn_url, dialect)
-        return {"raw_schema": raw_schema.model_dump(mode="json"), "error": ""}
-    except Exception as exc:
-        return {"raw_schema": {}, "error": f"Schema introspection failed: {exc}"}
+        result = await extract_raw_schema(req)
+    except IntrospectionError as exc:
+        return _error_response(state, exc)
+    if not result["raw_schema"]["tables"]:
+        return {"error": "The target database does not contain any tables."}
+    logger.info(
+        "Schema introspection completed db_id=%s db_type=%s tables=%d",
+        state.get("db_id"),
+        state["db_type"],
+        len(result["raw_schema"]["tables"]),
+    )
+    return {"raw_schema": result["raw_schema"], "introspection_warnings": result["warnings"]}
+
+
+def _error_response(state: AgentState, exc: IntrospectionError) -> dict[str, object]:
+    logger.warning(
+        "Schema introspection failed db_id=%s db_type=%s error=%s",
+        state.get("db_id"),
+        state.get("db_type"),
+        type(exc).__name__,
+    )
+    if isinstance(exc, InvalidCredentialError):
+        return {"error": "Invalid database credential."}
+    if isinstance(exc, UnsupportedDatabaseTypeError):
+        return {"error": "Unsupported database type or connection settings."}
+    if isinstance(exc, ConnectionIntrospectionError):
+        return {"error": "Cannot connect to the target database."}
+    return {"error": "Cannot read the target database schema."}

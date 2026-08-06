@@ -3,6 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from src.models.raw_schema import RawSchema
 from src.models.schema_metadata import ParseDiagnostic, RawSchemaMetadata, SchemaDialect
 
 # ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ class GenerateResponse(BaseModel):
 
     db_id: int
     status: Literal["draft", "pending_review", "saved"] = "draft"
-    raw_schema: dict[str, Any] = Field(default_factory=dict)
+    raw_schema: RawSchema
     enriched_schema: dict[str, Any] = Field(default_factory=dict)
     suggested_metrics: list[dict[str, Any]] = Field(default_factory=list)
 
