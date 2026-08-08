@@ -31,8 +31,8 @@ aiosqlite>=0.20.0
 pyyaml>=6.0.0
 faker>=30.0.0
 
-# SQL Dump Parsing & AST Validation
-sqlglot>=25.0.0,<31.0.0
+# SQL Dump Parsing
+sqlglot>=30.13.0,<31.0.0
 
 # Dev tools
 ruff>=0.8.0

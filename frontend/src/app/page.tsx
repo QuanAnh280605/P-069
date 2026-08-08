@@ -8,13 +8,7 @@ import { Header } from '@/components/layout/Header';
 import ImportedSchemaList from '@/components/ImportedSchemaList';
 import LiveDbList from '@/components/LiveDbList';
 import SqlDumpPreviewUploader from '@/components/SqlDumpPreviewUploader';
-import {
-  getLocalLayers,
-  updateLayer,
-  deleteLayer,
-  connectLiveTargetDb,
-  SemanticLayerData,
-} from '@/lib/api';
+import { getLocalLayers, updateLayer, deleteLayer, connectLiveTargetDb, SemanticLayerData } from '@/lib/api';
 import {
   Database,
   PlusCircle,
@@ -35,6 +29,8 @@ export default function DashboardPage() {
   const { user, token, isLoading } = useAuth();
   const [layers, setLayers] = useState<SemanticLayerData[]>([]);
   const [savedSchemaRevision, setSavedSchemaRevision] = useState(0);
+  const [liveDbRevision, setLiveDbRevision] = useState(0);
+  const [liveDbError, setLiveDbError] = useState('');
   const [mounted, setMounted] = useState(false);
 
   // Form State
@@ -43,8 +39,6 @@ export default function DashboardPage() {
   const [connUrl, setConnUrl] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<number>(0); // 0: Idle, 1: Introspect, 2: Enrich, 3: Metrics, 4: Done
-  const [liveDbRevision, setLiveDbRevision] = useState(0);
-  const [liveDbError, setLiveDbError] = useState('');
 
   useEffect(() => {
     setMounted(true);
@@ -100,30 +94,40 @@ export default function DashboardPage() {
                 columns: [
                   { column_name: 'order_id', data_type: 'INTEGER (PK)', business_name: 'Mã đơn hàng', sample_value: '1001' },
                   { column_name: 'customer_id', data_type: 'INTEGER (FK)', business_name: 'Mã khách hàng', sample_value: 'C-01' },
-                  { column_name: 'amount', data_type: 'NUMERIC', business_name: 'Tổng tiền đơn hàng', sample_value: '250,000' },
-                  { column_name: 'created_at', data_type: 'TIMESTAMP', business_name: 'Thời gian đặt hàng', sample_value: '2026-08-01' },
+                  { column_name: 'total_amount', data_type: 'NUMERIC', business_name: 'Tổng tiền', sample_value: '500,000' },
+                  { column_name: 'order_status', data_type: 'VARCHAR(20)', business_name: 'Trạng thái đơn', sample_value: 'COMPLETED' },
+                  { column_name: 'created_at', data_type: 'TIMESTAMP', business_name: 'Ngày tạo đơn', sample_value: '2026-08-01' },
                 ],
               },
               {
                 table_name: 'products',
                 business_name: 'Sản phẩm',
-                description: 'Bảng danh mục sản phẩm và giá',
+                description: 'Bảng danh mục sản phẩm kinh doanh',
                 columns: [
-                  { column_name: 'product_id', data_type: 'INTEGER (PK)', business_name: 'Mã sản phẩm', sample_value: 'P-99' },
-                  { column_name: 'price', data_type: 'NUMERIC', business_name: 'Đơn giá', sample_value: '120,000' },
+                  { column_name: 'product_id', data_type: 'INTEGER (PK)', business_name: 'Mã sản phẩm', sample_value: 'P-10' },
+                  { column_name: 'product_name', data_type: 'VARCHAR(100)', business_name: 'Tên sản phẩm', sample_value: 'Laptop Pro 15' },
+                  { column_name: 'unit_price', data_type: 'NUMERIC', business_name: 'Đơn giá', sample_value: '25,000,000' },
                 ],
               },
             ],
             metrics: [
               {
-                id: `m_${Date.now()}`,
-                name: 'Tổng doanh thu',
-                description: 'Tổng tiền các đơn hàng',
-                sql_template: 'SELECT SUM(amount) FROM orders',
+                id: `m_${Date.now()}_1`,
+                name: 'Tổng doanh thu bán hàng',
+                description: 'Tổng tiền các đơn hàng đã hoàn thành (COMPLETED)',
+                sql_template: `SELECT SUM(total_amount) FROM orders WHERE order_status = 'COMPLETED'`,
+                source: 'ai',
+              },
+              {
+                id: `m_${Date.now()}_2`,
+                name: 'Số lượng đơn hàng hoàn tất',
+                description: 'Đếm tổng đơn hàng có trạng thái thành công',
+                sql_template: `SELECT COUNT(*) FROM orders WHERE order_status = 'COMPLETED'`,
                 source: 'ai',
               },
             ],
           };
+
           updateLayer(newLayer);
           setLayers(getLocalLayers());
           setIsAnalyzing(false);
@@ -131,12 +135,14 @@ export default function DashboardPage() {
           setDbName('');
           setConnUrl('');
           router.push(`/semantic/${newId}/review`);
-        }, 1000);
-      }, 1000);
-    }, 1000);
+        }, 800);
+      }, 800);
+    }, 800);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (confirm('Bạn có chắc chắn muốn xóa Semantic Layer này?')) {
       deleteLayer(id);
       setLayers(getLocalLayers());
@@ -145,8 +151,8 @@ export default function DashboardPage() {
 
   if (!mounted || isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0B0F19]">
-        <div className="flex items-center gap-3 text-indigo-400">
+      <div className="min-h-screen flex items-center justify-center bg-[#0B0F19] text-indigo-400">
+        <div className="flex items-center gap-3">
           <Loader2 className="w-6 h-6 animate-spin" />
           <span className="text-sm font-semibold">Đang tải dữ liệu...</span>
         </div>
@@ -395,8 +401,8 @@ export default function DashboardPage() {
                       <div className="w-5 h-5 rounded-full border border-slate-700" />
                     )}
                     <div>
-                      <div className="text-xs font-bold">2. LLM Business Enrich</div>
-                      <div className="text-[11px] text-slate-400">Sinh tên nghiệp vụ VN</div>
+                      <div className="text-xs font-bold">2. LLM Enrich</div>
+                      <div className="text-[11px] text-slate-400">Gợi ý tên nghiệp vụ tiếng Việt</div>
                     </div>
                   </div>
 
@@ -407,7 +413,7 @@ export default function DashboardPage() {
                         : 'bg-slate-900/40 border-slate-800 text-slate-400'
                     }`}
                   >
-                    {analysisStep === 4 ? (
+                    {analysisStep > 3 ? (
                       <CheckCircle2 className="w-5 h-5 text-emerald-400" />
                     ) : analysisStep === 3 ? (
                       <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
@@ -415,8 +421,8 @@ export default function DashboardPage() {
                       <div className="w-5 h-5 rounded-full border border-slate-700" />
                     )}
                     <div>
-                      <div className="text-xs font-bold">3. Metric Suggestions</div>
-                      <div className="text-[11px] text-slate-400">Đề xuất chỉ số kinh doanh</div>
+                      <div className="text-xs font-bold">3. Suggest Metrics</div>
+                      <div className="text-[11px] text-slate-400">Đề xuất chỉ số thống kê ban đầu</div>
                     </div>
                   </div>
                 </div>
@@ -424,92 +430,102 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Section 2: Semantic Layers List */}
+          {/* Section 2: List of Created Semantic Layers */}
           <div className="glass-card rounded-2xl p-6 md:p-8 border border-indigo-500/20 shadow-xl">
             <div className="flex items-center justify-between pb-4 mb-6 border-b border-slate-800">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-purple-600/20 text-purple-400 flex items-center justify-center border border-purple-500/30">
-                  <FolderKanban className="w-5 h-5" />
+                  <Database className="w-5 h-5" />
                 </div>
                 <div>
                   <h2 className="text-lg font-bold text-slate-100 uppercase tracking-wide">
-                    📂 DANH SÁCH SEMANTIC LAYERS
+                    📑 DANH SÁCH SEMANTIC LAYER HIỆN CÓ ({layers.length})
                   </h2>
                   <p className="text-xs text-slate-400">
-                    Các Layer đang được quản trị, tinh chỉnh HITL và sẵn sàng Export
+                    Bấm vào từng Semantic Layer để vào giao diện HITL Review, AI Metric Studio & Export
                   </p>
                 </div>
               </div>
-              <span className="text-xs font-semibold px-3 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                {layers.length} Databases
-              </span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    <th className="py-3 px-4">Database Name</th>
-                    <th className="py-3 px-4">Loại DB</th>
-                    <th className="py-3 px-4">Trạng Thái</th>
-                    <th className="py-3 px-4">Quy Mô</th>
-                    <th className="py-3 px-4">Cập Nhật</th>
-                    <th className="py-3 px-4 text-right">Thao Tác</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {layers.map((layer) => (
-                    <tr key={layer.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-3.5 px-4 font-semibold text-slate-200">
-                        <div className="flex items-center gap-2">
-                          <Database className="w-4 h-4 text-indigo-400" />
-                          <span>{layer.db_name}</span>
+            {layers.length === 0 ? (
+              <div className="text-center py-12 text-slate-400">
+                <Database className="w-12 h-12 mx-auto text-slate-600 mb-3" />
+                <p className="text-sm font-semibold">Chưa có Semantic Layer nào</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Hãy kết nối một Database ở trên để bắt đầu Introspect & Enrich Schema.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {layers.map((layer) => (
+                  <div
+                    key={layer.id}
+                    className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900/90 transition-all group flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
+                              {layer.db_type}
+                            </span>
+                            <h3 className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors">
+                              {layer.db_name}
+                            </h3>
+                          </div>
+                          <p className="text-[11px] text-slate-400 font-mono">ID: {layer.id}</p>
                         </div>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="text-xs uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                          {layer.db_type}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        {layer.status === 'Saved' ? (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full">
-                            <CheckCircle2 className="w-3 h-3" /> Saved
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full">
-                            <Clock className="w-3 h-3" /> Draft
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 text-xs text-slate-300">
-                        <span>{layer.tables.length} bảng</span> • <span>{layer.metrics.length} metrics</span>
-                      </td>
-                      <td className="py-3.5 px-4 text-xs text-slate-400 font-mono">
-                        {layer.updated_at}
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Link
-                            href={`/semantic/${layer.id}/review`}
-                            className="gradient-btn px-3 py-1.5 text-xs font-semibold text-white rounded-lg flex items-center gap-1.5 shadow"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" /> [ Mở Review ]
-                          </Link>
-                          <button
-                            onClick={() => handleDelete(layer.id)}
-                            className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                            title="Xóa Layer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+
+                        <div>
+                          {layer.status === 'Saved' ? (
+                            <span className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" /> Production
+                            </span>
+                          ) : (
+                            <span className="bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <Clock className="w-3 h-3" /> In Review
+                            </span>
+                          )}
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-slate-300 bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
+                        <div>
+                          <span className="text-slate-500 block text-[10px] uppercase">Số Bảng Schema:</span>
+                          <span className="font-bold text-indigo-400">{layer.tables.length} bảng</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[10px] uppercase">Business Metrics:</span>
+                          <span className="font-bold text-cyan-400">{layer.metrics.length} metrics</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                      <span className="text-[10px] text-slate-500">Cập nhật: {layer.updated_at}</span>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={(e) => handleDelete(layer.id, e)}
+                          className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          title="Xóa Semantic Layer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                        <Link
+                          href={`/semantic/${layer.id}/review`}
+                          className="px-3.5 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl flex items-center gap-1.5 transition-colors shadow"
+                        >
+                          <span>Xem Review & Studio</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </main>

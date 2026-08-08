@@ -94,10 +94,9 @@ export default function ReviewPage({ params }: { params: Promise<{ db_id: string
   }
 
   const handleSaveOfficial = () => {
-    if (!layer) return;
-    const updated: SemanticLayerData = {
+    const updated = {
       ...layer,
-      status: 'Saved',
+      status: 'Saved' as const,
       updated_at: new Date().toISOString().replace('T', ' ').slice(0, 16),
     };
     updateLayer(updated);
@@ -122,7 +121,12 @@ export default function ReviewPage({ params }: { params: Promise<{ db_id: string
   };
 
   const handleDeleteMetric = async (mId: string) => {
-    await deleteMetricApi(layer.id, mId);
+    if (!layer) return;
+    try {
+      await deleteMetricApi(layer.id, mId);
+    } catch {
+      // Offline fallback
+    }
     const updatedMetrics = layer.metrics.filter((m) => m.id !== mId);
     const updatedLayer = { ...layer, metrics: updatedMetrics, status: 'Draft' as const };
     setLayer(updatedLayer);

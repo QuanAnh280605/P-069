@@ -70,18 +70,8 @@ DEMO_RETAIL_SCHEMA: dict[str, Any] = {
             {"column_name": "id", "data_type": "INTEGER", "is_primary_key": True, "business_name": "Mã đơn hàng"},
             {"column_name": "customer_id", "data_type": "INTEGER", "is_foreign_key": True, "business_name": "Mã KH"},
             {"column_name": "store_id", "data_type": "INTEGER", "is_foreign_key": True, "business_name": "Mã cửa hàng"},
-            {
-                "column_name": "sales_channel_id",
-                "data_type": "INTEGER",
-                "is_foreign_key": True,
-                "business_name": "Kênh bán",
-            },
-            {
-                "column_name": "payment_method_id",
-                "data_type": "INTEGER",
-                "is_foreign_key": True,
-                "business_name": "Phương thức thanh toán",
-            },
+            {"column_name": "sales_channel_id", "data_type": "INTEGER", "is_foreign_key": True, "business_name": "Kênh bán"},
+            {"column_name": "payment_method_id", "data_type": "INTEGER", "is_foreign_key": True, "business_name": "Phương thức thanh toán"},
             {"column_name": "total_amount", "data_type": "NUMERIC", "business_name": "Tổng tiền đơn"},
             {"column_name": "discount_amount", "data_type": "NUMERIC", "business_name": "Tiền giảm giá"},
             {"column_name": "shipping_fee", "data_type": "NUMERIC", "business_name": "Phí vận chuyển"},
@@ -147,7 +137,7 @@ def _preview_error_status(code: DiagnosticCode) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Schema Ingestion & SQL Dump Preview
+# 1. SQL Dump Ingestion & Technical Preview (Chức năng từ main)
 # ---------------------------------------------------------------------------
 
 
@@ -209,7 +199,7 @@ async def remove_saved_imported_schema(
 
 
 # ---------------------------------------------------------------------------
-# Live Target Database Management (Zero-Data Introspection)
+# 2. Live Target Database Management (Chức năng từ main)
 # ---------------------------------------------------------------------------
 
 
@@ -266,7 +256,7 @@ async def remove_saved_live_target_db(
 
 
 # ---------------------------------------------------------------------------
-# Flow 1 — Generate & HITL
+# 3. Flow 1 — Generate & HITL
 # ---------------------------------------------------------------------------
 
 
@@ -283,7 +273,7 @@ async def approve_semantic_layer(request: ApproveRequest) -> ApproveResponse:
 
 
 # ---------------------------------------------------------------------------
-# HITL Inline Edit — Tables & Columns
+# 4. HITL Inline Edit — Tables & Columns (Chức năng từ nhánh của bạn)
 # ---------------------------------------------------------------------------
 
 
@@ -348,7 +338,7 @@ async def update_column(
 
 
 # ---------------------------------------------------------------------------
-# Business Metrics CRUD & AI Prompt Generation
+# 5. AI Prompt Metric Generation & Metric CRUD (Chức năng từ nhánh của bạn)
 # ---------------------------------------------------------------------------
 
 
@@ -524,7 +514,7 @@ async def delete_metric(
 
 
 # ---------------------------------------------------------------------------
-# Export
+# 6. Export (Chức năng chung)
 # ---------------------------------------------------------------------------
 
 
@@ -554,7 +544,7 @@ async def export_semantic_layer(
 
 
 # ---------------------------------------------------------------------------
-# Health / Status
+# 7. Health / Status
 # ---------------------------------------------------------------------------
 
 
