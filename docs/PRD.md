@@ -39,6 +39,7 @@
 | **F-07** | Export Semantic Layer | Xuất Semantic Layer đã duyệt ra file **JSON** hoặc **YAML** để tích hợp với các công cụ BI khác (Metabase, dbt, Looker Studio). | **P1 (Should-Have)** |
 | **F-08** | Connection URL Encryption | Mã hóa Connection URL của Target DB bằng Fernet trước khi lưu vào Metadata Store. Không bao giờ lưu plaintext. | **P0 (Must-Have)** |
 | **F-09** | Import Schema Dump | Cho phép BA/DA upload file SQL dump (`.sql`) hoặc schema definition để hệ thống parse schema metadata mà **không cần kết nối live DB**. Hỗ trợ PostgreSQL dump (`pg_dump --schema-only`) và MySQL dump. | **P1 (Should-Have)** |
+| **F-10** | Semantic Layer Querying (Live DB) | Giao diện/API cho phép chọn Metric, Dimension và Filter từ Semantic Layer để biên dịch thành SQL (`SemanticQueryCompiler`) và thực thi Read-Only trên Live DB. **Chỉ áp dụng cho DB kết nối qua Connection String (Live DB).** | **P0 (Must-Have)** |
 
 ---
 
@@ -101,22 +102,34 @@
   - Hỗ trợ format: PostgreSQL dump (`pg_dump --schema-only`) và MySQL dump (`mysqldump --no-data`).
   - Trả về lỗi rõ ràng nếu file không phải SQL dump hợp lệ hoặc không có DDL statement nào.
 
+### Story 7: Query dữ liệu qua Semantic Layer (CHỈ DÙNG CHO CONNECTION STRING / LIVE DB)
+- **Là một** Data Lead / Analyst,  
+- **Tôi muốn** lựa chọn Metrics và Dimensions đã định nghĩa trong Semantic Layer để query dữ liệu thực tế từ Live Database,  
+- **Để** thu được báo cáo chính xác 100% dựa trên công thức chuẩn mà không cần viết SQL thủ công.
+- **Tiêu chí chấp nhận:**
+  - API `POST /api/v1/semantic/query` nhận payload gồm list metric IDs, dimension column names, và optional filters.
+  - `SemanticQueryCompiler` ghép `sql_template` + các phép JOIN bảng tự động để sinh câu SQL.
+  - `SQLGuardrailNode` kiểm tra câu lệnh: Ép duy nhất `SELECT`, tự động inject `LIMIT 100`, cài `statement_timeout = 15s`.
+  - Thực thi Read-Only trên Live DB và trả về dạng bảng dữ liệu JSON.
+  - Nếu nguồn là **SQL Dump**, API trả về lỗi HTTP 400 rõ ràng: *"Tính năng Query chỉ áp dụng cho Database kết nối qua Connection String"*.
+
 ---
 
 ## 5. Yêu cầu Phi chức năng (Non-functional Requirements)
 
 ### 5.1. Bảo mật (Security)
 - **Encryption:** Connection URL của Target DB bắt buộc được mã hóa Fernet trước khi lưu.
-- **Schema-Only Access:** Kết nối Target DB chỉ dùng `SQLAlchemy Inspector` để đọc schema metadata — **không thực thi câu lệnh trên data thực.**
+- **Query Guardrails:** Flow 2 CHỈ cho phép thực thi `SELECT` Read-Only trên Live DB với auto `LIMIT 100` và `statement_timeout=15s`. Bắt buộc kiểm tra AST bằng `sqlglot`.
 - **API Key Handling:** `OPENAI_API_KEY` quản lý qua `.env`, tuyệt đối không commit.
 
 ### 5.2. Độ tin cậy & Xử lý Lỗi (Reliability & Error Handling)
-- **Deterministic LLM Output:** `LLM_TEMPERATURE=0.0` áp dụng cho tất cả các node.
+- **Deterministic LLM Output:** `LLM_TEMPERATURE=0.0` áp dụng cho tất cả các node ở Flow 1.
+- **Deterministic Query Compiler:** Flow 2 biên dịch SQL thuần túy từ template & metadata graph, không dùng LLM lúc query để đảm bảo 100% chính xác.
 - **Graceful DB Error:** Nếu Connection URL sai hoặc DB không truy cập được, trả về lỗi rõ ràng (`ConnectionError`) với hướng dẫn khắc phục, không crash server.
-- **Partial Introspection:** Nếu một bảng lỗi quyền truy cập, bỏ qua bảng đó và tiếp tục xử lý các bảng còn lại.
 
 ### 5.3. Hiệu năng (Performance)
 - Schema Introspection + LLM Enrichment cho DB ≤ 20 bảng: hoàn thành trong **< 60 giây**.
-- API CRUD (update business_name, add metric): phản hồi trong **< 500ms**.
+- Semantic Layer Query execution: phản hồi trong **< 3 giây**.
+
 
 ---

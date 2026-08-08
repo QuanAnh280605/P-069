@@ -28,6 +28,8 @@ aiosqlite>=0.20.0
 
 # Export & Utilities
 pyyaml>=6.0.0
+faker>=30.0.0
+
 
 # SQL Dump Parsing
 sqlglot>=30.13.0,<31.0.0
