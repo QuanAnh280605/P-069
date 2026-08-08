@@ -25,7 +25,7 @@ export const Header: React.FC = () => {
         </div>
         <div>
           <span className="font-bold text-lg tracking-wide gradient-text block leading-none">
-            AI SEMANTIC LAYER
+            S206 SEMANTIC LAYER
           </span>
           <span className="text-[10px] text-slate-400 tracking-wider font-semibold uppercase">
             Agent Governance Platform

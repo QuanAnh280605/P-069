@@ -1,3 +1,5 @@
+import { getStoredToken } from '@/lib/jwt';
+
 export interface SemanticColumn {
   column_name: string;
   data_type: string;
@@ -31,6 +33,12 @@ export interface SemanticLayerData {
   updated_at: string;
   tables: SemanticTable[];
   metrics: BusinessMetric[];
+}
+
+export interface MetricSuggestion {
+  name: string;
+  description: string;
+  sql_template: string;
 }
 
 const INITIAL_LAYERS: SemanticLayerData[] = [
@@ -160,6 +168,111 @@ export function deleteLayer(id: string): void {
   saveLocalLayers(filtered);
 }
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || API_BASE;
+
+function getAuthHeader(): Record<string, string> {
+  const token =
+    getStoredToken() ||
+    (typeof window !== 'undefined' ? localStorage.getItem('access_token') || localStorage.getItem('token') : null);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export async function generateCustomMetricsApi(
+  dbId: string,
+  prompt: string
+): Promise<{ suggestions: MetricSuggestion[]; isLiveLLM: boolean }> {
+  const res = await fetch(`${API_BASE}/semantic/${dbId}/metrics/generate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify({ prompt }),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({ detail: 'Lỗi khi gọi API Backend' }));
+    const errorMsg =
+      typeof errData?.detail === 'string'
+        ? errData.detail
+        : JSON.stringify(errData?.detail || 'Không thể sinh metric từ LLM Backend');
+    throw new Error(`[Backend LLM Error ${res.status}]: ${errorMsg}`);
+  }
+
+  const data = await res.json();
+  if (!data.suggestions || data.suggestions.length === 0) {
+    throw new Error('LLM không tìm thấy hoặc không sinh được chỉ số phù hợp với schema');
+  }
+  return { suggestions: data.suggestions, isLiveLLM: true };
+}
+
+export async function createMetricApi(
+  dbId: string,
+  metric: { name: string; description: string; sql_template: string; source: 'ai' | 'manual' }
+): Promise<BusinessMetric> {
+  const localMetric: BusinessMetric = {
+    id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    ...metric,
+    created_at: new Date().toISOString(),
+  };
+
+  try {
+    const res = await fetch(`${API_BASE}/semantic/${dbId}/metric`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify(metric),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        id: String(data.metric_id || localMetric.id),
+        name: data.name || localMetric.name,
+        description: data.description || localMetric.description,
+        sql_template: data.sql_template || localMetric.sql_template,
+        source: data.source || localMetric.source,
+      };
+    }
+  } catch {
+    // Return localMetric on network error
+  }
+  return localMetric;
+}
+
+export async function updateMetricApi(
+  dbId: string,
+  metricId: string,
+  data: { name?: string; description?: string; sql_template?: string }
+): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/semantic/${dbId}/metric/${metricId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify(data),
+    });
+  } catch {
+    // Ignore on offline fallback
+  }
+}
+
+export async function deleteMetricApi(dbId: string, metricId: string): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/semantic/${dbId}/metric/${metricId}`, {
+      method: 'DELETE',
+      headers: getAuthHeader(),
+    });
+  } catch {
+    // Ignore on offline fallback
+  }
+}
+
+// SQL Dump & Imported Schema Types & Functions
 export interface SqlIdentifier {
   raw_name: string;
   normalized_name: string;
@@ -219,8 +332,6 @@ export interface ImportedSchemaSummary {
 export interface ImportedSchemaRecord extends ImportedSchemaSummary {
   raw_schema: SqlDumpPreview['raw_schema'];
 }
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
 export async function uploadSqlDumpPreview(
   file: File,

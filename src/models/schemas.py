@@ -137,6 +137,49 @@ class MetricResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Custom Prompt Metric Generation
+# ---------------------------------------------------------------------------
+
+
+class CustomMetricGenerateRequest(BaseModel):
+    """Request payload cho sinh Business Metric theo prompt tùy biến."""
+
+    prompt: str = Field(..., min_length=1, max_length=2000, description="Yêu cầu nghiệp vụ để sinh chỉ số")
+    target_tables: list[str] | None = Field(default=None, description="Danh sách bảng giới hạn phạm vi")
+
+
+class MetricSuggestionItem(BaseModel):
+    """Một đề xuất Business Metric do AI sinh (chưa lưu vào DB)."""
+
+    name: str = Field(..., min_length=1, max_length=200, description="Tên chỉ số bằng tiếng Việt")
+    description: str = Field(..., min_length=1, max_length=1000, description="Mô tả chỉ số bằng tiếng Việt")
+    sql_template: str = Field(..., min_length=1, description="Đúng một câu lệnh SELECT duy nhất")
+    source: Literal["ai"] = Field(default="ai", description="Nguồn gợi ý")
+
+
+class CustomMetricGenerateResponse(BaseModel):
+    """Response chứa danh sách các gợi ý metric từ prompt tùy biến."""
+
+    suggestions: list[MetricSuggestionItem] = Field(default_factory=list)
+
+
+class GeneratedMetric(BaseModel):
+    """Structured output item từ LLM cho một metric."""
+
+    name: str = Field(..., description="Tên chỉ số nghiệp vụ bằng tiếng Việt")
+    description: str = Field(..., description="Mô tả chi tiết ý nghĩa nghiệp vụ bằng tiếng Việt")
+    sql_template: str = Field(..., description="Đúng một câu lệnh SELECT chuẩn SQL")
+
+
+class MetricSuggestions(BaseModel):
+    """Structured output payload từ LLM chứa danh sách 1-3 metric."""
+
+    metrics: list[GeneratedMetric] = Field(
+        default_factory=list, description="Danh sách từ 1 đến 3 chỉ số nghiệp vụ liên quan"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Semantic Layer — Generate & Review
 # ---------------------------------------------------------------------------
 

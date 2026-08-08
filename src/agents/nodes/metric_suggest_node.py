@@ -35,8 +35,6 @@ async def metric_suggest_node(state: AgentState) -> dict[str, Any]:
 
     Input state fields: enriched_schema | raw_schema
     Output state fields: suggested_metrics | error
-
-    Note: LangGraph Interrupt (HITL) is triggered after this node.
     """
     schema_info = state.get("enriched_schema") or state.get("raw_schema")
     if not schema_info:
