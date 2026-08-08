@@ -65,6 +65,14 @@ def test_introspect_live_database(temp_sqlite_db: str):
     assert len(orders_table.foreign_keys) == 1
 
 
+def test_introspect_live_database_with_string_auto_dialect(temp_sqlite_db: str):
+    """Test introspect_live_database when passed string 'auto' as dialect."""
+    conn_url = f"sqlite:///{temp_sqlite_db}"
+    schema = introspect_live_database(conn_url, "auto")
+    assert schema.dialect == SchemaDialect.SQLITE
+    assert schema.tables is not None
+
+
 @pytest.mark.asyncio
 async def test_create_and_manage_live_target_db(async_session: AsyncSession, temp_sqlite_db: str):
     """Test full CRUD lifecycle for live target database records."""

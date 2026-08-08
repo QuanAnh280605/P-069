@@ -27,21 +27,24 @@ from src.models.schemas import LiveDbResponse, LiveDbSummaryResponse
 from src.services.database import encrypt_conn_url
 
 
-def introspect_live_database(conn_url: str, dialect: SchemaDialect) -> RawSchemaMetadata:
+def introspect_live_database(conn_url: str, dialect: str | SchemaDialect) -> RawSchemaMetadata:
     """Introspect technical schema metadata from a live target database without executing data queries."""
+    resolved_dialect = (
+        dialect if isinstance(dialect, SchemaDialect) else resolve_and_validate_dialect(conn_url, dialect)
+    )
     engine = create_engine(conn_url)
     try:
         inspector = inspect(engine)
-        default_schema = default_schema_identifier(dialect)
+        default_schema = default_schema_identifier(resolved_dialect)
         table_names = inspector.get_table_names()
         tables = []
         for table_name in table_names:
-            table_meta = _introspect_table(inspector, table_name, default_schema, dialect)
+            table_meta = _introspect_table(inspector, table_name, default_schema, resolved_dialect)
             if table_meta:
                 tables.append(table_meta)
         schema_meta = SchemaMetadata(schema_name=default_schema)
         return RawSchemaMetadata(
-            dialect=dialect,
+            dialect=resolved_dialect,
             schemas=(schema_meta,),
             tables=tuple(tables),
         )
