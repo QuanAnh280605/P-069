@@ -49,7 +49,7 @@ async def test_live_db_connect_endpoint_lifecycle(client, temp_sqlite_db: str):
     conn_url = f"sqlite:///{temp_sqlite_db}"
     payload = {
         "display_name": "  E-Commerce Live DB  ",
-        "dialect": "postgresql",
+        "dialect": "sqlite",
         "conn_url": conn_url,
     }
 
@@ -58,7 +58,7 @@ async def test_live_db_connect_endpoint_lifecycle(client, temp_sqlite_db: str):
     assert res.status_code == 201
     data = res.json()
     assert data["display_name"] == "E-Commerce Live DB"
-    assert data["dialect"] == "postgresql"
+    assert data["dialect"] == "sqlite"
     assert data["table_count"] == 1
     db_id = data["id"]
 
@@ -81,3 +81,29 @@ async def test_live_db_connect_endpoint_lifecycle(client, temp_sqlite_db: str):
     # Verify deleted
     get_after = await client.get(f"{SAVED_DB_ENDPOINT}/{db_id}", headers=_token_headers())
     assert get_after.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_live_db_connect_auto_detect_and_mismatch(client, temp_sqlite_db: str):
+    """Test POST /semantic/db/connect with auto-detect and strict mismatch validation."""
+    conn_url = f"sqlite:///{temp_sqlite_db}"
+
+    # Auto detect test
+    auto_payload = {
+        "display_name": "Auto Detect Store",
+        "dialect": "auto",
+        "conn_url": conn_url,
+    }
+    res_auto = await client.post(CONNECT_ENDPOINT, json=auto_payload, headers=_token_headers())
+    assert res_auto.status_code == 201
+    assert res_auto.json()["dialect"] == "sqlite"
+
+    # Mismatched dialect test
+    mismatch_payload = {
+        "display_name": "Mismatch DB",
+        "dialect": "mysql",
+        "conn_url": conn_url,
+    }
+    res_mismatch = await client.post(CONNECT_ENDPOINT, json=mismatch_payload, headers=_token_headers())
+    assert res_mismatch.status_code == 400
+    assert "does not match selected dialect" in res_mismatch.json()["detail"]

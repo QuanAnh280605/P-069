@@ -32,7 +32,7 @@ export default function DashboardPage() {
 
   // Form State
   const [dbName, setDbName] = useState('');
-  const [dbType, setDbType] = useState<'postgresql' | 'mysql' | 'sqlite'>('postgresql');
+  const [dbType, setDbType] = useState<'auto' | 'postgresql' | 'mysql' | 'sqlite'>('auto');
   const [connUrl, setConnUrl] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<number>(0); // 0: Idle, 1: Introspect, 2: Enrich, 3: Metrics, 4: Done
@@ -261,8 +261,8 @@ export default function DashboardPage() {
         </div>
 
         <form onSubmit={handleStartAnalysis} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="md:col-span-2">
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
                 Tên gợi nhớ DB
               </label>
@@ -277,48 +277,21 @@ export default function DashboardPage() {
               />
             </div>
 
-            <div>
+            <div className="md:col-span-1">
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Loại Database
+                DIALECT OVERRIDE
               </label>
-              <div className="flex items-center gap-6 pt-1">
-                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200">
-                  <input
-                    type="radio"
-                    name="dbType"
-                    value="postgresql"
-                    checked={dbType === 'postgresql'}
-                    onChange={() => setDbType('postgresql')}
-                    disabled={isAnalyzing}
-                    className="accent-indigo-500 w-4 h-4"
-                  />
-                  <span>PostgreSQL</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200">
-                  <input
-                    type="radio"
-                    name="dbType"
-                    value="mysql"
-                    checked={dbType === 'mysql'}
-                    onChange={() => setDbType('mysql')}
-                    disabled={isAnalyzing}
-                    className="accent-indigo-500 w-4 h-4"
-                  />
-                  <span>MySQL</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200">
-                  <input
-                    type="radio"
-                    name="dbType"
-                    value="sqlite"
-                    checked={dbType === 'sqlite'}
-                    onChange={() => setDbType('sqlite')}
-                    disabled={isAnalyzing}
-                    className="accent-indigo-500 w-4 h-4"
-                  />
-                  <span>SQLite</span>
-                </label>
-              </div>
+              <select
+                disabled={isAnalyzing}
+                value={dbType}
+                onChange={(e) => setDbType(e.target.value as 'auto' | 'postgresql' | 'mysql' | 'sqlite')}
+                className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <option value="auto">Auto detect</option>
+                <option value="postgresql">PostgreSQL</option>
+                <option value="mysql">MySQL</option>
+                <option value="sqlite">SQLite</option>
+              </select>
             </div>
           </div>
 

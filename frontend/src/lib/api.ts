@@ -312,7 +312,7 @@ export interface LiveDbRecord extends LiveDbSummary {
 
 export async function connectLiveTargetDb(
   displayName: string,
-  dialect: 'postgresql' | 'mysql' | 'sqlite',
+  dialect: 'auto' | 'postgresql' | 'mysql' | 'sqlite',
   connUrl: string,
   token: string,
 ): Promise<LiveDbRecord> {

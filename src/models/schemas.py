@@ -220,7 +220,7 @@ class LiveDbConnectRequest(BaseModel):
     """Request payload to connect and introspect a live target database."""
 
     display_name: str = Field(..., min_length=1, max_length=200)
-    dialect: SchemaDialect
+    dialect: str | None = Field(default="auto", description="Schema dialect or 'auto' for auto-detection")
     conn_url: str = Field(..., min_length=5, max_length=500)
 
     @field_validator("display_name")
@@ -248,4 +248,3 @@ class LiveDbResponse(LiveDbSummaryResponse):
     """Full representation of a persisted live target database including raw schema."""
 
     raw_schema: RawSchemaMetadata
-

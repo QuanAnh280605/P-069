@@ -65,6 +65,14 @@ def test_introspect_live_database(temp_sqlite_db: str):
     assert len(orders_table.foreign_keys) == 1
 
 
+def test_introspect_live_database_with_string_auto_dialect(temp_sqlite_db: str):
+    """Test introspect_live_database when passed string 'auto' as dialect."""
+    conn_url = f"sqlite:///{temp_sqlite_db}"
+    schema = introspect_live_database(conn_url, "auto")
+    assert schema.dialect == SchemaDialect.SQLITE
+    assert schema.tables is not None
+
+
 @pytest.mark.asyncio
 async def test_create_and_manage_live_target_db(async_session: AsyncSession, temp_sqlite_db: str):
     """Test full CRUD lifecycle for live target database records."""
@@ -77,7 +85,7 @@ async def test_create_and_manage_live_target_db(async_session: AsyncSession, tem
         db=async_session,
         user_id=user_id,
         display_name=display_name,
-        dialect=SchemaDialect.POSTGRESQL,
+        dialect=SchemaDialect.SQLITE,
         conn_url=conn_url,
     )
     assert created.id > 0
@@ -102,3 +110,21 @@ async def test_create_and_manage_live_target_db(async_session: AsyncSession, tem
     # Verify deleted
     fetched_after = await get_live_target_db(async_session, user_id, created.id)
     assert fetched_after is None
+
+
+def test_resolve_and_validate_dialect_auto_and_strict():
+    """Test auto-detection and strict matching validation logic."""
+    from src.services.live_db_service import resolve_and_validate_dialect
+
+    # Auto detect tests
+    assert resolve_and_validate_dialect("postgresql://localhost/db", "auto") == SchemaDialect.POSTGRESQL
+    assert resolve_and_validate_dialect("mysql+pymysql://localhost/db", "auto") == SchemaDialect.MYSQL
+    assert resolve_and_validate_dialect("sqlite:///test.db", None) == SchemaDialect.SQLITE
+
+    # Strict match success
+    assert resolve_and_validate_dialect("mysql+pymysql://localhost/db", "mysql") == SchemaDialect.MYSQL
+    assert resolve_and_validate_dialect("postgresql://localhost/db", "postgresql") == SchemaDialect.POSTGRESQL
+
+    # Strict match failure (mismatched URL scheme)
+    with pytest.raises(ValueError, match="does not match selected dialect"):
+        resolve_and_validate_dialect("postgresql://localhost/db", "mysql")
