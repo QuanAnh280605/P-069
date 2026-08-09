@@ -24,7 +24,6 @@ from src.services.canonical_builder_service import (
     summarize_canonical_schema,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -275,7 +274,7 @@ def test_roundtrip_raw_dict(sqlite_basic_db: str) -> None:
     reconstructed = CanonicalBuilderService.build_from_raw_dict(raw_dict)
     assert reconstructed.dialect == original.dialect
     assert len(reconstructed.tables) == len(original.tables)
-    for orig_tbl, reco_tbl in zip(original.tables, reconstructed.tables):
+    for orig_tbl, reco_tbl in zip(original.tables, reconstructed.tables, strict=True):
         assert orig_tbl.table_name.normalized_name == reco_tbl.table_name.normalized_name
         assert len(orig_tbl.columns) == len(reco_tbl.columns)
 
