@@ -39,9 +39,6 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1")
-app.include_router(auth_router)
-app.include_router(router)
-
 
 @app.get("/health")
 async def health():
