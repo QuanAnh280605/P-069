@@ -30,32 +30,41 @@ Trong các doanh nghiệp, dữ liệu lưu trong database quan hệ (PostgreSQL
 
 ## 3. Giải pháp đề xuất (Proposed Solution)
 
-Xây dựng **AI Semantic Layer Agent** — hệ thống AI hỗ trợ BA/DA xây dựng và quản lý Semantic Layer tập trung, với quy trình:
+Xây dựng **AI Semantic Layer Agent** — hệ thống AI hỗ trợ BA/DA xây dựng, quản lý và khai thác Semantic Layer tập trung, với 2 luồng chính:
 
-**Flow 1 (v1.0) — Generate & Manage Semantic Layer:**
-1. BA/DA cung cấp Connection URL của Target DB
-2. Agent tự động introspect schema kỹ thuật (SQLAlchemy Inspector — chỉ đọc metadata, không query data)
+**Flow 1 — Generate & Manage Semantic Layer:**
+1. BA/DA cung cấp Connection URL của Target DB (hoặc upload SQL Dump)
+2. Agent tự động introspect schema kỹ thuật (SQLAlchemy Inspector — đọc metadata)
 3. LLM phân tích và đề xuất tên nghiệp vụ tiếng Việt, mô tả chi tiết cho từng bảng/cột
 4. LLM đề xuất Business Metrics kèm SQL template tham chiếu
 5. BA/DA review, chỉnh sửa và phê duyệt qua giao diện HITL
 6. Semantic Layer được lưu vào Metadata Store (PostgreSQL)
 7. Export ra JSON/YAML để tích hợp với các tool BI khác
 
+**Flow 2 — Semantic Layer Query Engine (Live DB Only):**
+1. User chọn các Business Metrics, Dimensions và Filters trên giao diện Metric Explorer
+2. `SemanticQueryCompiler` tự động biên dịch cấu hình đã chọn thành câu lệnh SQL chuẩn xác 100% dựa trên định nghĩa đã duyệt
+3. `SQLGuardrailNode` ép các điều kiện an toàn (Read-Only `SELECT`, auto `LIMIT 100`, `timeout = 15s`)
+4. Thực thi truy vấn dữ liệu thực tế trên Target Live DB và hiển thị bảng kết quả
+
 ---
 
 ## 4. Phạm vi dự án (Project Scope)
 
 ### In-Scope v1.0 (Trong phạm vi):
-- Tự động introspect schema từ PostgreSQL, MySQL, SQLite (chỉ đọc metadata).
+- Tự động introspect schema từ PostgreSQL, MySQL, SQLite (đọc metadata).
+- Parse file SQL Dump DDL cho PostgreSQL và MySQL.
 - AI sinh định nghĩa tên nghiệp vụ và tự đề xuất chỉ số (metrics) kèm SQL template.
 - Giao diện HITL cho phép BA/DA chỉnh sửa và phê duyệt trước khi lưu.
 - CRUD đầy đủ cho Business Metrics (thêm thủ công, sửa, xóa).
 - Mã hóa Connection URL (Fernet) — không lưu plaintext.
 - Export Semantic Layer ra JSON / YAML.
+- **Truy vấn dữ liệu qua Semantic Layer (`SemanticQueryCompiler`) áp dụng CHỈ cho Target DB kết nối qua Connection String (Live DB) với các Guardrails Read-Only an toàn.**
 
 ### Out-of-Scope v1.0 (Ngoài phạm vi):
-- Thực thi câu lệnh SQL trên data thực của Target DB.
-- Natural Language Query (NL2SQL) → đây là v2.0+.
+- Truy vấn dữ liệu trực tiếp trên file SQL Dump (do SQL Dump chỉ chứa DDL cấu trúc, không có runtime DB).
+- Natural Language Query (NL2SQL) tự do qua LLM (thay vào đó dùng Deterministic Semantic Layer Query Engine để đảm bảo độ chính xác).
+- Các câu lệnh SQL làm thay đổi dữ liệu (`INSERT`, `UPDATE`, `DELETE`, `DROP`).
 - Truy vấn liên cơ sở dữ liệu (Cross-database join).
 - Fine-tune model LLM riêng (dùng GPT-4o-mini qua API).
 - Kết nối NoSQL (MongoDB, Cassandra).
@@ -70,13 +79,15 @@ Xây dựng **AI Semantic Layer Agent** — hệ thống AI hỗ trợ BA/DA xâ
 | **LLM Provider** | OpenAI GPT-4o-mini (Temperature `0.0`) |
 | **API Gateway** | FastAPI, Uvicorn (Async IO) |
 | **Metadata Store** | PostgreSQL (SQLAlchemy ORM + Alembic migrations) |
-| **Schema Introspection** | SQLAlchemy Inspector |
+| **Schema Introspection** | SQLAlchemy Inspector / sqlglot |
+| **Query Engine & AST** | `sqlglot` (SQL AST Validation & Guardrails) |
 | **Security** | `cryptography` (Fernet) — mã hóa Connection URL |
 | **Export** | `pyyaml` — YAML export |
-| **Frontend UI** | Next.js / Streamlit |
+| **Frontend UI** | Next.js |
 | **DevOps & Testing** | Docker, Docker Compose, Pytest, Ruff |
 
 ---
 
 ## 🎯 Tóm tắt mục đích trong 2 phút
-> **AI Semantic Layer Agent v1.0** là công cụ **quản trị ngữ nghĩa dữ liệu doanh nghiệp có AI hỗ trợ**: AI tự động chuyển đổi tên kỹ thuật khô khan thành định nghĩa nghiệp vụ có nghĩa, tự đề xuất chỉ số kinh doanh — BA/DA chỉ cần review & duyệt thay vì gõ tay từ đầu. Kết quả là một Semantic Layer chuẩn xác, được con người phê duyệt, xuất được ra các format phổ biến để tích hợp với hệ sinh thái BI.
+> **AI Semantic Layer Agent v1.0** là công cụ **quản trị và khai thác ngữ nghĩa dữ liệu doanh nghiệp có AI hỗ trợ**: AI tự động chuyển đổi tên kỹ thuật khô khan thành định nghĩa nghiệp vụ có nghĩa, tự đề xuất chỉ số kinh doanh — BA/DA review & duyệt. Sau đó, người dùng có thể **truy vấn dữ liệu an toàn và chuẩn xác trên Live DB** thông qua bộ định nghĩa Semantic Layer đã chốt.
+

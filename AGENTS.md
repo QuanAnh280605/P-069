@@ -23,18 +23,23 @@
 
 ## 2. 🎯 Bài toán trong 3 dòng
 
-**AI Agent xây dựng Semantic Layer & định nghĩa chỉ số thống nhất.**  
-Chỉ có **1 pipeline (Flow 1)**: Introspect DB schema → LLM đề xuất tên nghiệp vụ & Business Metrics → HITL review → Lưu → Export.  
-**Không phải NL2SQL chatbot. Không implement Flow 2 trong v1.0.**
+**AI Agent xây dựng Semantic Layer & định nghĩa chỉ số thống nhất, hỗ trợ Truy vấn Dữ liệu.**  
+Hỗ trợ 2 luồng chính:  
+- **Flow 1 (Generate & Manage):** Introspect DB schema (Live DB / SQL Dump) → LLM đề xuất tên nghiệp vụ & Business Metrics → HITL review → Lưu → Export.  
+- **Flow 2 (Semantic Layer Querying — CHỈ DÙNG CHO CONNECTION STRING / LIVE DB):** Biên dịch chỉ số (Metrics) & kích thước (Dimensions) được chọn thành câu lệnh SQL bằng `SemanticQueryCompiler` và thực thi Read-Only trên Live DB. *Không dùng Text-to-SQL tự do. SQL Dump không hỗ trợ Flow 2.*
 
 ---
 
 ## 3. 🚦 Quy tắc BẮT BUỘC
 
-### 🔴 Schema Introspection (CRITICAL)
-- **CHỈ ĐƯỢC PHÉP** dùng `SQLAlchemy Inspector` để đọc **schema metadata**
-- **KHÔNG** thực thi bất kỳ câu truy vấn SELECT data nào trên Target DB
-- Connection URL **không bao giờ** lưu plaintext — phải mã hóa Fernet (`cryptography`)
+### 🔴 Schema Introspection & Query Execution (CRITICAL)
+- **Flow 1 (Introspection):** CHỈ ĐƯỢC PHÉP dùng `SQLAlchemy Inspector` để đọc **schema metadata**.
+- **Flow 2 (Query Execution — Chỉ cho Live DB):**
+  - **CHỈ cho phép thực thi câu lệnh `SELECT` (Read-Only)** được biên dịch qua `SemanticQueryCompiler` dựa trên Metrics/Dimensions đã duyệt ở Flow 1.
+  - **BẮT BUỘC Guardrails:** Auto-append `LIMIT 100` (max 1000), `statement_timeout` = 15s.
+  - **TUYỆT ĐỐI CẤM** các câu lệnh thay đổi dữ liệu: `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`.
+  - **SQL Dump:** Vẫn giữ nguyên tắc CHỈ read schema metadata, không hỗ trợ query.
+- Connection URL **không bao giờ** lưu plaintext — phải mã hóa Fernet (`cryptography`).
 
 ### 🔴 Database & Migrations
 - **Bắt buộc tạo migration mới khi thay đổi DB schema**: Mỗi khi sửa đổi Database schema (models/tables/fields), **PHẢI** tạo 1 file Alembic migration mới (`alembic revision --autogenerate -m "..."`)
@@ -55,11 +60,11 @@ Chỉ có **1 pipeline (Flow 1)**: Introspect DB schema → LLM đề xuất tê
 
 ### 🔴 Dependency
 - Thêm package mới → **phải cập nhật `requirements.txt`** trước khi dùng
-- **Không dùng:** `sqlparse`, `langchain-community` — thuộc Flow 2 (Future)
+- **Được phép dùng:** `sqlglot` cho SQL AST validation & guardrail injection trong Flow 2.
 - **Không dùng:** ChromaDB, FAISS, hay vector store nào
 
 ### 🔴 Testing
-- Mỗi node phải có unit test trong `tests/test_agents/`
+- Mỗi node/service phải có unit test trong `tests/`
 - **Mock LLM** trong tests — không gọi OpenAI API thật
 - **Mock DB** — dùng SQLite in-memory
 
@@ -75,7 +80,9 @@ Chỉ có **1 pipeline (Flow 1)**: Introspect DB schema → LLM đề xuất tê
 
 | Cấm | Lý do |
 |-----|-------|
-| Thực thi `SELECT` data trên Target DB | Chỉ đọc schema metadata |
+| Thực thi câu lệnh `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER` trên Target DB | Bảo vệ an toàn dữ liệu khách hàng |
+| Chạy Text-to-SQL tự do | Thiếu kiểm soát, nguy cơ ảo giác và rủi ro security |
+| Query dữ liệu trên SQL Dump files | SQL Dump chỉ chứa DDL cấu trúc, không có runtime DB |
 | Sửa trực tiếp DB schema / Drop DB không qua Alembic migration mới | Tránh mất dữ liệu, làm hỏng DB và ảnh hưởng tới user khác |
 | `eval()` / `exec()` với SQL string | Security risk |
 | Hardcode API key / connection URL | Secret leak |
@@ -85,4 +92,3 @@ Chỉ có **1 pipeline (Flow 1)**: Introspect DB schema → LLM đề xuất tê
 | Function > 30 lines | Tách ra |
 | Code trong 1 file > 500 lines | Tách module |
 | Commit `.env` | Secret leak |
-| Implement Flow 2 trong v1.0 | Thuộc Future scope |

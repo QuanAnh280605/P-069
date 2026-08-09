@@ -242,6 +242,31 @@ Chuỗi kết nối (`conn_url`) đến Target DB **không bao giờ lưu ở d�
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
+### 4. Khởi tạo Target DB Thử nghiệm (Golden Retail Benchmark DB)
+
+Dự án cung cấp sẵn bộ dữ liệu mẫu **Golden Retail Database** (36 bảng DDL, 5.000 đơn hàng, 1.000 khách hàng, 8.000 phiên web, 8.5 MB seed dataset) để phục vụ thử nghiệm tính năng Introspection và biên dịch Query.
+
+1. Khởi chạy container PostgreSQL (nếu chưa chạy):
+   ```bash
+   docker compose -f docker-compose.dev.yml up postgres -d
+   ```
+
+2. Chạy script khởi tạo Target DB:
+   ```bash
+   python scripts/setup_target_db.py
+   ```
+   *Lưu ý:* Script hoàn toàn tự động! Nếu chưa có sẵn file seed SQL, script sẽ tự động gọi `scripts/seed_data_generator.py` và `scripts/convert_to_postgres.py` để sinh dữ liệu và nạp vào database `golden_retail_db`.
+
+3. **Connection URL của Target DB thử nghiệm**:
+   - **Khi chạy Backend trong Docker Container (`docker compose`):**
+     ```text
+     postgresql://dev:devpassword@postgres:5432/golden_retail_db
+     ```
+   - **Khi chạy Backend trên Local máy (`uvicorn`):**
+     ```text
+     postgresql://dev:devpassword@localhost:5432/golden_retail_db
+     ```
+
 ---
 
 ## 🚀 Chạy ứng dụng
