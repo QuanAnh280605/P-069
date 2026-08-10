@@ -5,12 +5,28 @@ Reads JSON from stdin, normalizes to common format, appends to .ai-log/session.j
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 VN_TZ = timezone(timedelta(hours=7))
+
+SECRET_PATTERNS = (
+    re.compile(r"(?i)\b([A-Z0-9_]*(?:API[_-]?KEY|TOKEN|PASSWORD|SECRET))(\s*[=:]\s*)([^\s,;]+)"),
+    re.compile(r"(?i)\b(Bearer\s+)[A-Za-z0-9._~+/=-]+"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
+)
+
+
+def redact_secrets(text):
+    """Mask API keys, bearer tokens, and PEM private keys before persisting."""
+    if not isinstance(text, str):
+        return text
+    text = SECRET_PATTERNS[0].sub(r"\1\2[REDACTED]", text)
+    text = SECRET_PATTERNS[1].sub(r"\1[REDACTED]", text)
+    return SECRET_PATTERNS[2].sub("[REDACTED PRIVATE KEY]", text)
 
 
 def git(cmd):
@@ -194,6 +210,12 @@ def main():
     entry = normalize(data, tool)
     if not entry:
         sys.exit(0)
+
+    # Redact secrets before persisting — defends against a key/token pasted into
+    # a prompt or echoed back in a tool response.
+    for key in ("prompt", "response_summary", "tool_response"):
+        if isinstance(entry.get(key), str):
+            entry[key] = redact_secrets(entry[key])
 
     log_dir = Path(os.environ.get("AI_LOG_DIR", ".ai-log"))
     log_dir.mkdir(exist_ok=True)
