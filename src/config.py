@@ -22,8 +22,14 @@ class Settings(BaseSettings):
     secret_key: str = "dev-secret-key-change-in-prod-semantic-layer-2026"
 
     # LLM
+    # LLM Provider & Keys
+    llm_provider: str = "mimo"  # openai | gemini | groq | mimo | custom
     openai_api_key: str = ""
-    model_name: str = "gpt-4o-mini"
+    openai_api_base: str | None = None
+    groq_api_key: str = ""
+    mimo_api_key: str = ""
+    google_api_key: str = ""
+    model_name: str = "mimo-v2.5"
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 0.0 for deterministic output
 
     # SQL dump parsing limits
