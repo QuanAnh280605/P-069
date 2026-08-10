@@ -191,13 +191,46 @@ def _parse_and_validate_metrics(
 
 
 def _extract_json_list(content: str | list[Any]) -> list[Any]:
-    """Strip markdown fences and parse JSON array from LLM response."""
+    """Strip markdown fences and extract JSON array from LLM response.
+
+    Handles cases where LLM adds filler text before/after the JSON block.
+    """
     if isinstance(content, list):
         return content
     text = str(content).strip()
-    text = re.sub(r"^```(?:json)?\s*\n?", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\n?\s*```\s*$", "", text)
-    return json.loads(text.strip())
+    # Strip markdown code fences (```json ... ```)
+    fence_match = re.search(
+        r"```(?:json)?\s*\n?(.*?)\n?\s*```",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if fence_match:
+        text = fence_match.group(1).strip()
+    # Try direct parse first (happy path)
+    try:
+        result = json.loads(text)
+        if isinstance(result, list):
+            return result
+    except json.JSONDecodeError:
+        pass
+    # Fallback: find first [...] bracket pair via counting
+    start = text.find("[")
+    if start == -1:
+        raise json.JSONDecodeError(
+            "No JSON array found in LLM response",
+            text,
+            0,
+        )
+    depth, end = 0, start
+    for i in range(start, len(text)):
+        if text[i] == "[":
+            depth += 1
+        elif text[i] == "]":
+            depth -= 1
+        if depth == 0:
+            end = i
+            break
+    return json.loads(text[start : end + 1])
 
 
 def _validate_single_metric(item: dict[str, Any]) -> dict[str, Any] | None:

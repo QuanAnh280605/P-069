@@ -9,28 +9,22 @@ from src.config import Settings, get_settings
 if not os.environ.get("LANGCHAIN_API_KEY"):
     os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
-
-PROVIDER_DEFAULTS = {
-    "gemini": {
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "model": "gemini-1.5-flash",
-    },
-    "groq": {
-        "base_url": "https://api.groq.com/openai/v1",
-        "model": "llama-3.3-70b-versatile",
-    },
-    "mimo": {
-        "base_url": "https://api.xiaomimimo.com/v1",
-        "model": "mimo-v2.5",
-    },
+# Default model per provider (fallback when MODEL_NAME is empty)
+_DEFAULT_MODELS = {
+    "openai": "gpt-4o-mini",
+    "gemini": "gemini-1.5-flash",
+    "groq": "llama-3.3-70b-versatile",
+    "mimo": "mimo-v2.5",
 }
 
 
-def _resolve_llm_config(settings: Settings) -> tuple[str, str | None, str]:
-    """Determine effective API key, base URL, and model name based on provider."""
+def _resolve_llm_config(
+    settings: Settings,
+) -> tuple[str, str, str]:
+    """Determine API key, base URL, and model name."""
     provider = settings.llm_provider.lower().strip()
-    preset = PROVIDER_DEFAULTS.get(provider, {})
 
+    # Resolve API key
     if provider == "groq":
         api_key = settings.groq_api_key or settings.openai_api_key
     elif provider == "gemini":
@@ -40,14 +34,24 @@ def _resolve_llm_config(settings: Settings) -> tuple[str, str | None, str]:
     else:
         api_key = settings.openai_api_key
 
-    base_url = settings.openai_api_base or preset.get("base_url")
-    model_name = settings.model_name or preset.get("model", "gpt-4o-mini")
+    # Resolve base URL from per-provider config field
+    base_url_map = {
+        "openai": settings.openai_api_base,
+        "gemini": settings.google_api_base,
+        "groq": settings.groq_api_base,
+        "mimo": settings.mimo_api_base,
+    }
+    base_url = base_url_map.get(provider, settings.openai_api_base)
+
+    # Resolve model name
+    default_model = _DEFAULT_MODELS.get(provider, "gpt-4o-mini")
+    model_name = settings.model_name or default_model
 
     return api_key, base_url, model_name
 
 
 def get_llm() -> ChatOpenAI:
-    """Instantiate and return configured ChatOpenAI client supporting multiple providers."""
+    """Instantiate ChatOpenAI client with provider config."""
     settings = get_settings()
     api_key, base_url, model_name = _resolve_llm_config(settings)
 
