@@ -1,4 +1,21 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(uvicorn:*)",
+      "Bash(git status)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git branch:*)",
+      "Bash(git show:*)",
+      "Bash(alembic:*)",
+      "Bash(docker compose:*)",
+      "Bash(python scripts/:*)"
+    ]
+  },
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -6,6 +23,18 @@
           {
             "type": "command",
             "command": "bash scripts/_pyrun.sh scripts/log_hook.py --tool=claude",
+            "shell": "bash"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/_pyrun.sh scripts/format_on_edit.py",
             "shell": "bash"
           }
         ]
