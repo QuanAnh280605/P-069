@@ -31,6 +31,8 @@ A **Canonical-Model redesign** (4-stage lifecycle, YAML registry) and an
 - **Schema changes require a new Alembic migration** — never edit applied
   migrations or drop/recreate the DB.
 - **Tests mock LLM + DB** (SQLite in-memory); never call the real OpenAI API.
+- **Never `git commit` or `git push`.** Write and edit code only — the user
+  reviews and commits everything themselves.
 
 ## Run commands
 
