@@ -25,7 +25,7 @@ export interface BusinessMetric {
 export interface SemanticLayerData {
   id: string;
   db_name: string;
-  db_type: 'postgresql' | 'mysql' | 'sqlite';
+  db_type: 'postgresql' | 'mysql' | 'sqlite' | 'auto';
   conn_url?: string;
   status: 'Draft' | 'Saved';
   updated_at: string;
