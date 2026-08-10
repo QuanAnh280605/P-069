@@ -184,19 +184,27 @@ def _validate_fk_target_columns(
     fk: ForeignKeyMetadata,
     table_index: dict[tuple[str, str], TableMetadata],
 ) -> None:
-    """Raise if any FK referred column is absent from the target table (C-5.6)."""
+    """Raise if any FK referred column is absent from the target table (C-5.6).
+
+    Error messages use raw_name (original DDL spelling) to aid debugging,
+    especially when identifiers were quoted or case-sensitive in the source DDL.
+    """
     ref_key = fk.referred_identity.canonical_key
     target = table_index.get(ref_key)
     if target is None:
         return
     target_cols: set[str] = {col.column_name.normalized_name for col in target.columns}
-    referred_cols: set[str] = {col.normalized_name for col in fk.referred_columns}
-    missing = referred_cols - target_cols
-    if missing:
+    # Map normalized_name → raw_name so error message shows original DDL spelling.
+    referred_col_map: dict[str, str] = {
+        col.normalized_name: col.raw_name for col in fk.referred_columns
+    }
+    missing_normalized = set(referred_col_map) - target_cols
+    if missing_normalized:
+        missing_raw = sorted(referred_col_map[n] for n in missing_normalized)
         raise ValueError(
             f"Table '{table.table_name.raw_name}': "
-            f"foreign key refers to unknown columns {sorted(missing)} "
-            f"in target table '{fk.referred_table.normalized_name}'."
+            f"foreign key refers to unknown columns {missing_raw} "
+            f"in target table '{fk.referred_table.raw_name}'."
         )
 
 
