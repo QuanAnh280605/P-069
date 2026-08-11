@@ -21,10 +21,20 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     secret_key: str = "dev-secret-key-change-in-prod-semantic-layer-2026"
 
-    # LLM
+    # LLM Provider & Keys
+    llm_provider: str = "mimo"  # openai | gemini | groq | mimo
     openai_api_key: str = ""
-    model_name: str = "gpt-4o-mini"
+    groq_api_key: str = ""
+    mimo_api_key: str = ""
+    google_api_key: str = ""
+    model_name: str = "mimo-v2.5"
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 0.0 for deterministic output
+
+    # LLM Base URLs — configurable via .env, defaults to official endpoints
+    openai_api_base: str = "https://api.openai.com/v1"
+    mimo_api_base: str = "https://api.xiaomimimo.com/v1"
+    groq_api_base: str = "https://api.groq.com/openai/v1"
+    google_api_base: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
     # SQL dump parsing limits
     sql_dump_max_file_bytes: int = Field(default=20 * 1024 * 1024, gt=0, le=20 * 1024 * 1024)
