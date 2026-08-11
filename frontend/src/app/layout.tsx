@@ -14,8 +14,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="vi" className="dark" suppressHydrationWarning>
-      <body className="antialiased selection:bg-indigo-500 selection:text-white min-h-screen w-full overflow-x-hidden" suppressHydrationWarning>
+    <html lang="vi" suppressHydrationWarning>
+      <body className="antialiased selection:bg-indigo-500 selection:text-white min-h-screen w-full overflow-x-hidden transition-colors duration-200" suppressHydrationWarning>
         <Providers>
           {children}
         </Providers>

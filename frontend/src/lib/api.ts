@@ -20,6 +20,10 @@ export interface BusinessMetric {
   name: string;
   description: string;
   sql_template: string;
+  measure_type?: 'sum' | 'count' | 'avg' | 'min' | 'max' | 'count_distinct';
+  target_table?: string;
+  target_column?: string;
+  filter_condition?: string;
   source: 'ai' | 'manual';
   created_at?: string;
 }
@@ -39,6 +43,10 @@ export interface MetricSuggestion {
   name: string;
   description: string;
   sql_template: string;
+  measure_type?: 'sum' | 'count' | 'avg' | 'min' | 'max' | 'count_distinct';
+  target_table?: string;
+  target_column?: string;
+  filter_condition?: string;
 }
 
 const INITIAL_LAYERS: SemanticLayerData[] = [
@@ -182,7 +190,7 @@ export async function generateCustomMetricsApi(
   dbId: string,
   prompt: string
 ): Promise<{ suggestions: MetricSuggestion[]; isLiveLLM: boolean }> {
-  const res = await fetch(`${API_BASE}/semantic/${dbId}/metrics/generate`, {
+  const res = await fetch(`${API_BASE}/api/v1/semantic/${dbId}/metrics/generate`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -218,7 +226,7 @@ export async function createMetricApi(
   };
 
   try {
-    const res = await fetch(`${API_BASE}/semantic/${dbId}/metric`, {
+    const res = await fetch(`${API_BASE}/api/v1/semantic/${dbId}/metric`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -248,7 +256,7 @@ export async function updateMetricApi(
   data: { name?: string; description?: string; sql_template?: string }
 ): Promise<void> {
   try {
-    await fetch(`${API_BASE}/semantic/${dbId}/metric/${metricId}`, {
+    await fetch(`${API_BASE}/api/v1/semantic/${dbId}/metric/${metricId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -263,7 +271,7 @@ export async function updateMetricApi(
 
 export async function deleteMetricApi(dbId: string, metricId: string): Promise<void> {
   try {
-    await fetch(`${API_BASE}/semantic/${dbId}/metric/${metricId}`, {
+    await fetch(`${API_BASE}/api/v1/semantic/${dbId}/metric/${metricId}`, {
       method: 'DELETE',
       headers: getAuthHeader(),
     });

@@ -10,7 +10,6 @@ import {
   Sun,
   Moon,
   Database,
-  Layers,
   BarChart3,
 } from 'lucide-react';
 import { CubeNavTab } from './CubeSidebar';
@@ -40,8 +39,6 @@ export const CubeTopBar: React.FC<CubeTopBarProps> = ({
     switch (tab) {
       case 'studio':
         return { label: 'AI Metric Studio (Copilot)', icon: <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> };
-      case 'tables':
-        return { label: 'Data Modeling & Schema', icon: <Layers className="w-3.5 h-3.5 text-sky-500" /> };
       case 'metrics':
         return { label: 'Business Metrics Catalog', icon: <BarChart3 className="w-3.5 h-3.5 text-emerald-500" /> };
       case 'export':

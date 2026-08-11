@@ -55,7 +55,7 @@ export const DataModelView: React.FC<DataModelViewProps> = ({
             <Layers className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold tracking-tight">Data Modeling & Schema Governance</h2>
+            <h2 className="text-sm font-bold tracking-tight">Quản lý Bảng & Cột (Schema Governance)</h2>
             <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
               Cấu trúc lược đồ quan hệ, tên nghiệp vụ tiếng Việt, Dimensions & Measures
             </p>

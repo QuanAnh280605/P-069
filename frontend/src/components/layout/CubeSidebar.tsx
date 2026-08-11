@@ -3,7 +3,6 @@
 import React from 'react';
 import Link from 'next/link';
 import {
-  Layers,
   Database,
   BarChart3,
   Sparkles,
@@ -14,7 +13,7 @@ import {
   Activity,
 } from 'lucide-react';
 
-export type CubeNavTab = 'tables' | 'metrics' | 'studio' | 'export';
+export type CubeNavTab = 'metrics' | 'studio' | 'export';
 
 interface CubeSidebarProps {
   activeTab: CubeNavTab;
@@ -47,12 +46,6 @@ export const CubeSidebar: React.FC<CubeSidebarProps> = ({
       label: 'AI Metric Studio',
       icon: <Sparkles className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />,
       badge: 'AI Live',
-    },
-    {
-      id: 'tables',
-      label: 'Data Modeling',
-      icon: <Layers className="w-4 h-4 text-sky-500 dark:text-sky-400" />,
-      badge: `${tableCount} bảng`,
     },
     {
       id: 'metrics',

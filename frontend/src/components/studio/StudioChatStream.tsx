@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { MetricSuggestion } from '@/lib/api';
+import { SqlCodeViewer } from './SqlCodeViewer';
 import {
   Send,
   Sparkles,
@@ -9,9 +10,16 @@ import {
   User,
   AlertCircle,
   Database,
-  ArrowUpRight,
   RefreshCw,
   Lightbulb,
+  ShieldCheck,
+  PlusCircle,
+  Edit3,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Code,
+  Layers,
 } from 'lucide-react';
 
 export interface ChatMessage {
@@ -28,7 +36,12 @@ interface StudioChatStreamProps {
   onSendMessage: (promptText: string) => Promise<void>;
   isLoading: boolean;
   tableNames: string[];
-  onSelectSuggestion: (sugg: MetricSuggestion, sIdx: number) => void;
+  dbName?: string;
+  dbType?: string;
+  onSelectSuggestion?: (sugg: MetricSuggestion, sIdx: number) => void;
+  onAddMetric?: (sugg: MetricSuggestion, sIdx: number) => void;
+  onEditMetric?: (sugg: MetricSuggestion) => void;
+  onRefineWithAI?: (sugg: MetricSuggestion) => void;
   activePromptText?: string;
   theme?: 'light' | 'dark';
 }
@@ -38,13 +51,19 @@ export const StudioChatStream: React.FC<StudioChatStreamProps> = ({
   onSendMessage,
   isLoading,
   tableNames,
-  onSelectSuggestion,
+  dbName,
+  dbType,
+  onAddMetric,
+  onEditMetric,
+  onRefineWithAI,
   activePromptText = '',
   theme = 'light',
 }) => {
   const isDark = theme === 'dark';
   const [inputVal, setInputVal] = useState(activePromptText);
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
+  const [savedMetricNames, setSavedMetricNames] = useState<string[]>([]);
+  const [expandedSqlKeys, setExpandedSqlKeys] = useState<Record<string, boolean>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -89,6 +108,13 @@ export const StudioChatStream: React.FC<StudioChatStreamProps> = ({
     );
   };
 
+  const handleSaveMetricClick = (sugg: MetricSuggestion, sIdx: number) => {
+    if (onAddMetric) {
+      onAddMetric(sugg, sIdx);
+      setSavedMetricNames((prev) => [...prev, sugg.name]);
+    }
+  };
+
   const sampleSuggestions = [
     'Tổng doanh thu theo từng tháng',
     'Tỷ lệ khách hàng mua lại sau 30 ngày',
@@ -97,66 +123,11 @@ export const StudioChatStream: React.FC<StudioChatStreamProps> = ({
   ];
 
   return (
-    <div
-      className={`h-full flex flex-col rounded-2xl border overflow-hidden transition-colors ${
-        isDark
-          ? 'bg-[#0E1526] border-slate-800 text-slate-200 shadow-md'
-          : 'bg-[#FAF9F6] border-slate-200 text-slate-800 shadow-xs'
-      }`}
-    >
-      {/* Top Scope & Context Bar */}
-      <div
-        className={`p-3 border-b space-y-2 transition-colors ${
-          isDark ? 'bg-[#131B2E] border-slate-800' : 'bg-white border-slate-200/80'
-        }`}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-xs font-bold">
-            <Bot className="w-4 h-4 text-indigo-500" />
-            <span className={isDark ? 'text-white' : 'text-slate-800'}>AI Metric Copilot</span>
-          </div>
-          <span
-            className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
-              isDark ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500'
-            }`}
-          >
-            Vietnamese Natural Language
-          </span>
-        </div>
+    <div className="w-full max-w-4xl mx-auto flex flex-col h-full overflow-hidden">
 
-        {/* Database Table Scope Tag Filters */}
-        {tableNames.length > 0 && (
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-            <span className="text-[11px] font-medium text-slate-400 shrink-0 flex items-center gap-1">
-              <Database className="w-3 h-3 text-slate-400" /> Bảng:
-            </span>
-            {tableNames.map((tbl) => {
-              const isSelected = selectedTables.includes(tbl);
-              return (
-                <button
-                  key={tbl}
-                  type="button"
-                  onClick={() => toggleTableTag(tbl)}
-                  className={`text-[11px] font-mono px-2 py-0.5 rounded-md transition-all cursor-pointer shrink-0 border ${
-                    isSelected
-                      ? isDark
-                        ? 'bg-indigo-950/80 border-indigo-500 text-indigo-300 font-semibold'
-                        : 'bg-indigo-50 border-indigo-300 text-indigo-700 font-semibold'
-                      : isDark
-                      ? 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-                      : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  @{tbl}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
 
-      {/* Message History Feed */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
+      {/* Chat Messages Feed */}
+      <div className="flex-1 overflow-y-auto px-1 py-2 space-y-4">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -167,120 +138,247 @@ export const StudioChatStream: React.FC<StudioChatStreamProps> = ({
             <div className="flex items-center gap-1.5 mb-1 px-1">
               {msg.sender === 'user' ? (
                 <>
-                  <span className="text-[11px] font-semibold text-slate-400">Bạn</span>
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Bạn</span>
                   <div
-                    className={`w-4 h-4 rounded-full flex items-center justify-center ${
-                      isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-600'
+                    className={`w-5 h-5 rounded-full flex items-center justify-center ${
+                      isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'
                     }`}
                   >
-                    <User className="w-2.5 h-2.5" />
+                    <User className="w-3 h-3" />
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="w-4 h-4 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
-                    <Sparkles className="w-2.5 h-2.5" />
+                  <div className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-500 dark:text-indigo-400 flex items-center justify-center">
+                    <Sparkles className="w-3 h-3" />
                   </div>
-                  <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                    Trợ lý AI
+                  <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                    AI Agent
                   </span>
                 </>
               )}
-              <span className="text-[10px] text-slate-500">{msg.timestamp}</span>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500">{msg.timestamp}</span>
             </div>
 
             {/* Bubble Content */}
             <div
-              className={`max-w-[92%] p-3.5 rounded-2xl text-xs leading-relaxed shadow-xs ${
+              className={`w-full max-w-3xl p-4 rounded-2xl text-xs leading-relaxed shadow-xs ${
                 msg.sender === 'user'
-                  ? 'bg-indigo-600 text-white rounded-br-xs'
+                  ? 'bg-indigo-600 text-white rounded-tr-xs ml-auto max-w-xl'
                   : msg.isError
                   ? isDark
-                    ? 'bg-red-950/50 text-red-200 border border-red-800 rounded-bl-xs'
-                    : 'bg-red-50 text-red-700 border border-red-200 rounded-bl-xs'
+                    ? 'bg-red-950/50 text-red-200 border border-red-800 rounded-tl-xs'
+                    : 'bg-red-50 text-red-700 border border-red-200 rounded-tl-xs'
                   : isDark
-                  ? 'bg-[#162036] text-slate-100 border border-slate-750 rounded-bl-xs'
-                  : 'bg-white text-slate-800 border border-slate-200/90 rounded-bl-xs'
+                  ? 'bg-[#0E1526] text-slate-100 border border-slate-800 rounded-tl-xs'
+                  : 'bg-white text-slate-900 border border-slate-200 rounded-tl-xs'
               }`}
             >
               {msg.isError && (
-                <div className="flex items-center gap-1.5 font-bold mb-1 text-red-400">
-                  <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                <div className="flex items-center gap-1.5 font-bold mb-1 text-red-500 dark:text-red-400">
+                  <AlertCircle className="w-3.5 h-3.5" />
                   <span>Có lỗi xảy ra</span>
                 </div>
               )}
               <p className="whitespace-pre-wrap">{msg.text}</p>
 
-              {/* Suggestions Cards embedded in Assistant Message */}
+              {/* Embedded Metric Cards inside Assistant Messages */}
               {msg.suggestions && msg.suggestions.length > 0 && (
-                <div
-                  className={`mt-3 pt-2.5 border-t space-y-2 ${
-                    isDark ? 'border-slate-700/60' : 'border-slate-100'
-                  }`}
-                >
-                  <div
-                    className={`text-[11px] font-bold flex items-center gap-1 ${
-                      isDark ? 'text-indigo-300' : 'text-slate-600'
-                    }`}
-                  >
-                    <Sparkles className="w-3 h-3 text-indigo-400" />
-                    <span>Đã tạo {msg.suggestions.length} chỉ số đề xuất:</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {msg.suggestions.map((sugg, sIdx) => (
+                <div className="mt-4 space-y-4">
+                  {msg.suggestions.map((sugg, sIdx) => {
+                    const isSaved = savedMetricNames.includes(sugg.name);
+                    return (
                       <div
                         key={sIdx}
-                        onClick={() => onSelectSuggestion(sugg, sIdx)}
-                        className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 group ${
+                        className={`p-4 rounded-xl border space-y-3 transition-colors ${
                           isDark
-                            ? 'bg-[#101827] hover:bg-indigo-950/60 border-slate-800 hover:border-indigo-500/60'
-                            : 'bg-slate-50 hover:bg-indigo-50/60 border-slate-200 hover:border-indigo-300'
+                            ? 'bg-[#141C2E] border-slate-750'
+                            : 'bg-slate-50/90 border-slate-200'
                         }`}
                       >
-                        <div className="min-w-0">
-                          <div
-                            className={`font-semibold truncate ${
+                        {/* Header & Badges */}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
                               isDark
-                                ? 'text-slate-100 group-hover:text-indigo-300'
-                                : 'text-slate-800 group-hover:text-indigo-700'
+                                ? 'bg-indigo-950/80 text-indigo-300 border-indigo-800'
+                                : 'bg-indigo-100/80 text-indigo-800 border-indigo-200'
                             }`}
                           >
+                            <Layers className="w-3 h-3 text-indigo-500" /> Semantic Metric Spec #{sIdx + 1}
+                          </span>
+
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${
+                              isDark
+                                ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800'
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            }`}
+                          >
+                            <ShieldCheck className="w-3 h-3 text-emerald-600 dark:text-emerald-500" /> Semantic Spec Ready
+                          </span>
+                        </div>
+
+                        {/* Title & Description */}
+                        <div>
+                          <h4 className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
                             {sugg.name}
-                          </div>
-                          <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                          </h4>
+                          <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                             {sugg.description}
+                          </p>
+                        </div>
+
+                        {/* Semantic Layer Specification Grid */}
+                        <div className={`p-3 rounded-xl border grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] ${
+                          isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200 shadow-2xs'
+                        }`}>
+                          <div>
+                            <span className="text-slate-500 dark:text-slate-400 block font-medium">Bảng Target</span>
+                            <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                              {sugg.target_table || (tableNames[0] || 'orders')}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 dark:text-slate-400 block font-medium">Phép Gom Nhóm</span>
+                            <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 uppercase">
+                              {sugg.measure_type || 'SUM'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 dark:text-slate-400 block font-medium">Cột Tính Toán</span>
+                            <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                              {sugg.target_column || 'total_amount'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 dark:text-slate-400 block font-medium">Điều Kiện Lọc</span>
+                            <span className="font-mono text-slate-600 dark:text-slate-400 truncate block" title={sugg.filter_condition || 'Nghiệp vụ chuẩn'}>
+                              {sugg.filter_condition || 'Nghiệp vụ chuẩn'}
+                            </span>
                           </div>
                         </div>
-                        <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-400 shrink-0" />
+
+                        {/* Collapsible Compiled SQL Preview */}
+                        {(() => {
+                          const cardKey = `${msg.id}_${sIdx}`;
+                          const isExpanded = !!expandedSqlKeys[cardKey];
+                          return (
+                            <div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedSqlKeys((prev) => ({
+                                    ...prev,
+                                    [cardKey]: !prev[cardKey],
+                                  }))
+                                }
+                                className={`w-full py-1.5 px-3 text-[11px] font-medium rounded-lg border flex items-center justify-between transition-colors cursor-pointer ${
+                                  isDark
+                                    ? 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                                    : 'bg-slate-100 border-slate-200 text-slate-600 hover:text-slate-900'
+                                }`}
+                              >
+                                <span className="flex items-center gap-1.5">
+                                  <Code className="w-3.5 h-3.5 text-indigo-500" />
+                                  <span>Xem SQL Compiled Mẫu (SemanticQueryCompiler Preview)</span>
+                                </span>
+                                {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              </button>
+
+                              {isExpanded && (
+                                <div className="mt-2 animate-in fade-in">
+                                  <SqlCodeViewer sql={sugg.sql_template} title="SQL Compiled bởi SemanticQueryCompiler" theme={theme} />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* Inline Actions */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                          <div className="flex items-center gap-2">
+                            {onRefineWithAI && (
+                              <button
+                                type="button"
+                                onClick={() => onRefineWithAI(sugg)}
+                                className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg border transition-all cursor-pointer inline-flex items-center gap-1 ${
+                                  isDark
+                                    ? 'bg-slate-900 text-slate-300 hover:text-white border-slate-700'
+                                    : 'bg-white text-slate-700 hover:text-slate-900 border-slate-200 shadow-2xs'
+                                }`}
+                              >
+                                <Sparkles className="w-3 h-3 text-indigo-500" /> Nhờ AI tinh chỉnh
+                              </button>
+                            )}
+
+                            {onEditMetric && (
+                              <button
+                                type="button"
+                                onClick={() => onEditMetric(sugg)}
+                                className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg border transition-all cursor-pointer inline-flex items-center gap-1 ${
+                                  isDark
+                                    ? 'bg-slate-900 text-slate-300 hover:text-white border-slate-700'
+                                    : 'bg-white text-slate-700 hover:text-slate-900 border-slate-200 shadow-2xs'
+                                }`}
+                              >
+                                <Edit3 className="w-3 h-3 text-slate-400" /> Chỉnh sửa
+                              </button>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleSaveMetricClick(sugg, sIdx)}
+                            disabled={isSaved}
+                            className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-xs ${
+                              isSaved
+                                ? 'bg-emerald-600 text-white cursor-default'
+                                : 'gradient-btn text-white'
+                            }`}
+                          >
+                            {isSaved ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Đã lưu vào Semantic Layer</span>
+                              </>
+                            ) : (
+                              <>
+                                <PlusCircle className="w-3.5 h-3.5" />
+                                <span>Lưu vào Semantic Layer</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
           </div>
         ))}
 
-        {/* Loading Bubble */}
+        {/* Loading Indicator */}
         {isLoading && (
           <div className="flex flex-col items-start animate-in fade-in">
             <div className="flex items-center gap-1.5 mb-1 px-1">
-              <div className="w-4 h-4 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
-                <Sparkles className="w-2.5 h-2.5 animate-spin" />
+              <div className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-500 dark:text-indigo-400 flex items-center justify-center">
+                <Sparkles className="w-3 h-3 animate-spin" />
               </div>
-              <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                Trợ lý AI
+              <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                AI Agent
               </span>
             </div>
             <div
               className={`p-3.5 rounded-2xl border text-xs flex items-center gap-2.5 shadow-xs ${
                 isDark
-                  ? 'bg-[#162036] border-slate-800 text-slate-300'
-                  : 'bg-white border-slate-200/90 text-slate-600'
+                  ? 'bg-[#0E1526] border-slate-800 text-slate-300'
+                  : 'bg-white border-slate-200 text-slate-700'
               }`}
             >
-              <RefreshCw className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
-              <span>Đang đọc schema và sinh công thức chỉ số an toàn...</span>
+              <RefreshCw className="w-3.5 h-3.5 text-indigo-500 animate-spin" />
+              <span>Đang phân tích schema metadata và sinh công thức chỉ số an toàn...</span>
             </div>
           </div>
         )}
@@ -288,14 +386,14 @@ export const StudioChatStream: React.FC<StudioChatStreamProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Suggestion Pills */}
+      {/* Suggestion Quick Pills */}
       <div
-        className={`px-3 pt-2 pb-1 border-t transition-colors ${
-          isDark ? 'bg-[#131B2E] border-slate-800' : 'bg-white border-slate-200'
+        className={`px-3 pt-2 pb-1 border-t rounded-t-2xl transition-colors ${
+          isDark ? 'bg-[#0E1526] border-slate-800' : 'bg-white border-slate-200'
         }`}
       >
-        <div className="flex items-center gap-1 text-[11px] text-slate-400 mb-1.5">
-          <Lightbulb className="w-3 h-3 text-amber-400" />
+        <div className="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-400 mb-1.5 font-semibold">
+          <Lightbulb className="w-3 h-3 text-amber-500" />
           <span>Gợi ý câu hỏi nhanh:</span>
         </div>
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
@@ -304,10 +402,10 @@ export const StudioChatStream: React.FC<StudioChatStreamProps> = ({
               key={idx}
               type="button"
               onClick={() => setInputVal(item)}
-              className={`text-[11px] border px-2.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`text-[11px] border px-2.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 font-medium ${
                 isDark
-                  ? 'bg-slate-900/90 hover:bg-indigo-950/80 text-slate-300 hover:text-indigo-300 border-slate-750'
-                  : 'bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border-slate-200/80'
+                  ? 'bg-slate-900 hover:bg-indigo-950 text-slate-300 hover:text-indigo-300 border-slate-800'
+                  : 'bg-slate-100 hover:bg-indigo-50 text-slate-800 hover:text-indigo-700 border-slate-200 shadow-2xs'
               }`}
             >
               {item}
@@ -316,11 +414,11 @@ export const StudioChatStream: React.FC<StudioChatStreamProps> = ({
         </div>
       </div>
 
-      {/* Chat Input Bar */}
+      {/* Input Form Bar */}
       <form
         onSubmit={handleSend}
-        className={`p-3 border-t transition-colors ${
-          isDark ? 'bg-[#131B2E] border-slate-800' : 'bg-white border-slate-200/80'
+        className={`p-3 border-t rounded-b-2xl transition-colors ${
+          isDark ? 'bg-[#0E1526] border-slate-800' : 'bg-white border-slate-200'
         }`}
       >
         <div
@@ -335,27 +433,26 @@ export const StudioChatStream: React.FC<StudioChatStreamProps> = ({
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ví dụ: Tính tỷ lệ đơn hàng hoàn thành trong 30 ngày qua..."
+            placeholder="Mô tả chỉ số bạn muốn tính toán bằng tiếng Việt (ví dụ: Tính doanh thu theo từng tháng)..."
             rows={2}
             maxLength={2000}
-            className={`w-full p-2.5 pr-10 text-xs focus:outline-none resize-none bg-transparent ${
-              isDark ? 'text-slate-100 placeholder-slate-500' : 'text-slate-800 placeholder-slate-400'
+            className={`w-full p-3 pr-12 text-xs focus:outline-none resize-none bg-transparent ${
+              isDark ? 'text-slate-100 placeholder-slate-500' : 'text-slate-900 placeholder-slate-400'
             }`}
           />
 
-          {/* Send Button */}
           <button
             type="submit"
             disabled={isLoading || !inputVal.trim()}
-            className="absolute right-2 bottom-2 p-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all cursor-pointer shadow-xs"
-            title="Gửi câu hỏi (Enter)"
+            className="absolute right-2.5 bottom-2.5 p-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all cursor-pointer shadow-md"
+            title="Gửi yêu cầu (Enter)"
           >
             <Send className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        <div className="flex items-center justify-between mt-1.5 px-1 text-[10px] text-slate-400">
-          <span>Nhấn <b>Enter</b> để gửi, <b>Shift + Enter</b> để xuống dòng</span>
+        <div className="flex items-center justify-between mt-1 px-1 text-[10px] text-slate-500 dark:text-slate-400">
+          <span>Bấm <b>Enter</b> để gửi câu hỏi cho Trợ lý AI</span>
           <span>{inputVal.length}/2000</span>
         </div>
       </form>

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { SemanticLayerData } from '@/lib/api';
-import { Share2, Download, Copy, Check, FileCode, Layers } from 'lucide-react';
+import { Share2, Download, Copy, Check } from 'lucide-react';
 
 interface ExportPlaygroundViewProps {
   layer: SemanticLayerData;
@@ -12,6 +12,8 @@ interface ExportPlaygroundViewProps {
 export const ExportPlaygroundView: React.FC<ExportPlaygroundViewProps> = ({ layer, theme }) => {
   const [format, setFormat] = useState<'cube' | 'dbt' | 'json'>('cube');
   const [copied, setCopied] = useState(false);
+
+  const isDark = theme === 'dark';
 
   // Generate Cube.js JS Schema format
   const generateCubeSchema = (): string => {
@@ -144,9 +146,9 @@ ${layer.metrics
       {/* Top Header */}
       <div
         className={`p-4 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 ${
-          theme === 'light'
-            ? 'bg-white border-slate-200 shadow-2xs'
-            : 'bg-slate-900/60 border-slate-800 shadow-lg'
+          isDark
+            ? 'bg-slate-900/60 border-slate-800 shadow-lg text-white'
+            : 'bg-white border-slate-200 shadow-2xs text-slate-900'
         }`}
       >
         <div className="flex items-center gap-3">
@@ -154,7 +156,7 @@ ${layer.metrics
             <Share2 className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold tracking-tight">Semantic Layer Export & Integrations</h2>
+            <h2 className="text-sm font-bold tracking-tight text-slate-900 dark:text-white">Semantic Layer Export & Integrations</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Xuất mô hình dữ liệu sang Cube.js Schema, dbt Semantic Layer YAML hoặc JSON chuẩn hóa
             </p>
@@ -163,33 +165,45 @@ ${layer.metrics
 
         {/* Format Selector Pills */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+          <div className={`flex items-center p-1 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>
             <button
               onClick={() => setFormat('cube')}
-              className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                 format === 'cube'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs font-bold'
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  ? isDark
+                    ? 'bg-slate-900 text-indigo-400 shadow-xs font-extrabold'
+                    : 'bg-white text-indigo-600 shadow-2xs font-extrabold'
+                  : isDark
+                  ? 'text-slate-400 hover:text-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Cube.js Schema
             </button>
             <button
               onClick={() => setFormat('dbt')}
-              className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                 format === 'dbt'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs font-bold'
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  ? isDark
+                    ? 'bg-slate-900 text-indigo-400 shadow-xs font-extrabold'
+                    : 'bg-white text-indigo-600 shadow-2xs font-extrabold'
+                  : isDark
+                  ? 'text-slate-400 hover:text-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               dbt YAML
             </button>
             <button
               onClick={() => setFormat('json')}
-              className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                 format === 'json'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs font-bold'
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  ? isDark
+                    ? 'bg-slate-900 text-indigo-400 shadow-xs font-extrabold'
+                    : 'bg-white text-indigo-600 shadow-2xs font-extrabold'
+                  : isDark
+                  ? 'text-slate-400 hover:text-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               JSON Schema
@@ -198,7 +212,11 @@ ${layer.metrics
 
           <button
             onClick={handleCopy}
-            className="px-3.5 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
+            className={`px-3.5 py-1.5 text-xs font-bold border rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs ${
+              isDark
+                ? 'text-slate-200 bg-slate-900 border-slate-700 hover:bg-slate-800'
+                : 'text-slate-700 bg-white border-slate-200 hover:bg-slate-50'
+            }`}
           >
             {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
             <span>{copied ? 'Đã sao chép' : 'Copy'}</span>
@@ -216,10 +234,10 @@ ${layer.metrics
 
       {/* Code Editor Container */}
       <div
-        className={`rounded-2xl border p-4 font-mono text-xs overflow-x-auto leading-relaxed shadow-sm ${
-          theme === 'light'
-            ? 'bg-white border-slate-200 text-slate-800'
-            : 'bg-slate-950 border-slate-800 text-slate-200'
+        className={`rounded-2xl border p-4 font-mono text-xs overflow-x-auto leading-relaxed shadow-xs ${
+          isDark
+            ? 'bg-slate-950 border-slate-800 text-slate-200'
+            : 'bg-white border-slate-200 text-slate-900'
         }`}
       >
         <pre className="whitespace-pre overflow-x-auto select-text">{activeCode}</pre>
