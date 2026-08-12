@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any
 
 import sqlglot
@@ -10,6 +12,8 @@ from sqlglot import exp
 from src.models.metric_definition import MetricDefinition
 from src.models.schemas import MetricSuggestionItem, MetricSuggestions
 from src.services.llm import get_llm
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_prompt(prompt: str) -> str:
@@ -45,38 +49,127 @@ def _format_columns(columns: list[dict[str, Any]]) -> list[str]:
 
 def build_metric_system_prompt(schema_text: str) -> str:
     """Construct the structured-output prompt in Vietnamese."""
-    return f"""Bạn là Data Analyst. Đề xuất 1-3 Business Metrics bằng tiếng Việt.
-Chỉ trả về MetricDefinition JSON có metric.name, formula.function, formula.expression,
-base_entity, filters, status=pending_approval, confidence, excluded_notes.
-Không tạo SQL, sql_template, YAML, subquery hoặc tên cột không có trong schema.
-formula.function chỉ dùng SUM, COUNT, COUNT_DISTINCT, AVG, MIN, MAX.
-formula.expression chỉ gồm cột của base_entity, số, ngoặc và + - * /.
-Schema semantic:\n{schema_text}"""
+    return f"""Bạn là chuyên gia phân tích dữ liệu (Data Analyst).
+Nhiệm vụ: Đề xuất 1-3 Business Metrics bằng tiếng Việt dựa trên schema cơ sở dữ liệu.
+
+Trả về kết quả ở định dạng JSON thuần túy có cấu trúc như sau:
+{{
+  "metrics": [
+    {{
+      "metric": {{
+        "name": "Tên metric tiếng Việt",
+        "formula": {{
+          "function": "SUM",
+          "expression": "cột_tính_toán"
+        }},
+        "base_entity": "tên_bảng_chính",
+        "filters": [],
+        "status": "pending_approval",
+        "confidence": "high",
+        "excluded_notes": "Ghi chú nếu có"
+      }}
+    }}
+  ]
+}}
+
+Quy tắc BẮT BUỘC:
+1. formula.function chỉ dùng: SUM, COUNT, COUNT_DISTINCT, AVG, MIN, MAX.
+2. formula.expression chỉ gồm cột của base_entity, số và các toán tử (+, -, *, /). Không viết SQL, subquery, alias.
+3. base_entity và các cột phải tồn tại chính xác trong Schema dưới đây.
+
+Schema database:\n{schema_text}"""
+
+
+def _extract_json_from_text(text: str) -> Any:
+    """Extract JSON object or array from LLM response text."""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start_obj, end_obj = cleaned.find("{"), cleaned.rfind("}")
+        if start_obj != -1 and end_obj > start_obj:
+            return json.loads(cleaned[start_obj : end_obj + 1])
+        start_arr, end_arr = cleaned.find("["), cleaned.rfind("]")
+        if start_arr != -1 and end_arr > start_arr:
+            return json.loads(cleaned[start_arr : end_arr + 1])
+        raise
+
+
+def _parse_metric_payload(payload: Any) -> list[MetricDefinition]:
+    """Parse various dictionary or list shapes into MetricDefinition list."""
+    if isinstance(payload, MetricSuggestions):
+        return payload.metrics
+    items: list[Any] = []
+    if isinstance(payload, dict):
+        if "metrics" in payload and isinstance(payload["metrics"], list):
+            items = payload["metrics"]
+        elif "metric" in payload or "name" in payload:
+            items = [payload]
+    elif isinstance(payload, list):
+        items = payload
+
+    definitions: list[MetricDefinition] = []
+    for item in items:
+        try:
+            definitions.append(MetricDefinition.model_validate(item))
+        except Exception as exc:
+            logger.debug("Failed to validate metric item: %s (%s)", item, exc)
+    return definitions
 
 
 async def _invoke_llm(prompt: str, schema_text: str) -> list[MetricDefinition]:
-    llm = get_llm().with_structured_output(MetricSuggestions)
-    response = await llm.ainvoke(
-        [
-            {"role": "system", "content": build_metric_system_prompt(schema_text)},
-            {"role": "user", "content": prompt},
-        ]
-    )
-    if isinstance(response, MetricSuggestions):
-        return response.metrics
-    if isinstance(response, dict):
-        return [MetricDefinition.model_validate(item) for item in response.get("metrics", [])]
-    return []
+    """Invoke LLM with structured output or fallback to raw text parsing."""
+    sys_prompt = build_metric_system_prompt(schema_text)
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": prompt},
+    ]
+    raw_llm = get_llm()
+    try:
+        structured = raw_llm.with_structured_output(MetricSuggestions)
+        response = await structured.ainvoke(messages)
+        definitions = _parse_metric_payload(response)
+        if definitions:
+            return definitions
+    except Exception as exc:
+        logger.info("Structured output fallback triggered: %s", exc)
+
+    try:
+        resp = await raw_llm.ainvoke(messages)
+        raw_text = resp.content if hasattr(resp, "content") else str(resp)
+        parsed = _extract_json_from_text(raw_text)
+        return _parse_metric_payload(parsed)
+    except Exception as exc:
+        logger.error("LLM metric extraction failed: %s", exc)
+        return []
+
 
 
 def _references_schema(definition: MetricDefinition, valid: dict[str, set[str]]) -> bool:
-    columns = valid.get(definition.metric.base_entity)
-    if columns is None:
+    """Check if the metric formula and filters reference existing schema tables and columns."""
+    valid_lower = {k.lower(): (k, v) for k, v in valid.items()}
+    entity_key = definition.metric.base_entity.strip().lower()
+    if entity_key not in valid_lower:
         return False
-    parsed = sqlglot.parse_one(definition.metric.formula.expression)
-    referenced = {column.name for column in parsed.find_all(exp.Column)}
-    referenced.update(item.field for item in definition.metric.filters)
-    return referenced.issubset(columns)
+    actual_table_name, columns = valid_lower[entity_key]
+    definition.metric.base_entity = actual_table_name
+    col_lower = {c.lower(): c for c in columns}
+    try:
+        parsed = sqlglot.parse_one(definition.metric.formula.expression)
+        referenced = {col.name.lower() for col in parsed.find_all(exp.Column)}
+        for item in definition.metric.filters:
+            referenced.add(item.field.lower())
+        return referenced.issubset(set(col_lower.keys()))
+    except Exception:
+        return False
+
 
 
 async def generate_metrics_from_prompt(

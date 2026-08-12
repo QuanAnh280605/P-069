@@ -20,6 +20,8 @@ from src.models.db import (
 )
 from src.services.query_compiler import CompiledQuery
 
+CATALOG_ENDPOINT = "/api/v1/semantic/{db_id}/catalog"
+
 QUERY_ENDPOINT = "/api/v1/semantic/{db_id}/query"
 
 
@@ -501,3 +503,55 @@ async def test_query_execution_error_returns_500(
     )
 
     assert response.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_catalog_returns_canonical_ids_for_live_db(
+    client: Any,
+    async_session: AsyncSession,
+) -> None:
+    """GET catalog returns stable table and column IDs for query controls."""
+    data = await _seed_live_db_with_semantic(async_session)
+    response = await client.get(CATALOG_ENDPOINT.format(db_id=data["sem_db_id"]), headers=_token_headers())
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["source_type"] == "live"
+    assert payload["query_supported"] is True
+    assert payload["tables"][0]["table_name"] == "orders"
+    assert {item["column_id"] for item in payload["tables"][0]["columns"]} == {
+        data["col_created_id"],
+        data["col_total_id"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_catalog_marks_sql_dump_as_not_queryable(
+    client: Any,
+    async_session: AsyncSession,
+) -> None:
+    """GET catalog reports SQL dump query capability without executing data SQL."""
+    data = await _seed_imported_schema_only(async_session)
+    response = await client.get(CATALOG_ENDPOINT.format(db_id=data["sem_db_id"]), headers=_token_headers())
+    assert response.status_code == 200
+    assert response.json()["source_type"] == "sql_dump"
+    assert response.json()["query_supported"] is False
+
+
+@pytest.mark.asyncio
+async def test_catalog_rejects_other_users_database(
+    client: Any,
+    async_session: AsyncSession,
+) -> None:
+    """GET catalog hides semantic databases owned by another user."""
+    data = await _seed_live_db_with_semantic(async_session)
+    other = UserModel(
+        id=2,
+        email="other@company.com",
+        username="other",
+        full_name="Other",
+        hashed_password="hash",
+        role="admin",
+        status="active",
+    )
+    response = await client.get(CATALOG_ENDPOINT.format(db_id=data["sem_db_id"]), headers=_token_headers(other))
+    assert response.status_code == 404

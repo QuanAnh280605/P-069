@@ -33,6 +33,30 @@ class MetricFormula(BaseModel):
     function: MetricFunction
     expression: str = Field(..., min_length=1, max_length=1000)
 
+    @field_validator("function", mode="before")
+    @classmethod
+    def normalize_function(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip().upper()
+        return value
+
+    @field_validator("expression", mode="before")
+    @classmethod
+    def normalize_expression(cls, value: Any) -> Any:
+        """Strip table qualifications if present (e.g. order_header.price -> price)."""
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if "." in cleaned and cleaned != "*":
+                try:
+                    parsed = sqlglot.parse_one(cleaned)
+                    for col in parsed.find_all(exp.Column):
+                        col.set("table", None)
+                    return parsed.sql()
+                except Exception:
+                    pass
+            return cleaned
+        return value
+
     @field_validator("expression")
     @classmethod
     def validate_expression(cls, value: str) -> str:
@@ -52,6 +76,7 @@ class MetricFormula(BaseModel):
             if isinstance(node, exp.Column) and node.table:
                 raise ValueError("Metric expressions cannot reference another entity")
         return cleaned
+
 
     @model_validator(mode="after")
     def validate_star(self) -> MetricFormula:
@@ -82,6 +107,31 @@ class MetricFilter(BaseModel):
         return self
 
 
+_OP_MAP = {
+    "=": "eq",
+    "==": "eq",
+    "eq": "eq",
+    "!=": "neq",
+    "<>": "neq",
+    "neq": "neq",
+    ">": "gt",
+    "gt": "gt",
+    ">=": "gte",
+    "gte": "gte",
+    "<": "lt",
+    "lt": "lt",
+    "<=": "lte",
+    "lte": "lte",
+    "in": "in",
+    "not in": "not_in",
+    "not_in": "not_in",
+    "is null": "is_null",
+    "is_null": "is_null",
+    "is not null": "is_not_null",
+    "is_not_null": "is_not_null",
+}
+
+
 class MetricSpec(BaseModel):
     """Canonical business metric persisted in the metadata store."""
 
@@ -93,15 +143,62 @@ class MetricSpec(BaseModel):
     confidence: MetricConfidence | None = None
     excluded_notes: str = Field(default="", max_length=2000)
 
+    @field_validator("filters", mode="before")
+    @classmethod
+    def normalize_filters(cls, value: Any) -> list[Any]:
+        if not value or not isinstance(value, list):
+            return []
+        valid_filters = []
+        for item in value:
+            if isinstance(item, MetricFilter):
+                valid_filters.append(item)
+            elif isinstance(item, dict):
+                fld = item.get("field") or item.get("column") or item.get("name")
+                raw_op = str(item.get("operator", "eq")).strip().lower()
+                op = _OP_MAP.get(raw_op)
+                val = item.get("value")
+                if fld and op:
+                    valid_filters.append({"field": str(fld).strip(), "operator": op, "value": val})
+        return valid_filters
+
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, value: Any) -> str:
+        if isinstance(value, str) and value.strip().lower() in {"pending_approval", "approved", "needs_review"}:
+            return value.strip().lower()
+        return "pending_approval"
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def normalize_confidence(cls, value: Any) -> str | None:
+        if isinstance(value, str) and value.strip().lower() in {"low", "medium", "high"}:
+            return value.strip().lower()
+        return "high"
+
+
+
 
 class MetricDefinition(BaseModel):
     """Top-level wrapper used by JSON persistence and YAML preview."""
 
     metric: MetricSpec
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_metric_payload(cls, data: Any) -> Any:
+        """Wrap flat metric specification in a 'metric' container if needed."""
+        if isinstance(data, dict):
+            if "metric" in data and isinstance(data["metric"], dict):
+                return data
+            if "name" in data or "formula" in data or "base_entity" in data:
+                return {"metric": data}
+        return data
+
     def to_yaml(self) -> str:
         """Render a stable, Unicode YAML preview."""
         payload = self.model_dump(mode="json", exclude_none=True)
-        if not payload["metric"]["filters"]:
-            payload["metric"].pop("filters")
+        if not payload["metric"].get("filters"):
+            payload["metric"].pop("filters", None)
         return yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
+

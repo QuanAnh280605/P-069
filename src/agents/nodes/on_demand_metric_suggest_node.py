@@ -9,7 +9,11 @@ from src.agents.state import AgentState
 from src.models.metric_definition import MetricDefinition
 from src.models.schemas import MetricSuggestions
 from src.services.llm import get_llm
-from src.services.metrics import build_metric_system_prompt
+from src.services.metrics import (
+    _extract_json_from_text,
+    _parse_metric_payload,
+    build_metric_system_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,21 +25,31 @@ async def on_demand_metric_suggest_node(state: AgentState) -> dict[str, Any]:
         return {"error": "on_demand_metric_suggest_node: enriched_schema is empty"}
     try:
         schema_text = _format_schema_for_prompt(schema)
-        llm = get_llm().with_structured_output(MetricSuggestions)
-        response = await llm.ainvoke(build_metric_system_prompt(schema_text))
-        definitions = _parse_definitions(response)
+        sys_prompt = build_metric_system_prompt(schema_text)
+        definitions = await _generate_definitions_with_fallback(sys_prompt)
         return {"suggested_metrics": [item.model_dump(mode="json") for item in definitions]}
     except Exception as exc:
         logger.warning("Metric definition generation failed: %s", exc)
         return {"error": f"on_demand_metric_suggest_node: {exc}"}
 
 
-def _parse_definitions(response: Any) -> list[MetricDefinition]:
-    if isinstance(response, MetricSuggestions):
-        return response.metrics
-    if isinstance(response, dict):
-        return [MetricDefinition.model_validate(item) for item in response.get("metrics", [])]
-    raise ValueError("LLM returned an invalid metric definition payload")
+async def _generate_definitions_with_fallback(prompt: str) -> list[MetricDefinition]:
+    """Try structured output first, then fallback to text parsing."""
+    raw_llm = get_llm()
+    try:
+        structured = raw_llm.with_structured_output(MetricSuggestions)
+        response = await structured.ainvoke(prompt)
+        definitions = _parse_metric_payload(response)
+        if definitions:
+            return definitions
+    except Exception as exc:
+        logger.info("Structured output fallback in node: %s", exc)
+
+    resp = await raw_llm.ainvoke(prompt)
+    raw_text = resp.content if hasattr(resp, "content") else str(resp)
+    parsed = _extract_json_from_text(raw_text)
+    return _parse_metric_payload(parsed)
+
 
 
 def _format_schema_for_prompt(schema: dict[str, Any]) -> str:

@@ -255,6 +255,7 @@ class ImportedSchemaSummaryResponse(BaseModel):
     """List item for one persisted SQL dump schema."""
 
     id: int
+    semantic_db_id: int | None = None
     display_name: str
     dialect: SchemaDialect
     table_count: int
@@ -294,6 +295,7 @@ class LiveDbSummaryResponse(BaseModel):
     """Summary representation of a persisted live target database connection."""
 
     id: int
+    semantic_db_id: int | None = None
     display_name: str
     dialect: SchemaDialect
     table_count: int
@@ -356,6 +358,36 @@ class CanonicalRelationshipResponse(BaseModel):
     created_at: datetime
 
 
+class SemanticCatalogColumn(BaseModel):
+    """Expose a selectable canonical column to semantic query clients."""
+
+    column_id: int
+    column_name: str
+    business_name: str
+    data_type: str
+    is_time_dimension: bool = False
+    allowed_values: Any = None
+
+
+class SemanticCatalogTable(BaseModel):
+    """Expose one canonical entity and its queryable columns."""
+
+    table_id: int
+    table_name: str
+    business_name: str
+    columns: list[SemanticCatalogColumn] = Field(default_factory=list)
+
+
+class SemanticCatalogResponse(BaseModel):
+    """Describe metadata required by the deterministic query builder."""
+
+    db_id: int
+    source_type: Literal["live", "sql_dump"]
+    query_supported: bool
+    tables: list[SemanticCatalogTable] = Field(default_factory=list)
+    relationships: list[CanonicalRelationshipResponse] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Canonical Semantic Layer — Generate, Approve, Metrics List, History
 # ---------------------------------------------------------------------------
@@ -382,6 +414,7 @@ class MetricListItem(BaseModel):
     """A metric with version, status, and approval info."""
 
     metric_id: int
+    name: str
     definition: MetricDefinition | None
     source: str
     version: int

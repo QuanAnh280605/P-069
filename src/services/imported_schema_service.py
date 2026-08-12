@@ -25,7 +25,12 @@ async def create_imported_schema(
     raw_schema: RawSchemaMetadata,
 ) -> ImportedSchemaResponse:
     """Persist validated schema metadata for one authenticated user."""
-    logger.info("Saving imported schema '%s' (%d tables, dialect=%s)...", display_name, len(raw_schema.tables), raw_schema.dialect.value)
+    logger.info(
+        "Saving imported schema '%s' (%d tables, dialect=%s)...",
+        display_name,
+        len(raw_schema.tables),
+        raw_schema.dialect.value,
+    )
     record = ImportedSchemaModel(
         created_by=owner_id,
         display_name=display_name.strip(),
@@ -69,7 +74,6 @@ async def create_imported_schema(
         logger.warning("Failed to create semantic database for imported schema %d", record.id, exc_info=True)
 
     return _full_response(record)
-
 
 
 async def list_imported_schemas(
@@ -136,6 +140,7 @@ def _summary_response(record: ImportedSchemaModel) -> ImportedSchemaSummaryRespo
     raw_schema = RawSchemaMetadata.model_validate(record.schema_metadata)
     return ImportedSchemaSummaryResponse(
         id=record.id,
+        semantic_db_id=record.semantic_db_id,
         display_name=record.display_name,
         dialect=raw_schema.dialect,
         table_count=len(raw_schema.tables),

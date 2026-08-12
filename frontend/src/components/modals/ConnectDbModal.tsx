@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import { X, Database, Upload, PlusCircle, Loader2, FileText, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { connectLiveTargetDb, uploadSqlDumpPreview, saveImportedSchema, updateLayer, getLocalLayers, convertRawSchemaToLayer, SemanticLayerData } from '@/lib/api';
+import { getStoredToken } from '@/lib/jwt';
+import { connectLiveTargetDb, uploadSqlDumpPreview, saveImportedSchema, updateLayer, convertRawSchemaToLayer } from '@/lib/api';
 
 interface ConnectDbModalProps {
   isOpen: boolean;
@@ -37,16 +38,26 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
 
     setIsAnalyzing(true);
     setLiveDbError('');
+    const accessToken = token || getStoredToken();
 
-    if (token) {
+    if (!accessToken) {
+      setLiveDbError('Vui lòng đăng nhập để lưu kết nối an toàn trên backend.');
+      setIsAnalyzing(false);
+      return;
+    }
+
+    if (accessToken) {
       try {
-        const liveRecord = await connectLiveTargetDb(dbName.trim(), dbType, connUrl.trim(), token);
+        const liveRecord = await connectLiveTargetDb(dbName.trim(), dbType, connUrl.trim(), accessToken);
         const newLayer = convertRawSchemaToLayer(
           liveRecord.id,
           liveRecord.display_name || dbName.trim(),
           liveRecord.dialect || dbType,
           liveRecord.raw_schema,
-          connUrl.trim()
+          undefined,
+          liveRecord.updated_at,
+          liveRecord.semantic_db_id,
+          'live',
         );
         updateLayer(newLayer);
         setIsAnalyzing(false);
@@ -61,7 +72,7 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
       }
     }
 
-    // Offline / Guest Fallback
+    /* Offline / Guest Fallback removed: backend is authoritative.
     setTimeout(() => {
       const newId = `db-${Date.now()}`;
       const newLayer: SemanticLayerData = {
@@ -113,23 +124,37 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
     }, 600);
   };
 
+    */
+  };
+
   const handleUploadDump = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return;
 
     setIsDumpProcessing(true);
     setDumpError('');
+    const accessToken = token || getStoredToken();
 
-    if (token) {
+    if (!accessToken) {
+      setDumpError('Vui lòng đăng nhập để lưu schema trên backend.');
+      setIsDumpProcessing(false);
+      return;
+    }
+
+    if (accessToken) {
       try {
-        const preview = await uploadSqlDumpPreview(file, dumpDialect, token);
+        const preview = await uploadSqlDumpPreview(file, dumpDialect, accessToken);
         const name = dumpDisplayName.trim() || file.name.replace(/\.sql$/i, '');
-        const savedRecord = await saveImportedSchema(name, preview, token);
+        const savedRecord = await saveImportedSchema(name, preview, accessToken);
         const newLayer = convertRawSchemaToLayer(
           savedRecord.id,
           savedRecord.display_name || name,
           savedRecord.dialect || dumpDialect || 'postgresql',
-          savedRecord.raw_schema
+          savedRecord.raw_schema,
+          undefined,
+          savedRecord.updated_at,
+          savedRecord.semantic_db_id,
+          'sql_dump',
         );
         updateLayer(newLayer);
         setIsDumpProcessing(false);
@@ -144,7 +169,7 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
       }
     }
 
-    // Offline / Guest Fallback
+    /* Offline / Guest Fallback removed: backend is authoritative.
     setTimeout(() => {
       const name = dumpDisplayName.trim() || file.name.replace(/\.sql$/i, '');
       const newId = `dump-${Date.now()}`;
@@ -172,6 +197,9 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
       onSuccess(name, newId);
       onClose();
     }, 600);
+  };
+
+    */
   };
 
   return (

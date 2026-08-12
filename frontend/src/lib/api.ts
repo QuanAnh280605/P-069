@@ -15,17 +15,38 @@ export interface SemanticTable {
   columns: SemanticColumn[];
 }
 
-export interface BusinessMetric {
-  id: string;
+export type MetricFunction = 'SUM' | 'COUNT' | 'COUNT_DISTINCT' | 'AVG' | 'MIN' | 'MAX';
+export type MetricStatus = 'pending_approval' | 'approved' | 'needs_review';
+export type MetricConfidence = 'low' | 'medium' | 'high';
+export type FilterOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'not_in' | 'is_null' | 'is_not_null';
+
+export interface MetricFilter {
+  field: string;
+  operator: FilterOperator;
+  value: unknown;
+}
+
+export interface MetricDefinition {
+  metric: {
+    name: string;
+    formula: { function: MetricFunction; expression: string };
+    base_entity: string;
+    filters: MetricFilter[];
+    status: MetricStatus;
+    confidence?: MetricConfidence | null;
+    excluded_notes: string;
+  };
+}
+
+export interface MetricRecord {
+  metric_id: number;
   name: string;
-  description: string;
-  sql_template: string;
-  measure_type?: 'sum' | 'count' | 'avg' | 'min' | 'max' | 'count_distinct';
-  target_table?: string;
-  target_column?: string;
-  filter_condition?: string;
+  definition: MetricDefinition | null;
   source: 'ai' | 'manual';
-  created_at?: string;
+  version: number;
+  status: MetricStatus;
+  approved_by?: number | null;
+  created_at: string;
 }
 
 export interface SemanticLayerData {
@@ -36,20 +57,76 @@ export interface SemanticLayerData {
   status: 'Draft' | 'Saved';
   updated_at: string;
   tables: SemanticTable[];
-  metrics: BusinessMetric[];
+  semantic_db_id?: number | null;
+  source_type?: 'live' | 'sql_dump';
+  metrics: MetricRecord[];
 }
 
 export interface MetricSuggestion {
-  name: string;
-  description: string;
-  sql_template: string;
-  measure_type?: 'sum' | 'count' | 'avg' | 'min' | 'max' | 'count_distinct';
-  target_table?: string;
-  target_column?: string;
-  filter_condition?: string;
+  definition: MetricDefinition;
+  yaml_preview: string;
 }
 
-const INITIAL_LAYERS: SemanticLayerData[] = [
+export interface MetricVersion {
+  version: number;
+  definition: MetricDefinition | null;
+  changed_by?: number | null;
+  change_reason: string;
+  created_at: string;
+}
+
+export interface MetricHistory {
+  metric_id: number;
+  metric_name: string;
+  versions: MetricVersion[];
+}
+
+export interface CatalogColumn {
+  column_id: number;
+  column_name: string;
+  business_name: string;
+  data_type: string;
+  is_time_dimension: boolean;
+  allowed_values: unknown;
+}
+
+export interface CatalogTable {
+  table_id: number;
+  table_name: string;
+  business_name: string;
+  columns: CatalogColumn[];
+}
+
+export interface SemanticCatalog {
+  db_id: number;
+  source_type: 'live' | 'sql_dump';
+  query_supported: boolean;
+  tables: CatalogTable[];
+  relationships: Array<{ from_entity_id: number; to_entity_id: number }>;
+}
+
+export interface SemanticQueryFilter {
+  column_id: number;
+  operator: FilterOperator;
+  value: unknown;
+}
+
+export interface SemanticQueryRequest {
+  metric_ids: number[];
+  dimension_ids: number[];
+  filters: SemanticQueryFilter[];
+  limit: number;
+}
+
+export interface SemanticQueryResult {
+  sql: string;
+  parameters: Record<string, unknown>;
+  columns: string[];
+  rows: unknown[][];
+  row_count: number;
+}
+
+const LEGACY_INITIAL_LAYERS: unknown[] = [
   {
     id: 'db-ecommerce-prod',
     db_name: 'E-Commerce Production Database',
@@ -135,6 +212,9 @@ const INITIAL_LAYERS: SemanticLayerData[] = [
   },
 ];
 
+void LEGACY_INITIAL_LAYERS;
+const INITIAL_LAYERS: SemanticLayerData[] = [];
+
 export function getLocalLayers(): SemanticLayerData[] {
   if (typeof window === 'undefined') return INITIAL_LAYERS;
   const stored = localStorage.getItem('semantic_layers_store');
@@ -186,9 +266,51 @@ function getAuthHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+export class SemanticApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = 'SemanticApiError';
+  }
+}
+
+async function semanticRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      ...getAuthHeader(),
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...init.headers,
+    },
+  });
+  if (!response.ok) throw new SemanticApiError(response.status, await semanticError(response));
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
+}
+
+async function semanticError(response: Response): Promise<string> {
+  const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
+  if (typeof payload?.detail === 'string') return payload.detail;
+  return payload?.detail ? JSON.stringify(payload.detail) : `Request failed (${response.status})`;
+}
+
+function metricResponseToRecord(data: {
+  metric_id: number;
+  definition: MetricDefinition;
+  source: 'ai' | 'manual';
+}): MetricRecord {
+  return {
+    ...data,
+    name: data.definition.metric.name,
+    version: 1,
+    status: data.definition.metric.status,
+    created_at: new Date().toISOString(),
+  };
+}
+
 export async function generateCustomMetricsApi(
   dbId: string,
-  prompt: string
+  prompt: string,
+  targetTables: string[] = [],
 ): Promise<{ suggestions: MetricSuggestion[]; isLiveLLM: boolean }> {
   const res = await fetch(`${API_BASE}/api/v1/semantic/${dbId}/metrics/generate`, {
     method: 'POST',
@@ -196,7 +318,7 @@ export async function generateCustomMetricsApi(
       'Content-Type': 'application/json',
       ...getAuthHeader(),
     },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, target_tables: targetTables.length ? targetTables : null }),
   });
 
   if (!res.ok) {
@@ -215,6 +337,7 @@ export async function generateCustomMetricsApi(
   return { suggestions: data.suggestions, isLiveLLM: true };
 }
 
+/* Legacy SQL metric adapter removed in favor of canonical definitions.
 export async function createMetricApi(
   dbId: string,
   metric: { name: string; description: string; sql_template: string; source: 'ai' | 'manual' }
@@ -280,6 +403,81 @@ export async function deleteMetricApi(dbId: string, metricId: string): Promise<v
   }
 }
 
+*/
+
+export async function createMetricApi(
+  dbId: string,
+  payload: { definition: MetricDefinition; source: 'ai' | 'manual' },
+): Promise<MetricRecord> {
+  const data = await semanticRequest<{ metric_id: number; definition: MetricDefinition; source: 'ai' | 'manual' }>(
+    `/api/v1/semantic/${dbId}/metric`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+  return metricResponseToRecord(data);
+}
+
+export async function updateMetricApi(
+  dbId: string,
+  metricId: number,
+  definition: MetricDefinition,
+): Promise<MetricRecord> {
+  const data = await semanticRequest<{ metric_id: number; definition: MetricDefinition; source: 'ai' | 'manual' }>(
+    `/api/v1/semantic/${dbId}/metric/${metricId}`,
+    { method: 'PUT', body: JSON.stringify({ definition }) },
+  );
+  return metricResponseToRecord(data);
+}
+
+export async function deleteMetricApi(dbId: string, metricId: number): Promise<void> {
+  await semanticRequest<void>(`/api/v1/semantic/${dbId}/metric/${metricId}`, { method: 'DELETE' });
+}
+
+export async function listMetricsApi(dbId: string): Promise<MetricRecord[]> {
+  return semanticRequest<MetricRecord[]>(`/api/v1/semantic/${dbId}/metrics`);
+}
+
+export async function getMetricHistoryApi(dbId: string, metricId: number): Promise<MetricHistory> {
+  return semanticRequest<MetricHistory>(`/api/v1/semantic/${dbId}/metric/${metricId}/history`);
+}
+
+export async function approveMetricsApi(dbId: number): Promise<{ approved_count: number; message: string }> {
+  return semanticRequest('/api/v1/semantic/approve', {
+    method: 'POST',
+    body: JSON.stringify({ db_id: dbId }),
+  });
+}
+
+export async function approveSingleMetricApi(dbId: string, metricId: number): Promise<MetricRecord> {
+  const data = await semanticRequest<{ metric_id: number; definition: MetricDefinition; source: 'ai' | 'manual' }>(
+    `/api/v1/semantic/${dbId}/metric/${metricId}/approve`,
+    { method: 'POST' },
+  );
+  return metricResponseToRecord(data);
+}
+
+
+export async function getSemanticCatalogApi(dbId: string): Promise<SemanticCatalog> {
+  return semanticRequest<SemanticCatalog>(`/api/v1/semantic/${dbId}/catalog`);
+}
+
+export async function executeSemanticQueryApi(
+  dbId: string,
+  request: SemanticQueryRequest,
+): Promise<SemanticQueryResult> {
+  return semanticRequest<SemanticQueryResult>(`/api/v1/semantic/${dbId}/query`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function exportSemanticLayerApi(dbId: string, format: 'json' | 'yaml'): Promise<string> {
+  const response = await fetch(`${API_BASE}/api/v1/semantic/${dbId}/export?format=${format}`, {
+    headers: getAuthHeader(),
+  });
+  if (!response.ok) throw new SemanticApiError(response.status, await semanticError(response));
+  return response.text();
+}
+
 // SQL Dump & Imported Schema Types & Functions
 export interface SqlIdentifier {
   raw_name: string;
@@ -330,6 +528,7 @@ export interface SqlDumpPreview {
 
 export interface ImportedSchemaSummary {
   id: number;
+  semantic_db_id: number | null;
   display_name: string;
   dialect: 'postgresql' | 'mysql' | 'sqlite';
   table_count: number;
@@ -418,6 +617,7 @@ async function requestImportedSchema(
 
 export interface LiveDbSummary {
   id: number;
+  semantic_db_id: number | null;
   display_name: string;
   dialect: 'postgresql' | 'mysql' | 'sqlite';
   table_count: number;
@@ -496,7 +696,9 @@ export function convertRawSchemaToLayer(
   dialect: string,
   rawSchema: any,
   connUrl?: string,
-  updatedAt?: string
+  updatedAt?: string,
+  semanticDbId?: number | null,
+  sourceType: 'live' | 'sql_dump' = 'live',
 ): SemanticLayerData {
   const tables: SemanticTable[] = (rawSchema?.tables || []).map((tbl: any) => {
     const rawTableName =
@@ -528,6 +730,8 @@ export function convertRawSchemaToLayer(
 
   return {
     id: String(id),
+    semantic_db_id: semanticDbId,
+    source_type: sourceType,
     db_name: dbName,
     db_type: (dialect as any) || 'postgresql',
     conn_url: connUrl,

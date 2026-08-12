@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from src.api.auth import get_current_user, get_current_user_profile
 from src.models.db import (
+    CanonicalRelationshipModel,
     ImportedSchemaModel,
     LiveTargetDbModel,
     SemanticColumnModel,
@@ -38,6 +39,9 @@ from src.models.schemas import (
     MetricUpdate,
     MetricVersionItem,
     SemanticApproveV2Response,
+    SemanticCatalogColumn,
+    SemanticCatalogResponse,
+    SemanticCatalogTable,
     SemanticColumnUpdate,
     SemanticGenerateV2Response,
     SemanticQueryRequest,
@@ -414,7 +418,8 @@ async def approve_semantic_layer(
 
     sem_stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == db_id)
     sem_result = await db.execute(sem_stmt)
-    if not sem_result.scalar_one_or_none():
+    sem_db = sem_result.scalar_one_or_none()
+    if not sem_db:
         raise HTTPException(status_code=404, detail="Semantic database not found")
 
     metrics_stmt = select(SemanticMetricModel).where(
@@ -429,16 +434,50 @@ async def approve_semantic_layer(
 
     approved_count = 0
     for metric in draft_metrics:
-        if metric.created_by is not None and metric.created_by != current_user.id:
+        if metric.created_by is not None and metric.created_by != current_user.id and current_user.role != "admin":
             continue
         await approve_metric(db=db, metric_id=metric.id, user_id=current_user.id)
         approved_count += 1
+
+    sem_db.status = "saved"
+    await db.commit()
 
     return SemanticApproveV2Response(
         db_id=db_id,
         approved_count=approved_count,
         message=f"Approved {approved_count} metric(s)",
     )
+
+
+@router.post("/semantic/{db_id}/metric/{metric_id}/approve", response_model=MetricResponse)
+async def approve_single_metric_endpoint(
+    db_id: str,
+    metric_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> MetricResponse:
+    """Approve a single metric by its ID."""
+    numeric_db_id = int(db_id)
+    stmt = select(SemanticMetricModel).where(
+        SemanticMetricModel.id == metric_id,
+        SemanticMetricModel.db_id == numeric_db_id,
+    )
+    metric = (await db.execute(stmt)).scalar_one_or_none()
+    if not metric:
+        raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found in database {db_id}")
+
+    try:
+        approved = await approve_metric(db=db, metric_id=metric_id, user_id=current_user.id)
+        await db.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return MetricResponse(
+        metric_id=approved.id,
+        definition=approved.definition,
+        source=approved.source or "manual",
+    )
+
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +681,9 @@ async def create_metric_endpoint(
             user_id=current_user.id,
         )
     except ValueError as exc:
+        logger.warning("create_metric validation error for db_id=%s: %s", db_id, exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 
     # Update DB status to 'draft' after metric creation
     db_record.status = "draft"
@@ -670,6 +711,7 @@ async def list_metrics(
         items.append(
             MetricListItem(
                 metric_id=m.id,
+                name=m.name,
                 definition=m.definition,
                 source=m.source or "manual",
                 version=m.version or 1,
@@ -679,6 +721,82 @@ async def list_metrics(
             )
         )
     return items
+
+
+@router.get("/semantic/{db_id}/catalog", response_model=SemanticCatalogResponse)
+async def get_semantic_catalog(
+    db_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> SemanticCatalogResponse:
+    """Return canonical IDs and query capability for an owned semantic database."""
+    semantic_db = await _owned_semantic_database(db, db_id, current_user.id)
+    if semantic_db is None:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+    source_type = await _catalog_source_type(db, db_id)
+    return SemanticCatalogResponse(
+        db_id=db_id,
+        source_type=source_type,
+        query_supported=source_type == "live",
+        tables=await _catalog_tables(db, db_id),
+        relationships=await _catalog_relationships(db, db_id),
+    )
+
+
+async def _owned_semantic_database(db: AsyncSession, db_id: int, user_id: int) -> SemanticDatabaseModel | None:
+    """Find an owned semantic database."""
+    stmt = select(SemanticDatabaseModel).where(
+        SemanticDatabaseModel.id == db_id,
+        SemanticDatabaseModel.created_by == user_id,
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def _catalog_tables(db: AsyncSession, db_id: int) -> list[SemanticCatalogTable]:
+    """Load canonical tables and columns for the query builder."""
+    stmt = (
+        select(SemanticTableModel)
+        .where(SemanticTableModel.db_id == db_id)
+        .options(selectinload(SemanticTableModel.columns))
+        .order_by(SemanticTableModel.id)
+    )
+    tables = (await db.execute(stmt)).scalars().all()
+    return [_catalog_table(table) for table in tables]
+
+
+def _catalog_table(table: SemanticTableModel) -> SemanticCatalogTable:
+    """Map a canonical table model to its public catalog representation."""
+    columns = [
+        SemanticCatalogColumn(
+            column_id=column.id,
+            column_name=column.column_name,
+            business_name=column.business_name,
+            data_type=column.data_type,
+            is_time_dimension=column.is_time_dimension,
+            allowed_values=column.allowed_values,
+        )
+        for column in sorted(table.columns, key=lambda item: item.id)
+    ]
+    return SemanticCatalogTable(
+        table_id=table.id,
+        table_name=table.table_name,
+        business_name=table.business_name,
+        columns=columns,
+    )
+
+
+async def _catalog_relationships(db: AsyncSession, db_id: int) -> list[CanonicalRelationshipModel]:
+    """Load canonical relationships for a semantic database."""
+    stmt = select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.connection_id == db_id)
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def _catalog_source_type(db: AsyncSession, db_id: int) -> str:
+    """Identify whether a semantic database is backed by a live connection."""
+    stmt = select(LiveTargetDbModel.id).where(LiveTargetDbModel.semantic_db_id == db_id)
+    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+        return "live"
+    return "sql_dump"
 
 
 @router.get("/semantic/{db_id}/metric/{metric_id}/history", response_model=MetricHistoryResponse)
