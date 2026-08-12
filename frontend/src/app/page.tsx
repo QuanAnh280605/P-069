@@ -2,6 +2,7 @@
 
 import { BarChart3, CheckCircle2, Database, LogOut, Moon, PlusCircle, Search, Settings, Share2, Sparkles, Sun, Trash2 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ConnectDbModal } from '@/components/modals/ConnectDbModal';
@@ -38,6 +39,7 @@ import {
 type WorkspaceTab = 'studio' | 'metrics' | 'explorer' | 'export';
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { user, token, logout, isLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [layers, setLayers] = useState<SemanticLayerData[]>([]);
@@ -58,6 +60,12 @@ export default function DashboardPage() {
     setToast(message);
     window.setTimeout(() => setToast(''), 3000);
   }, []);
+
+  useEffect(() => {
+    if (!isLoading && !token) {
+      router.replace('/login');
+    }
+  }, [isLoading, token, router]);
 
   useEffect(() => {
     if (!token) return;
@@ -115,7 +123,13 @@ export default function DashboardPage() {
     setEditingMetric(metric || null); setEditingSuggestion(suggestion || null); setMetricOpen(true);
   };
 
-  if (isLoading) return <div className='flex min-h-screen items-center justify-center'>Đang khởi tạo workspace...</div>;
+  if (isLoading || !token) {
+    return (
+      <div className='flex min-h-screen items-center justify-center bg-slate-50 text-xs font-semibold text-slate-500 dark:bg-[#0B0F19] dark:text-slate-400'>
+        Đang xác thực tài khoản và chuyển hướng đến trang đăng nhập...
+      </div>
+    );
+  }
 
   return <div className={`flex h-screen overflow-hidden ${theme === 'dark' ? 'bg-[#0B0F19] text-slate-100' : 'bg-slate-50 text-slate-900'}`}>{toast && <div className='fixed right-6 top-6 z-60 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-xl'><CheckCircle2 className='mr-2 inline h-4 w-4 text-emerald-400' />{toast}</div>}<Sidebar layers={layers} selectedId={selectedId} onSelect={(id) => { setSelectedId(id); setTab('studio'); }} onConnect={() => setConnectOpen(true)} onDelete={async (layer) => { if (!token || !window.confirm(`Xóa database ${layer.db_name}?`)) return; await deleteDatabaseApi(layer.id, token); deleteLayer(layer.id); setLayers((current) => current.filter((item) => item.id !== layer.id)); }} onSettings={() => setSettingsOpen(true)} onTheme={toggleTheme} dark={theme === 'dark'} userName={user?.name} onLogout={logout} />
     <main className='flex min-w-0 flex-1 flex-col'>{activeLayer ? <><WorkspaceHeader layer={activeLayer} tab={tab} onTab={setTab} /><div className='flex-1 overflow-y-auto p-4 md:p-5'>{tab === 'studio' && <AIStudioView layer={activeLayer} theme={theme} onMetricsChanged={refreshSemanticData} onEditMetricRequest={(item) => openEditor(undefined, item)} />}{tab === 'metrics' && <MetricsCatalogView dbId={activeLayer.semantic_db_id} metrics={activeLayer.metrics} onDeleteMetric={removeMetric} onEditMetric={(item) => openEditor(item)} onOpenStudio={() => setTab('studio')} onApproveAll={approve} onApproveMetric={approveSingleMetric} />}{tab === 'explorer' && <MetricExplorerView dbId={activeLayer.semantic_db_id} metrics={activeLayer.metrics} catalog={catalog} theme={theme} />}{tab === 'export' && <ExportPlaygroundView dbId={activeLayer.semantic_db_id} />}</div></> : <EmptyWorkspace onConnect={() => setConnectOpen(true)} />}</main>
