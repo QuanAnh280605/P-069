@@ -11,20 +11,20 @@ from sqlalchemy.orm import selectinload
 
 from src.api.auth import get_current_user, get_current_user_profile
 from src.models.db import (
+    ImportedSchemaModel,
+    LiveTargetDbModel,
     SemanticColumnModel,
     SemanticDatabaseModel,
     SemanticMetricModel,
     SemanticTableModel,
     UserModel,
 )
-from src.models.schema_metadata import DiagnosticCode, SchemaDialect
+from src.models.schema_metadata import DiagnosticCode, RawSchemaMetadata, SchemaDialect
 from src.models.schemas import (
     ApproveRequest,
-    ApproveResponse,
     CustomMetricGenerateRequest,
     CustomMetricGenerateResponse,
     GenerateRequest,
-    GenerateResponse,
     ImportedSchemaCreateRequest,
     ImportedSchemaResponse,
     ImportedSchemaSummaryResponse,
@@ -32,14 +32,21 @@ from src.models.schemas import (
     LiveDbResponse,
     LiveDbSummaryResponse,
     MetricCreate,
+    MetricHistoryResponse,
+    MetricListItem,
     MetricResponse,
     MetricUpdate,
+    MetricVersionItem,
+    SemanticApproveV2Response,
     SemanticColumnUpdate,
+    SemanticGenerateV2Response,
+    SemanticQueryRequest,
+    SemanticQueryResponse,
     SemanticTableUpdate,
     SqlDumpPreviewResponse,
     UserProfileResponse,
 )
-from src.services.database import get_db_session
+from src.services.database import decrypt_conn_url, get_db_session
 from src.services.export_service import build_semantic_layer_dict, serialize_to_json, serialize_to_yaml
 from src.services.imported_schema_service import (
     create_imported_schema,
@@ -54,7 +61,15 @@ from src.services.live_db_service import (
     list_live_target_dbs,
 )
 from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
+from src.services.query_compiler import SemanticQueryCompiler
 from src.services.schema_ingestion import parse_sql_dump_preview
+from src.services.semantic_service import (
+    approve_metric,
+    create_metric,
+    delete_semantic_database,
+    enrich_and_save_canonical_schema,
+    get_metric_with_history,
+)
 from src.services.sql_dump_parser_models import SqlDumpParseError
 from src.services.sql_dump_scanner_models import SqlDumpScanError
 
@@ -70,8 +85,18 @@ DEMO_RETAIL_SCHEMA: dict[str, Any] = {
             {"column_name": "id", "data_type": "INTEGER", "is_primary_key": True, "business_name": "Mã đơn hàng"},
             {"column_name": "customer_id", "data_type": "INTEGER", "is_foreign_key": True, "business_name": "Mã KH"},
             {"column_name": "store_id", "data_type": "INTEGER", "is_foreign_key": True, "business_name": "Mã cửa hàng"},
-            {"column_name": "sales_channel_id", "data_type": "INTEGER", "is_foreign_key": True, "business_name": "Kênh bán"},
-            {"column_name": "payment_method_id", "data_type": "INTEGER", "is_foreign_key": True, "business_name": "Phương thức thanh toán"},
+            {
+                "column_name": "sales_channel_id",
+                "data_type": "INTEGER",
+                "is_foreign_key": True,
+                "business_name": "Kênh bán",
+            },
+            {
+                "column_name": "payment_method_id",
+                "data_type": "INTEGER",
+                "is_foreign_key": True,
+                "business_name": "Phương thức thanh toán",
+            },
             {"column_name": "total_amount", "data_type": "NUMERIC", "business_name": "Tổng tiền đơn"},
             {"column_name": "discount_amount", "data_type": "NUMERIC", "business_name": "Tiền giảm giá"},
             {"column_name": "shipping_fee", "data_type": "NUMERIC", "business_name": "Phí vận chuyển"},
@@ -210,6 +235,12 @@ async def connect_live_target_db(
     db: AsyncSession = Depends(get_db_session),
 ) -> LiveDbResponse:
     """Connect to a live target database, encrypt URL, introspect schema without SELECT data, and persist."""
+    logger.info(
+        "Received live DB connect request: display_name='%s', dialect=%s, user_id=%d",
+        body.display_name,
+        body.dialect,
+        current_user.id,
+    )
     try:
         return await create_live_target_db(
             db,
@@ -219,7 +250,9 @@ async def connect_live_target_db(
             body.conn_url,
         )
     except Exception as exc:
+        logger.error("Failed to connect live DB '%s': %s", body.display_name, exc, exc_info=True)
         raise HTTPException(status_code=400, detail=f"Failed to connect and introspect target database: {exc}") from exc
+
 
 
 @router.get("/semantic/db/saved", response_model=list[LiveDbSummaryResponse])
@@ -255,21 +288,143 @@ async def remove_saved_live_target_db(
         raise HTTPException(status_code=404, detail="Saved live database not found")
 
 
+@router.delete("/semantic/db/{db_id}", status_code=204)
+async def remove_database_unified(
+    db_id: str,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    """Delete a database connection or schema and all associated tables, metrics, and relationships."""
+    parsed_id = _parse_int_id(db_id)
+    deleted = False
+    if parsed_id is not None:
+        if await delete_live_target_db(db, current_user.id, parsed_id):
+            deleted = True
+        elif await delete_imported_schema(db, current_user.id, parsed_id):
+            deleted = True
+        elif await delete_semantic_database(db, parsed_id, current_user.id):
+            deleted = True
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Database not found")
+
+
 # ---------------------------------------------------------------------------
 # 3. Flow 1 — Generate & HITL
 # ---------------------------------------------------------------------------
 
 
-@router.post("/semantic/generate", response_model=GenerateResponse, status_code=status.HTTP_202_ACCEPTED)
-async def generate_semantic_layer(request: GenerateRequest) -> GenerateResponse:
-    """Kick-off Flow 1: Introspect -> Enrich -> MetricSuggest -> HITL interrupt."""
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Flow 1 pipeline not yet implemented")
+@router.post("/semantic/generate", response_model=SemanticGenerateV2Response, status_code=status.HTTP_202_ACCEPTED)
+async def generate_semantic_layer(
+    request: GenerateRequest,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> SemanticGenerateV2Response:
+    """Re-run AI Enrichment for an existing semantic database.
+
+    Looks up the source (live DB or imported schema) linked to the semantic db,
+    reconstructs the raw schema metadata, and calls enrich_and_save_canonical_schema.
+    """
+    db_id = request.db_id
+    logger.info("Received request to re-generate AI semantic layer for db_id=%d (user_id=%d)", db_id, current_user.id)
+
+    sem_stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == db_id)
+
+    sem_result = await db.execute(sem_stmt)
+    sem_db = sem_result.scalar_one_or_none()
+    if not sem_db:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+
+    raw_schema, dialect = await _find_source_raw_schema(db, db_id, sem_db.db_type)
+
+    try:
+        result = await enrich_and_save_canonical_schema(
+            db=db,
+            user_id=current_user.id,
+            connection_id=db_id,
+            raw_schema=raw_schema,
+            dialect=dialect,
+        )
+    except Exception as exc:
+        logger.error("Enrichment failed for db_id=%d: %s", db_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Enrichment failed: {exc}") from exc
+
+    return SemanticGenerateV2Response(
+        db_id=db_id,
+        status=result.get("status", "draft"),
+        tables=result.get("tables", []),
+        relationships=result.get("relationships", []),
+    )
 
 
-@router.post("/semantic/approve", response_model=ApproveResponse)
-async def approve_semantic_layer(request: ApproveRequest) -> ApproveResponse:
-    """HITL approval - Save Node: persist reviewed semantic layer to Metadata Store."""
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="HITL approval not yet implemented")
+async def _find_source_raw_schema(
+    db: AsyncSession,
+    semantic_db_id: int,
+    fallback_dialect: str,
+) -> tuple[RawSchemaMetadata, str]:
+    """Find the source model (LiveTargetDbModel or ImportedSchemaModel) for a semantic db.
+
+    Returns (raw_schema, dialect) tuple.
+    """
+    live_stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.semantic_db_id == semantic_db_id)
+    live_result = await db.execute(live_stmt)
+    live_db = live_result.scalar_one_or_none()
+    if live_db:
+        raw_schema = RawSchemaMetadata.model_validate(live_db.schema_metadata)
+        return raw_schema, live_db.dialect
+
+    imported_stmt = select(ImportedSchemaModel).where(ImportedSchemaModel.semantic_db_id == semantic_db_id)
+    imported_result = await db.execute(imported_stmt)
+    imported = imported_result.scalar_one_or_none()
+    if imported:
+        raw_schema = RawSchemaMetadata.model_validate(imported.schema_metadata)
+        return raw_schema, imported.dialect
+
+    raise HTTPException(
+        status_code=404,
+        detail="No source (live DB or imported schema) found for this semantic database",
+    )
+
+
+@router.post("/semantic/approve", response_model=SemanticApproveV2Response)
+async def approve_semantic_layer(
+    request: ApproveRequest,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> SemanticApproveV2Response:
+    """Approve all draft metrics for a semantic database.
+
+    Checks ownership: only metrics created by the current user can be approved.
+    """
+    db_id = request.db_id
+
+    sem_stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == db_id)
+    sem_result = await db.execute(sem_stmt)
+    if not sem_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+
+    metrics_stmt = select(SemanticMetricModel).where(
+        SemanticMetricModel.db_id == db_id,
+        SemanticMetricModel.status == "draft",
+    )
+    metrics_result = await db.execute(metrics_stmt)
+    draft_metrics = metrics_result.scalars().all()
+
+    if not draft_metrics:
+        raise HTTPException(status_code=404, detail="No draft metrics found to approve")
+
+    approved_count = 0
+    for metric in draft_metrics:
+        if metric.created_by is not None and metric.created_by != current_user.id:
+            continue
+        await approve_metric(db=db, metric_id=metric.id, user_id=current_user.id)
+        approved_count += 1
+
+    return SemanticApproveV2Response(
+        db_id=db_id,
+        approved_count=approved_count,
+        message=f"Approved {approved_count} metric(s)",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +498,7 @@ async def update_column(
 
 
 async def _load_schema_context_for_db(db: AsyncSession, db_id: Any) -> dict[str, Any]:
-    """Helper to fetch schema context from database with eager loading or fallback to demo schema."""
+    """Helper to fetch schema context from database with eager loading or fallback to source raw_schema."""
     try:
         numeric_db_id = int(db_id)
         stmt = (
@@ -371,6 +526,31 @@ async def _load_schema_context_for_db(db: AsyncSession, db_id: Any) -> dict[str,
                     ],
                 }
             return schema_dict
+
+        # Fallback to source raw_schema if semantic_tables is empty
+        try:
+            raw_schema_meta, _ = await _find_source_raw_schema(db, numeric_db_id, "postgresql")
+            if raw_schema_meta and raw_schema_meta.tables:
+                schema_dict: dict[str, Any] = {}
+                for tbl in raw_schema_meta.tables:
+                    t_name = tbl.table_name.raw_name
+                    schema_dict[t_name] = {
+                        "business_name": t_name,
+                        "description": "",
+                        "columns": [
+                            {
+                                "column_name": col.column_name.raw_name,
+                                "data_type": col.data_type,
+                                "business_name": col.column_name.raw_name,
+                                "is_primary_key": col.primary_key,
+                                "is_foreign_key": False,
+                            }
+                            for col in tbl.columns
+                        ],
+                    }
+                return schema_dict
+        except Exception:
+            pass
     except (ValueError, TypeError):
         pass
 
@@ -420,38 +600,109 @@ async def generate_custom_metrics(
 
 
 @router.post("/semantic/{db_id}/metric", response_model=MetricResponse, status_code=201)
-async def create_metric(
+async def create_metric_endpoint(
     db_id: str,
     body: MetricCreate,
+    current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricResponse:
-    """Tạo hoặc lưu một Business Metric vào Semantic Layer."""
+    """Tạo Business Metric mới — tự động tạo record trong metric_versions."""
     numeric_db_id = int(db_id)
-    new_metric = SemanticMetricModel(
-        db_id=numeric_db_id,
-        name=body.name,
-        description=body.description,
-        sql_template=body.sql_template,
-        source=body.source,
-    )
-    db.add(new_metric)
 
-    # If DB exists, update its status to 'draft'
     db_stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == numeric_db_id)
-    res = await db.execute(db_stmt)
-    db_record = res.scalar_one_or_none()
-    if db_record:
-        db_record.status = "draft"
+    db_res = await db.execute(db_stmt)
+    db_record = db_res.scalar_one_or_none()
+    if not db_record:
+        raise HTTPException(status_code=404, detail=f"Semantic database {numeric_db_id} not found")
 
+    metric_data: dict[str, Any] = {
+        "name": body.name,
+        "description": body.description,
+        "sql_template": body.sql_template,
+        "source": body.source,
+        "formula": body.formula,
+        "aggregation_type": body.aggregation_type,
+    }
+
+    try:
+        new_metric = await create_metric(
+            db=db,
+            connection_id=numeric_db_id,
+            metric_data=metric_data,
+            user_id=current_user.id,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to create metric: {exc}") from exc
+
+    # Update DB status to 'draft' after metric creation
+    db_record.status = "draft"
     await db.commit()
-    await db.refresh(new_metric)
 
     return MetricResponse(
         metric_id=new_metric.id,
         name=new_metric.name,
         description=new_metric.description,
         sql_template=new_metric.sql_template,
-        source=new_metric.source,
+        source=new_metric.source or "manual",
+    )
+
+
+@router.get("/semantic/{db_id}/metrics", response_model=list[MetricListItem])
+async def list_metrics(
+    db_id: int,
+    db: AsyncSession = Depends(get_db_session),
+) -> list[MetricListItem]:
+    """Danh sách metrics kèm version, status, approved_by."""
+    stmt = select(SemanticMetricModel).where(SemanticMetricModel.db_id == db_id).order_by(SemanticMetricModel.id)
+    result = await db.execute(stmt)
+    metrics = result.scalars().all()
+
+    items: list[MetricListItem] = []
+    for m in metrics:
+        items.append(
+            MetricListItem(
+                metric_id=m.id,
+                name=m.name,
+                description=m.description,
+                sql_template=m.sql_template,
+                source=m.source or "manual",
+                version=m.version or 1,
+                status=m.status or "draft",
+                approved_by=m.approved_by,
+                created_at=m.created_at,
+            )
+        )
+    return items
+
+
+@router.get("/semantic/{db_id}/metric/{metric_id}/history", response_model=MetricHistoryResponse)
+async def get_metric_history(
+    db_id: int,
+    metric_id: int,
+    db: AsyncSession = Depends(get_db_session),
+) -> MetricHistoryResponse:
+    """Lịch sử version của một metric."""
+    metric = await get_metric_with_history(db=db, metric_id=metric_id)
+    if not metric:
+        raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
+    if metric.db_id != db_id:
+        raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found in database {db_id}")
+
+    versions = [
+        MetricVersionItem(
+            version=v.version,
+            formula=v.formula,
+            changed_by=v.changed_by,
+            change_reason=v.change_reason or "",
+            created_at=v.created_at,
+        )
+        for v in sorted(metric.versions, key=lambda x: x.version)
+    ]
+
+    return MetricHistoryResponse(
+        metric_id=metric.id,
+        metric_name=metric.name,
+        versions=versions,
     )
 
 
@@ -544,7 +795,96 @@ async def export_semantic_layer(
 
 
 # ---------------------------------------------------------------------------
-# 7. Health / Status
+# 7. Semantic Query Execution (Flow 2 — Live DB Only)
+# ---------------------------------------------------------------------------
+
+
+def _execute_sql_on_live_db(
+    conn_url: str,
+    sql: str,
+    statement_timeout_ms: int = 15000,
+) -> dict[str, Any]:
+    """Execute read-only SQL against a live database with timeout.
+
+    Returns dict with 'columns', 'rows', 'row_count'.
+    """
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(conn_url, pool_pre_ping=True)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(f"SET statement_timeout = {statement_timeout_ms}"))
+            result = conn.execute(text(sql))
+            columns = list(result.keys())
+            rows = [list(row) for row in result.fetchall()]
+            return {"columns": columns, "rows": rows, "row_count": len(rows)}
+    finally:
+        engine.dispose()
+
+
+@router.post("/semantic/{db_id}/query", response_model=SemanticQueryResponse)
+async def execute_semantic_query(
+    db_id: str,
+    body: SemanticQueryRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> SemanticQueryResponse:
+    """Execute a semantic query (Flow 2 — Live DB Only).
+
+    Compiles metric/dimension selections into SQL via SemanticQueryCompiler,
+    then executes read-only on the linked Live DB with guardrails.
+    """
+    parsed_id = _parse_int_id(db_id)
+    if parsed_id is None:
+        raise HTTPException(status_code=400, detail="Invalid database id")
+
+    # Fetch semantic database record
+    stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == parsed_id)
+    result = await db.execute(stmt)
+    sem_db = result.scalar_one_or_none()
+    if not sem_db:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+
+    # Verify linked LiveTargetDbModel exists (reject SQL Dump)
+    live_stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.semantic_db_id == parsed_id)
+    live_result = await db.execute(live_stmt)
+    live_db = live_result.scalar_one_or_none()
+    if not live_db:
+        raise HTTPException(
+            status_code=400,
+            detail="Query only supported for Live DB connections",
+        )
+
+    # Compile semantic query
+    compiler = SemanticQueryCompiler(db)
+    try:
+        compiled = await compiler.compile(
+            connection_id=parsed_id,
+            metric_ids=body.metric_ids,
+            dimension_ids=body.dimension_ids,
+            limit=body.limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Execute on live DB
+    try:
+        conn_url = decrypt_conn_url(live_db.conn_url_enc)
+        exec_result = _execute_sql_on_live_db(conn_url, compiled.sql)
+        return SemanticQueryResponse(
+            sql=compiled.sql,
+            columns=exec_result["columns"],
+            rows=exec_result["rows"],
+            row_count=exec_result["row_count"],
+        )
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Query execution timed out") from exc
+    except Exception as exc:
+        logger.exception("Query execution failed for db_id=%s", db_id)
+        raise HTTPException(status_code=500, detail="Query execution failed") from exc
+
+
+# ---------------------------------------------------------------------------
+# 8. Health / Status
 # ---------------------------------------------------------------------------
 
 

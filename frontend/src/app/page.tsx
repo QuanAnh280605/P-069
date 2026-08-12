@@ -10,7 +10,21 @@ import { MetricModal } from '@/components/modals/MetricModal';
 import { AIStudioView } from '@/components/views/AIStudioView';
 import { MetricsCatalogView } from '@/components/views/MetricsCatalogView';
 import { ExportPlaygroundView } from '@/components/views/ExportPlaygroundView';
-import { getLocalLayers, updateLayer, deleteLayer, SemanticLayerData, BusinessMetric, MetricSuggestion, deleteMetricApi } from '@/lib/api';
+import {
+  getLocalLayers,
+  updateLayer,
+  deleteLayer,
+  listLiveTargetDbs,
+  listImportedSchemas,
+  getLiveTargetDb,
+  getImportedSchema,
+  convertRawSchemaToLayer,
+  SemanticLayerData,
+  BusinessMetric,
+  MetricSuggestion,
+  deleteMetricApi,
+  deleteDatabaseApi,
+} from '@/lib/api';
 import {
   Database,
   PlusCircle,
@@ -30,7 +44,7 @@ import {
 export type CubeNavTab = 'studio' | 'metrics' | 'export';
 
 export default function ChatGPTDashboardPage() {
-  const { user, logout, isLoading } = useAuth();
+  const { user, token, logout, isLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
@@ -47,12 +61,62 @@ export default function ChatGPTDashboardPage() {
 
   useEffect(() => {
     setMounted(true);
-    const local = getLocalLayers();
-    setLayers(local);
-    if (local.length > 0) {
-      setSelectedLayerId(local[0].id);
+    async function syncBackendData() {
+      let local = getLocalLayers();
+      if (token) {
+        try {
+          const [liveDbs, importedSchemas] = await Promise.all([
+            listLiveTargetDbs(token).catch(() => []),
+            listImportedSchemas(token).catch(() => []),
+          ]);
+
+          for (const live of liveDbs) {
+            const idStr = String(live.id);
+            if (!local.some((l) => l.id === idStr)) {
+              const fullRecord = await getLiveTargetDb(live.id, token).catch(() => null);
+              if (fullRecord) {
+                const layer = convertRawSchemaToLayer(
+                  fullRecord.id,
+                  fullRecord.display_name,
+                  fullRecord.dialect,
+                  fullRecord.raw_schema,
+                  undefined,
+                  fullRecord.updated_at
+                );
+                updateLayer(layer);
+              }
+            }
+          }
+
+          for (const imp of importedSchemas) {
+            const idStr = String(imp.id);
+            if (!local.some((l) => l.id === idStr)) {
+              const fullRecord = await getImportedSchema(imp.id, token).catch(() => null);
+              if (fullRecord) {
+                const layer = convertRawSchemaToLayer(
+                  fullRecord.id,
+                  fullRecord.display_name,
+                  fullRecord.dialect,
+                  fullRecord.raw_schema,
+                  undefined,
+                  fullRecord.updated_at
+                );
+                updateLayer(layer);
+              }
+            }
+          }
+          local = getLocalLayers();
+        } catch {
+          // Fallback to local
+        }
+      }
+      setLayers(local);
+      if (local.length > 0 && !selectedLayerId) {
+        setSelectedLayerId(local[0].id);
+      }
     }
-  }, []);
+    syncBackendData();
+  }, [token]);
 
   const refreshLayers = (preferredId?: string) => {
     const updated = getLocalLayers();
@@ -76,16 +140,23 @@ export default function ChatGPTDashboardPage() {
     showToast(`🎉 Đã kết nối thành công Database "${newDbName}"!`);
   };
 
-  const handleDeleteDb = (id: string, e: React.MouseEvent) => {
+  const handleDeleteDb = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('Bạn có chắc chắn muốn xóa kết nối Database này?')) {
+    if (confirm('Bạn có chắc chắn muốn xóa kết nối Database này và toàn bộ dữ liệu liên quan?')) {
+      if (token) {
+        try {
+          await deleteDatabaseApi(id, token);
+        } catch (err) {
+          console.error('Lỗi khi xóa DB trên server:', err);
+        }
+      }
       deleteLayer(id);
       const remaining = getLocalLayers();
       setLayers(remaining);
       if (selectedLayerId === id) {
         setSelectedLayerId(remaining.length > 0 ? remaining[0].id : null);
       }
-      showToast('🗑️ Đã xóa kết nối Database.');
+      showToast('🗑️ Đã xóa kết nối Database và dữ liệu liên quan.');
     }
   };
 

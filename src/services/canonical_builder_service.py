@@ -115,8 +115,7 @@ def _validate_column_ordinals(table: TableMetadata) -> None:
     ordinals = [col.ordinal_position for col in table.columns]
     if len(ordinals) != len(set(ordinals)):
         raise ValueError(
-            f"Table '{table.table_name.raw_name}': "
-            "duplicate column ordinal_position detected in canonical schema."
+            f"Table '{table.table_name.raw_name}': duplicate column ordinal_position detected in canonical schema."
         )
 
 
@@ -195,9 +194,7 @@ def _validate_fk_target_columns(
         return
     target_cols: set[str] = {col.column_name.normalized_name for col in target.columns}
     # Map normalized_name → raw_name so error message shows original DDL spelling.
-    referred_col_map: dict[str, str] = {
-        col.normalized_name: col.raw_name for col in fk.referred_columns
-    }
+    referred_col_map: dict[str, str] = {col.normalized_name: col.raw_name for col in fk.referred_columns}
     missing_normalized = set(referred_col_map) - target_cols
     if missing_normalized:
         missing_raw = sorted(referred_col_map[n] for n in missing_normalized)
@@ -217,14 +214,16 @@ def summarize_canonical_schema(raw_schema: RawSchemaMetadata) -> dict[str, Any]:
     tables_summary = []
     for table in raw_schema.tables:
         columns_summary = _summarize_columns(table.columns)
-        tables_summary.append({
-            "table_name": table.table_name.raw_name,
-            "schema_name": table.schema_name.normalized_name,
-            "column_count": len(table.columns),
-            "has_primary_key": table.primary_key is not None,
-            "foreign_key_count": len(table.foreign_keys),
-            "columns": columns_summary,
-        })
+        tables_summary.append(
+            {
+                "table_name": table.table_name.raw_name,
+                "schema_name": table.schema_name.normalized_name,
+                "column_count": len(table.columns),
+                "has_primary_key": table.primary_key is not None,
+                "foreign_key_count": len(table.foreign_keys),
+                "columns": columns_summary,
+            }
+        )
     return {
         "dialect": raw_schema.dialect.value,
         "contract_version": raw_schema.contract_version,

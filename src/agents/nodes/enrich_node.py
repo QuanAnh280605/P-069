@@ -81,12 +81,14 @@ def _parse_enrich_response(raw_response: str, raw_schema: dict[str, Any]) -> dic
             }
             for c in tbl.get("columns", [])
         ]
-        fallback_tables.append({
-            "table_name": t_name,
-            "business_name": t_name.replace("_", " ").title(),
-            "description": f"Bảng {t_name}",
-            "columns": cols,
-        })
+        fallback_tables.append(
+            {
+                "table_name": t_name,
+                "business_name": t_name.replace("_", " ").title(),
+                "description": f"Bảng {t_name}",
+                "columns": cols,
+            }
+        )
     return {"tables": fallback_tables}
 
 
@@ -112,4 +114,3 @@ async def enrich_node(state: AgentState) -> dict[str, Any]:
     except Exception as exc:
         logger.error("enrich_node error: %s", exc)
         return {"error": f"enrich_node: {exc}"}
-

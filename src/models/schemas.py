@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Literal
 
@@ -116,6 +118,8 @@ class MetricCreate(BaseModel):
     description: str = Field(..., min_length=1, max_length=1000, description="Mô tả nghiệp vụ")
     sql_template: str = Field(..., min_length=1, description="SQL template tham chiếu (SELECT only)")
     source: Literal["ai", "manual"] = Field(default="manual", description="Nguồn gốc metric")
+    formula: str = Field(default="", description="Công thức metric (e.g. SUM(orders.total))")
+    aggregation_type: str | None = Field(default=None, description="Kiểu aggregation: SUM, COUNT, AVG, etc.")
 
 
 class MetricUpdate(BaseModel):
@@ -134,6 +138,27 @@ class MetricResponse(BaseModel):
     description: str
     sql_template: str
     source: Literal["ai", "manual"]
+
+
+class MetricVersionResponse(BaseModel):
+    """Response for a single metric version record."""
+
+    id: int
+    metric_id: int
+    version: int
+    formula: str
+    changed_by: int | None = None
+    change_reason: str = ""
+    created_at: datetime
+
+
+class MetricWithHistoryResponse(MetricResponse):
+    """Extended MetricResponse with version, status, approved_by, and version history."""
+
+    version: int
+    status: str
+    approved_by: int | None = None
+    history: list[MetricVersionResponse] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +180,10 @@ class MetricSuggestionItem(BaseModel):
     description: str = Field(..., min_length=1, max_length=1000, description="Mô tả chỉ số bằng tiếng Việt")
     sql_template: str = Field(..., min_length=1, description="Đúng một câu lệnh SELECT duy nhất")
     source: Literal["ai"] = Field(default="ai", description="Nguồn gợi ý")
+    target_table: str | None = Field(default=None, description="Tên bảng chính")
+    measure_type: str | None = Field(default=None, description="Hàm tổng hợp: SUM, COUNT, AVG, MIN, MAX...")
+    target_column: str | None = Field(default=None, description="Tên cột tính toán chính")
+    filter_condition: str | None = Field(default=None, description="Mô tả hoặc mệnh đề lọc WHERE")
 
 
 class CustomMetricGenerateResponse(BaseModel):
@@ -169,6 +198,10 @@ class GeneratedMetric(BaseModel):
     name: str = Field(..., description="Tên chỉ số nghiệp vụ bằng tiếng Việt")
     description: str = Field(..., description="Mô tả chi tiết ý nghĩa nghiệp vụ bằng tiếng Việt")
     sql_template: str = Field(..., description="Đúng một câu lệnh SELECT chuẩn SQL")
+    target_table: str | None = Field(default=None, description="Tên bảng chính trong SQL")
+    measure_type: str | None = Field(default=None, description="Phép tổng hợp SUM, COUNT, AVG...")
+    target_column: str | None = Field(default=None, description="Tên cột tính toán")
+    filter_condition: str | None = Field(default=None, description="Điều kiện lọc WHERE nếu có")
 
 
 class MetricSuggestions(BaseModel):
@@ -198,6 +231,8 @@ class GenerateResponse(BaseModel):
     raw_schema: RawSchema
     enriched_schema: dict[str, Any] = Field(default_factory=dict)
     suggested_metrics: list[dict[str, Any]] = Field(default_factory=list)
+    canonical_tables: list[dict[str, Any]] = Field(default_factory=list)
+    canonical_relationships: list[CanonicalRelationshipResponse] = Field(default_factory=list)
 
 
 class ApproveRequest(BaseModel):
@@ -291,3 +326,99 @@ class LiveDbResponse(LiveDbSummaryResponse):
     """Full representation of a persisted live target database including raw schema."""
 
     raw_schema: RawSchemaMetadata
+
+
+# ---------------------------------------------------------------------------
+# Semantic Query (Flow 2 — Live DB Only)
+# ---------------------------------------------------------------------------
+
+
+class SemanticQueryRequest(BaseModel):
+    """Request payload for executing a semantic query (Flow 2)."""
+
+    metric_ids: list[int] = Field(..., min_length=1, description="List of approved metric IDs")
+    dimension_ids: list[int] = Field(default_factory=list, description="List of column IDs for GROUP BY dimensions")
+    filters: list[dict[str, Any]] | None = Field(
+        default=None, description="Filters (format: {column, operator, value})"
+    )
+    limit: int = Field(default=100, ge=1, le=1000, description="Max rows to return (default 100, max 1000)")
+
+
+class SemanticQueryResponse(BaseModel):
+    """Response from a semantic query execution."""
+
+    sql: str = Field(..., description="Compiled SQL query")
+    columns: list[str] = Field(default_factory=list, description="Column names in result")
+    rows: list[list[Any]] = Field(default_factory=list, description="Result rows")
+    row_count: int = Field(default=0, description="Number of rows returned")
+
+
+# ---------------------------------------------------------------------------
+# Canonical Relationships
+# ---------------------------------------------------------------------------
+
+
+class CanonicalRelationshipResponse(BaseModel):
+    """Response for a canonical relationship between two semantic tables."""
+
+    id: int
+    connection_id: int
+    from_entity_id: int
+    to_entity_id: int
+    relationship_type: str
+    join_condition: str
+    created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Canonical Semantic Layer — Generate, Approve, Metrics List, History
+# ---------------------------------------------------------------------------
+
+
+class SemanticGenerateV2Response(BaseModel):
+    """Response after re-running AI enrichment (POST /semantic/generate)."""
+
+    db_id: int
+    status: str = "draft"
+    tables: list[dict[str, Any]] = Field(default_factory=list)
+    relationships: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SemanticApproveV2Response(BaseModel):
+    """Response after approving all metrics in a semantic database."""
+
+    db_id: int
+    approved_count: int
+    message: str = "Metrics approved successfully"
+
+
+class MetricListItem(BaseModel):
+    """A metric with version, status, and approval info."""
+
+    metric_id: int
+    name: str
+    description: str
+    sql_template: str
+    source: str
+    version: int
+    status: str
+    approved_by: int | None = None
+    created_at: datetime
+
+
+class MetricVersionItem(BaseModel):
+    """One version entry in a metric's history."""
+
+    version: int
+    formula: str
+    changed_by: int | None = None
+    change_reason: str = ""
+    created_at: datetime
+
+
+class MetricHistoryResponse(BaseModel):
+    """Response containing a metric's version history."""
+
+    metric_id: int
+    metric_name: str
+    versions: list[MetricVersionItem]

@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { X, Database, Upload, PlusCircle, Loader2, FileText, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { connectLiveTargetDb, uploadSqlDumpPreview, saveImportedSchema, updateLayer, getLocalLayers, SemanticLayerData } from '@/lib/api';
+import { connectLiveTargetDb, uploadSqlDumpPreview, saveImportedSchema, updateLayer, getLocalLayers, convertRawSchemaToLayer, SemanticLayerData } from '@/lib/api';
 
 interface ConnectDbModalProps {
   isOpen: boolean;
@@ -40,9 +40,17 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
 
     if (token) {
       try {
-        await connectLiveTargetDb(dbName.trim(), dbType, connUrl.trim(), token);
+        const liveRecord = await connectLiveTargetDb(dbName.trim(), dbType, connUrl.trim(), token);
+        const newLayer = convertRawSchemaToLayer(
+          liveRecord.id,
+          liveRecord.display_name || dbName.trim(),
+          liveRecord.dialect || dbType,
+          liveRecord.raw_schema,
+          connUrl.trim()
+        );
+        updateLayer(newLayer);
         setIsAnalyzing(false);
-        onSuccess(dbName.trim());
+        onSuccess(dbName.trim(), newLayer.id);
         onClose();
         return;
       } catch (err: unknown) {
@@ -116,9 +124,16 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
       try {
         const preview = await uploadSqlDumpPreview(file, dumpDialect, token);
         const name = dumpDisplayName.trim() || file.name.replace(/\.sql$/i, '');
-        await saveImportedSchema(name, preview, token);
+        const savedRecord = await saveImportedSchema(name, preview, token);
+        const newLayer = convertRawSchemaToLayer(
+          savedRecord.id,
+          savedRecord.display_name || name,
+          savedRecord.dialect || dumpDialect || 'postgresql',
+          savedRecord.raw_schema
+        );
+        updateLayer(newLayer);
         setIsDumpProcessing(false);
-        onSuccess(name);
+        onSuccess(name, newLayer.id);
         onClose();
         return;
       } catch (err: unknown) {
@@ -160,10 +175,10 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
-      <div className="glass-card w-full max-w-xl rounded-2xl border border-indigo-500/30 shadow-2xl overflow-hidden bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 dark:bg-slate-950/75 backdrop-blur-sm animate-in fade-in">
+      <div className="glass-card w-full max-w-xl rounded-2xl border border-slate-200 dark:border-indigo-500/30 shadow-2xl overflow-hidden bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
         {/* Modal Header */}
-        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950/60">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/90 dark:bg-slate-950/60">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200 dark:border-indigo-500/30">
               <PlusCircle className="w-4 h-4" />
@@ -182,13 +197,13 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
         </div>
 
         {/* Tab Selector */}
-        <div className="flex border-b border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-950/40 p-1">
+        <div className="flex border-b border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-950/40 p-1">
           <button
             onClick={() => setActiveTab('live')}
             className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
               activeTab === 'live'
-                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs border border-slate-200/80 dark:border-slate-800'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/40'
             }`}
           >
             <Database className="w-4 h-4" />
@@ -198,8 +213,8 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
             onClick={() => setActiveTab('dump')}
             className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
               activeTab === 'dump'
-                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs border border-slate-200/80 dark:border-slate-800'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/40'
             }`}
           >
             <Upload className="w-4 h-4" />
@@ -221,7 +236,7 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
                   placeholder="e.g. E-Commerce Production DB"
                   value={dbName}
                   onChange={(e) => setDbName(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                 />
               </div>
 
@@ -232,12 +247,12 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
                 <select
                   value={dbType}
                   onChange={(e) => setDbType(e.target.value as any)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
-                  <option value="auto">Auto Detect</option>
-                  <option value="postgresql">PostgreSQL</option>
-                  <option value="mysql">MySQL</option>
-                  <option value="sqlite">SQLite</option>
+                  <option value="auto" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">Auto Detect</option>
+                  <option value="postgresql" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">PostgreSQL</option>
+                  <option value="mysql" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">MySQL</option>
+                  <option value="sqlite" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">SQLite</option>
                 </select>
               </div>
 
@@ -251,7 +266,7 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
                   placeholder="postgresql+asyncpg://user:pass@localhost:5432/ecommerce_db"
                   value={connUrl}
                   onChange={(e) => setConnUrl(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                 />
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 flex items-center gap-1">
                   🔒 Chuỗi URL được mã hóa Fernet an toàn và chỉ dùng SQLAlchemy Inspector đọc metadata.
@@ -269,7 +284,7 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
                 >
                   Hủy
                 </button>
@@ -303,7 +318,7 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
                   placeholder="Ví dụ: Schema bán hàng tháng 8"
                   value={dumpDisplayName}
                   onChange={(e) => setDumpDisplayName(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                 />
               </div>
 
@@ -311,7 +326,7 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                   Chọn File .SQL Dump
                 </label>
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3">
+                <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/80 transition-colors">
                   <FileText className="h-5 w-5 text-cyan-600 dark:text-cyan-400 shrink-0" />
                   <span className="truncate text-xs text-slate-700 dark:text-slate-300">
                     {file?.name || 'Chọn file SQL schema DDL (.sql)...'}
@@ -332,11 +347,11 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
                 <select
                   value={dumpDialect}
                   onChange={(e) => setDumpDialect(e.target.value as any)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
-                  <option value="">Auto Detect</option>
-                  <option value="postgresql">PostgreSQL</option>
-                  <option value="mysql">MySQL</option>
+                  <option value="" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">Auto Detect</option>
+                  <option value="postgresql" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">PostgreSQL</option>
+                  <option value="mysql" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">MySQL</option>
                 </select>
               </div>
 
@@ -351,7 +366,7 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
                 >
                   Hủy
                 </button>

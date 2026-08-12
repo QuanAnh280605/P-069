@@ -1,4 +1,4 @@
-"""Demo script to execute metric_suggest_node and display user-facing Business Metrics."""
+"""Demo script to execute on_demand_metric_suggest_node and display user-facing Business Metrics."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from pathlib import Path
 # Ensure root directory is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.agents.nodes.metric_suggest_node import metric_suggest_node
+from src.agents.nodes.on_demand_metric_suggest_node import on_demand_metric_suggest_node
 
 # E-Commerce Canonical Schema Metadata Example
 SAMPLE_CANONICAL_SCHEMA = {
@@ -86,11 +86,11 @@ SAMPLE_CANONICAL_SCHEMA = {
 
 async def main() -> None:
     print("=" * 80)
-    print(" 🔍 Đang chạy Agent metric_suggest_node với Canonical Schema mẫu...")
+    print(" 🔍 Đang chạy Agent On-demand Metric Generator (on_demand_metric_suggest_node)...")
     print("=" * 80)
 
     state = {"enriched_schema": SAMPLE_CANONICAL_SCHEMA}
-    result = await metric_suggest_node(state)
+    result = await on_demand_metric_suggest_node(state)
 
     if "error" in result:
         print(f"\n❌ Lỗi: {result['error']}")

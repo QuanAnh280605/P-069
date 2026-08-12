@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any
 
@@ -5,9 +6,19 @@ from langchain_openai import ChatOpenAI
 
 from src.config import Settings, get_settings
 
-# Tắt LangSmith tracing nếu không có API key hợp lệ
-if not os.environ.get("LANGCHAIN_API_KEY"):
+logger = logging.getLogger(__name__)
+
+# Tắt LangSmith tracing nếu không có API key hợp lệ hoặc LANGCHAIN_TRACING_V2=false
+_langchain_key = os.environ.get("LANGCHAIN_API_KEY", "").strip()
+_tracing_val = os.environ.get("LANGCHAIN_TRACING_V2", "false").strip().lower()
+
+if (
+    not _langchain_key
+    or _langchain_key in ("your-langsmith-key-here", "dummy", "none")
+    or _tracing_val in ("false", "0", "off", "no")
+):
     os.environ["LANGCHAIN_TRACING_V2"] = "false"
+    os.environ.pop("LANGCHAIN_API_KEY", None)
 
 # Default model per provider (fallback when MODEL_NAME is empty)
 _DEFAULT_MODELS = {
@@ -55,6 +66,13 @@ def get_llm() -> ChatOpenAI:
     settings = get_settings()
     api_key, base_url, model_name = _resolve_llm_config(settings)
 
+    logger.info(
+        "Instantiating LLM client (provider=%s, model=%s, base_url=%s)",
+        settings.llm_provider,
+        model_name,
+        base_url or "default",
+    )
+
     kwargs: dict[str, Any] = {
         "model": model_name,
         "api_key": api_key,
@@ -64,3 +82,4 @@ def get_llm() -> ChatOpenAI:
         kwargs["base_url"] = base_url
 
     return ChatOpenAI(**kwargs)
+

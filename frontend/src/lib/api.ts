@@ -474,3 +474,66 @@ export async function deleteLiveTargetDb(id: number, token: string): Promise<voi
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
 }
+
+export async function deleteDatabaseApi(id: string, token: string): Promise<void> {
+  const numId = Number(id);
+  if (isNaN(numId)) {
+    return;
+  }
+  const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    await deleteLiveTargetDb(numId, token).catch(() => null);
+    await deleteImportedSchema(numId, token).catch(() => null);
+  }
+}
+
+export function convertRawSchemaToLayer(
+  id: string | number,
+  dbName: string,
+  dialect: string,
+  rawSchema: any,
+  connUrl?: string,
+  updatedAt?: string
+): SemanticLayerData {
+  const tables: SemanticTable[] = (rawSchema?.tables || []).map((tbl: any) => {
+    const rawTableName =
+      typeof tbl.table_name === 'object' && tbl.table_name !== null
+        ? tbl.table_name.raw_name || tbl.table_name.normalized_name
+        : String(tbl.table_name || 'table');
+
+    const columns: SemanticColumn[] = (tbl.columns || []).map((col: any) => {
+      const rawColName =
+        typeof col.column_name === 'object' && col.column_name !== null
+          ? col.column_name.raw_name || col.column_name.normalized_name
+          : String(col.column_name || 'column');
+      const dataType = col.data_type || col.raw_data_type || 'VARCHAR';
+      return {
+        column_name: rawColName,
+        data_type: dataType,
+        business_name: rawColName,
+        description: '',
+      };
+    });
+
+    return {
+      table_name: rawTableName,
+      business_name: rawTableName,
+      description: '',
+      columns,
+    };
+  });
+
+  return {
+    id: String(id),
+    db_name: dbName,
+    db_type: (dialect as any) || 'postgresql',
+    conn_url: connUrl,
+    status: 'Draft',
+    updated_at: updatedAt || new Date().toISOString().replace('T', ' ').slice(0, 16),
+    tables,
+    metrics: [],
+  };
+}

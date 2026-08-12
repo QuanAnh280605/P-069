@@ -31,6 +31,26 @@ export interface ChatMessage {
   isError?: boolean;
 }
 
+const extractTableFromSql = (sql: string): string => {
+  const match = sql.match(/FROM\s+["`]?([a-zA-Z0-9_\.]+)/i);
+  return match ? match[1].replace(/["`]/g, '') : '-';
+};
+
+const extractAggFromSql = (sql: string): string => {
+  const match = sql.match(/(COUNT_DISTINCT|COUNT|SUM|AVG|MIN|MAX)\s*\(/i);
+  return match ? match[1].toUpperCase() : 'COUNT';
+};
+
+const extractColFromSql = (sql: string): string => {
+  const match = sql.match(/(?:COUNT_DISTINCT|COUNT|SUM|AVG|MIN|MAX)\s*\(\s*(?:DISTINCT\s+)?["`]?([a-zA-Z0-9_\.\*]+)/i);
+  return match ? match[1].replace(/["`]/g, '') : '*';
+};
+
+const extractWhereFromSql = (sql: string): string => {
+  const match = sql.match(/WHERE\s+([^;\n]+)/i);
+  return match ? match[1].trim() : 'Không có';
+};
+
 interface StudioChatStreamProps {
   messages: ChatMessage[];
   onSendMessage: (promptText: string) => Promise<void>;
@@ -236,25 +256,25 @@ export const StudioChatStream: React.FC<StudioChatStreamProps> = ({
                           <div>
                             <span className="text-slate-500 dark:text-slate-400 block font-medium">Bảng Target</span>
                             <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                              {sugg.target_table || (tableNames[0] || 'orders')}
+                              {sugg.target_table || extractTableFromSql(sugg.sql_template)}
                             </span>
                           </div>
                           <div>
                             <span className="text-slate-500 dark:text-slate-400 block font-medium">Phép Gom Nhóm</span>
                             <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 uppercase">
-                              {sugg.measure_type || 'SUM'}
+                              {sugg.measure_type || extractAggFromSql(sugg.sql_template)}
                             </span>
                           </div>
                           <div>
                             <span className="text-slate-500 dark:text-slate-400 block font-medium">Cột Tính Toán</span>
                             <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                              {sugg.target_column || 'total_amount'}
+                              {sugg.target_column || extractColFromSql(sugg.sql_template)}
                             </span>
                           </div>
                           <div>
                             <span className="text-slate-500 dark:text-slate-400 block font-medium">Điều Kiện Lọc</span>
-                            <span className="font-mono text-slate-600 dark:text-slate-400 truncate block" title={sugg.filter_condition || 'Nghiệp vụ chuẩn'}>
-                              {sugg.filter_condition || 'Nghiệp vụ chuẩn'}
+                            <span className="font-mono text-slate-600 dark:text-slate-400 truncate block" title={sugg.filter_condition || extractWhereFromSql(sugg.sql_template)}>
+                              {sugg.filter_condition || extractWhereFromSql(sugg.sql_template)}
                             </span>
                           </div>
                         </div>

@@ -73,7 +73,7 @@ export const AIStudioView: React.FC<AIStudioViewProps> = ({
           {
             id: `bot_${Math.random().toString(36).slice(2, 9)}`,
             sender: 'assistant',
-            text: `Tôi đã phân tích cấu trúc các bảng (${tableNames.join(', ')}) và đề xuất ${suggestions.length} Semantic Metric Specification (định nghĩa thuộc tính ngữ nghĩa) vào Semantic Layer bên dưới:`,
+            text: `Tôi đã phân tích cấu trúc cơ sở dữ liệu (${tableNames.length} bảng) và đề xuất ${suggestions.length} Semantic Metric Specification (định nghĩa thuộc tính ngữ nghĩa) vào Semantic Layer bên dưới:`,
             suggestions,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },

@@ -149,23 +149,70 @@ def format_sql(sql: str, dialect: str = "postgres") -> str:
         return cleaned
 
 
+def extract_sql_metadata(sql: str, dialect: str = "postgres") -> dict[str, str]:
+    """Parse SQL AST with sqlglot to extract target_table, measure_type, target_column, filter_condition."""
+    meta = {
+        "target_table": "",
+        "measure_type": "",
+        "target_column": "",
+        "filter_condition": "",
+    }
+    cleaned = sql.strip().rstrip(";")
+    if not cleaned:
+        return meta
+
+    try:
+        parsed = sqlglot.parse_one(cleaned, read=dialect)
+        if not parsed:
+            return meta
+
+        tables = list(parsed.find_all(exp.Table))
+        if tables:
+            meta["target_table"] = tables[0].name
+
+        funcs = list(parsed.find_all(exp.Func))
+        if funcs:
+            main_func = funcs[0]
+            meta["measure_type"] = main_func.key.upper()
+            cols = list(main_func.find_all(exp.Column))
+            if cols:
+                meta["target_column"] = cols[0].name
+            elif isinstance(main_func, exp.Count):
+                meta["target_column"] = "*"
+        else:
+            cols = list(parsed.find_all(exp.Column))
+            if cols:
+                meta["target_column"] = cols[0].name
+
+        where = parsed.find(exp.Where)
+        if where and where.this:
+            meta["filter_condition"] = where.this.sql(dialect=dialect)
+        else:
+            meta["filter_condition"] = "Không có"
+    except Exception as exc:
+        logger.debug("Failed to extract SQL metadata via sqlglot: %s", exc)
+
+    return meta
+
+
 def build_metric_system_prompt(dialect: str, schema_text: str) -> str:
     """Construct LLM system prompt for structured metric generation in Vietnamese."""
     return (
         f"Bạn là chuyên gia phân tích dữ liệu (Data Analyst).\n"
         f"Nhiệm vụ của bạn là đề xuất từ 1 đến 3 chỉ số kinh doanh (Business Metrics) "
         f"chuẩn xác dựa trên yêu cầu và trả về kết quả dưới định dạng JSON (JSON object) hợp lệ:\n"
-        f'{{"metrics": [{{"name": "...", "description": "...", "sql_template": "..."}}]}}\n\n'
+        f'{{"metrics": [{{"name": "...", "description": "...", "sql_template": "...", "target_table": "...", "measure_type": "...", "target_column": "...", "filter_condition": "..."}}]}}\n\n'
         f"### Dialect: {dialect}\n"
         f"### Schema Metadata:\n{schema_text}\n\n"
         f"### Quy tắc BẮT BUỘC:\n"
         f"1. Trả về đúng định dạng JSON chứa danh sách `metrics`.\n"
         f"2. `name` và `description` của mỗi metric PHẢI viết bằng tiếng Việt.\n"
         f"3. Mỗi `sql_template` PHẢI là đúng một câu lệnh `SELECT` duy nhất, không dùng multi-statement.\n"
-        f"4. TUYỆT ĐỐI KHÔNG sinh câu lệnh `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`.\n"
-        f"5. CHỈ ĐƯỢC PHÉP tham chiếu các bảng và cột thực sự tồn tại trong Schema Metadata ở trên.\n"
-        f"6. Đảm bảo cú pháp SQL tương thích hoàn toàn với dialect `{dialect}`.\n"
-        f"7. Trả về đúng từ 1 đến 3 metrics liên quan trực tiếp đến yêu cầu."
+        f"4. `target_table` (tên bảng chính), `measure_type` (SUM/COUNT/AVG/MIN/MAX), `target_column` (cột tính toán), `filter_condition` (mô tả hoặc điều kiện WHERE nếu có).\n"
+        f"5. TUYỆT ĐỐI KHÔNG sinh câu lệnh `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`.\n"
+        f"6. CHỈ ĐƯỢC PHÉP tham chiếu các bảng và cột thực sự tồn tại trong Schema Metadata ở trên.\n"
+        f"7. Đảm bảo cú pháp SQL tương thích hoàn toàn với dialect `{dialect}`.\n"
+        f"8. Trả về đúng từ 1 đến 3 metrics liên quan trực tiếp đến yêu cầu."
     )
 
 
@@ -254,12 +301,22 @@ async def generate_metrics_from_prompt(
             is_valid, reason = validate_sql_template(metric.sql_template, dialect, valid_tables)
             if is_valid:
                 pretty_sql = format_sql(metric.sql_template, dialect)
+                parsed_meta = extract_sql_metadata(metric.sql_template, dialect)
+                t_table = metric.target_table or parsed_meta["target_table"]
+                m_type = metric.measure_type or parsed_meta["measure_type"]
+                t_column = metric.target_column or parsed_meta["target_column"]
+                f_cond = metric.filter_condition or parsed_meta["filter_condition"]
+
                 valid_suggestions.append(
                     MetricSuggestionItem(
                         name=metric.name.strip(),
                         description=metric.description.strip(),
                         sql_template=pretty_sql,
                         source="ai",
+                        target_table=t_table,
+                        measure_type=m_type,
+                        target_column=t_column,
+                        filter_condition=f_cond,
                     )
                 )
             else:

@@ -24,7 +24,7 @@ async def enrich_node(state: AgentState) -> dict:
 |------|------|---------------|
 | `introspect_node` | `src/agents/nodes/introspect_node.py` | SQLAlchemy Inspector → raw_schema |
 | `enrich_node` | `src/agents/nodes/enrich_node.py` | LLM → business_name + description |
-| `metric_suggest_node` | `src/agents/nodes/metric_suggest_node.py` | LLM → Business Metrics |
+| `on_demand_metric_suggest_node` | `src/agents/nodes/on_demand_metric_suggest_node.py` | LLM → Business Metrics (On-demand / Optional) |
 | `save_node` | `src/agents/nodes/save_node.py` | Persist to Metadata Store |
 
 ### Node Best Practices
