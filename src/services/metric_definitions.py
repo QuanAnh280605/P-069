@@ -124,7 +124,6 @@ async def _bootstrap_semantic_tables_if_empty(db: AsyncSession, db_id: int) -> N
     await db.flush()
 
 
-
 async def _load_columns(db: AsyncSession, table_id: int) -> list[SemanticColumnModel]:
     result = await db.execute(select(SemanticColumnModel).where(SemanticColumnModel.table_id == table_id))
     return list(result.scalars().all())
@@ -144,11 +143,7 @@ def _validate_expression_columns(
     if missing:
         raise ValueError(f"Unknown expression columns: {sorted(missing)}")
     if formula.function in {"SUM", "AVG"}:
-        invalid = [
-            col_map_lower[name][0]
-            for name in names
-            if not _is_numeric(col_map_lower[name][1].data_type)
-        ]
+        invalid = [col_map_lower[name][0] for name in names if not _is_numeric(col_map_lower[name][1].data_type)]
         if invalid:
             raise ValueError(f"{formula.function} requires numeric columns: {invalid}")
 
@@ -165,4 +160,3 @@ def _validate_filter_columns(
 
 def _is_numeric(data_type: str) -> bool:
     return any(token in data_type.upper() for token in _NUMERIC_TYPES)
-

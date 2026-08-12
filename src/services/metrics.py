@@ -151,7 +151,6 @@ async def _invoke_llm(prompt: str, schema_text: str) -> list[MetricDefinition]:
         return []
 
 
-
 def _references_schema(definition: MetricDefinition, valid: dict[str, set[str]]) -> bool:
     """Check if the metric formula and filters reference existing schema tables and columns."""
     valid_lower = {k.lower(): (k, v) for k, v in valid.items()}
@@ -169,7 +168,6 @@ def _references_schema(definition: MetricDefinition, valid: dict[str, set[str]])
         return referenced.issubset(set(col_lower.keys()))
     except Exception:
         return False
-
 
 
 async def generate_metrics_from_prompt(

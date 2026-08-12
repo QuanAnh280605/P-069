@@ -51,7 +51,6 @@ async def _generate_definitions_with_fallback(prompt: str) -> list[MetricDefinit
     return _parse_metric_payload(parsed)
 
 
-
 def _format_schema_for_prompt(schema: dict[str, Any]) -> str:
     """Format enriched tables and columns for structured generation."""
     lines: list[str] = []

@@ -479,7 +479,6 @@ async def approve_single_metric_endpoint(
     )
 
 
-
 # ---------------------------------------------------------------------------
 # 4. HITL Inline Edit — Tables & Columns (Chức năng từ nhánh của bạn)
 # ---------------------------------------------------------------------------
@@ -683,7 +682,6 @@ async def create_metric_endpoint(
     except ValueError as exc:
         logger.warning("create_metric validation error for db_id=%s: %s", db_id, exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
 
     # Update DB status to 'draft' after metric creation
     db_record.status = "draft"

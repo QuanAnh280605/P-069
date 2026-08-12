@@ -270,6 +270,22 @@ async def test_approve_semantic_layer_no_draft_metrics(
     assert "No draft metrics" in res.json()["detail"]
 
 
+def _make_route_def(
+    name: str = "Total Orders", function: str = "COUNT", expression: str = "total_amount", base_entity: str = "orders"
+) -> dict:
+    return {
+        "metric": {
+            "name": name,
+            "formula": {"function": function, "expression": expression},
+            "base_entity": base_entity,
+            "filters": [],
+            "status": "pending_approval",
+            "confidence": "high",
+            "excluded_notes": "",
+        }
+    }
+
+
 @pytest.mark.asyncio
 async def test_approve_semantic_layer_success(client: AsyncClient, async_session: AsyncSession, auth_headers: dict):
     """POST /semantic/approve approves all draft metrics for the semantic database."""
@@ -289,7 +305,8 @@ async def test_approve_semantic_layer_success(client: AsyncClient, async_session
         source="manual",
         formula="COUNT(*)",
         aggregation_type="COUNT",
-        status="draft",
+        definition=_make_route_def("Total Orders", "COUNT", "total_amount", "orders"),
+        status="pending_approval",
         created_by=1,
         version=1,
     )
@@ -301,7 +318,8 @@ async def test_approve_semantic_layer_success(client: AsyncClient, async_session
         source="manual",
         formula="SUM(orders.total)",
         aggregation_type="SUM",
-        status="draft",
+        definition=_make_route_def("Total Revenue", "SUM", "total_amount", "orders"),
+        status="pending_approval",
         created_by=1,
         version=1,
     )
@@ -309,7 +327,6 @@ async def test_approve_semantic_layer_success(client: AsyncClient, async_session
     await async_session.commit()
 
     # Create initial version records for metric creation via semantic_service
-    # These metrics were created directly, so we need versions for approve_metric
     v1 = MetricVersionModel(metric_id=metric1.id, version=1, formula="COUNT(*)", changed_by=1)
     v2 = MetricVersionModel(metric_id=metric2.id, version=1, formula="SUM(orders.total)", changed_by=1)
     async_session.add_all([v1, v2])
@@ -325,10 +342,23 @@ async def test_approve_semantic_layer_success(client: AsyncClient, async_session
 
 @pytest.mark.asyncio
 async def test_approve_skips_other_users_metrics(client: AsyncClient, async_session: AsyncSession, auth_headers: dict):
-    """POST /semantic/approve skips metrics created by other users."""
+    """POST /semantic/approve skips metrics created by other users for non-admin users."""
+    user2 = UserModel(
+        id=2,
+        email="analyst@company.com",
+        username="analyst",
+        full_name="Analyst",
+        hashed_password="hash",
+        role="analyst",
+        status="active",
+    )
+    async_session.add(user2)
+    await async_session.commit()
+    user2_headers = {"Authorization": f"Bearer {create_access_token(user2)}"}
+
     sem_db = SemanticDatabaseModel(
         id=212,
-        created_by=1,
+        created_by=2,
         display_name="Ownership DB",
         db_type="postgresql",
         conn_url_enc="dummy",
@@ -342,8 +372,9 @@ async def test_approve_skips_other_users_metrics(client: AsyncClient, async_sess
         source="manual",
         formula="COUNT(*)",
         aggregation_type="COUNT",
-        status="draft",
-        created_by=1,
+        definition=_make_route_def("My Metric", "COUNT", "total_amount", "orders"),
+        status="pending_approval",
+        created_by=2,
         version=1,
     )
     other_metric = SemanticMetricModel(
@@ -354,19 +385,20 @@ async def test_approve_skips_other_users_metrics(client: AsyncClient, async_sess
         source="manual",
         formula="SUM(x)",
         aggregation_type="SUM",
-        status="draft",
+        definition=_make_route_def("Other Metric", "SUM", "total_amount", "orders"),
+        status="pending_approval",
         created_by=999,
         version=1,
     )
     async_session.add_all([sem_db, my_metric, other_metric])
     await async_session.commit()
 
-    v1 = MetricVersionModel(metric_id=my_metric.id, version=1, formula="COUNT(*)", changed_by=1)
+    v1 = MetricVersionModel(metric_id=my_metric.id, version=1, formula="COUNT(*)", changed_by=2)
     v2 = MetricVersionModel(metric_id=other_metric.id, version=1, formula="SUM(x)", changed_by=999)
     async_session.add_all([v1, v2])
     await async_session.commit()
 
-    res = await client.post("/api/v1/semantic/approve", json={"db_id": 212}, headers=auth_headers)
+    res = await client.post("/api/v1/semantic/approve", json={"db_id": 212}, headers=user2_headers)
     assert res.status_code == 200
     data = res.json()
     assert data["approved_count"] == 1
@@ -415,6 +447,7 @@ async def test_list_metrics_with_version_info(client: AsyncClient, async_session
         source="ai",
         formula="SUM(total)/COUNT(*)",
         aggregation_type="AVG",
+        definition=_make_route_def("AOV", "AVG", "total_amount", "orders"),
         status="approved",
         created_by=1,
         version=2,
@@ -452,16 +485,16 @@ async def test_create_metric_creates_version_record(
         conn_url_enc="dummy",
         status="saved",
     )
-    async_session.add(sem_db)
+    tbl = SemanticTableModel(id=230, db_id=230, table_name="orders", business_name="Đơn hàng")
+    col = SemanticColumnModel(
+        id=230, table_id=230, column_name="total_amount", data_type="NUMERIC", business_name="Tổng"
+    )
+    async_session.add_all([sem_db, tbl, col])
     await async_session.commit()
 
     payload = {
-        "name": "Total Orders",
-        "description": "Count of all orders",
-        "sql_template": "SELECT COUNT(*) FROM orders",
+        "definition": _make_route_def("Total Orders", "COUNT", "total_amount", "orders"),
         "source": "manual",
-        "formula": "COUNT(orders.order_id)",
-        "aggregation_type": "COUNT",
     }
     res = await client.post("/api/v1/semantic/230/metric", json=payload, headers=auth_headers)
     assert res.status_code == 201
@@ -483,9 +516,7 @@ async def test_create_metric_creates_version_record(
 async def test_create_metric_db_not_found(client: AsyncClient, auth_headers: dict):
     """POST /semantic/{db_id}/metric returns 404 for non-existent semantic database."""
     payload = {
-        "name": "Test",
-        "description": "Test metric",
-        "sql_template": "SELECT 1",
+        "definition": _make_route_def("Test", "COUNT", "total_amount", "orders"),
         "source": "manual",
     }
     res = await client.post("/api/v1/semantic/9999/metric", json=payload, headers=auth_headers)

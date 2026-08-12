@@ -148,14 +148,55 @@ async def enrich_and_save_canonical_schema(
     }
 
 
+def _coerce_metric_definition(metric_data: dict[str, Any]) -> dict[str, Any]:
+    if "definition" in metric_data and isinstance(metric_data["definition"], dict):
+        return metric_data["definition"]
+    if "metric" in metric_data and isinstance(metric_data["metric"], dict):
+        return metric_data
+
+    name = metric_data.get("name", "Metric")
+    formula_raw = metric_data.get("formula")
+    agg_type = metric_data.get("aggregation_type", "COUNT")
+    base_entity = metric_data.get("base_entity", "orders")
+
+    if isinstance(formula_raw, dict):
+        func = formula_raw.get("function", agg_type)
+        expr = formula_raw.get("expression", "*")
+    elif isinstance(formula_raw, str):
+        func = agg_type
+        expr = formula_raw
+        if "(" in expr and ")" in expr:
+            expr = expr[expr.find("(") + 1 : expr.rfind(")")]
+        if "." in expr and expr != "*":
+            expr = expr.split(".")[-1]
+        if not expr:
+            expr = "*"
+    else:
+        func = agg_type
+        expr = "*"
+
+    return {
+        "metric": {
+            "name": name,
+            "formula": {"function": func, "expression": expr},
+            "base_entity": base_entity,
+            "filters": metric_data.get("filters", []),
+            "status": metric_data.get("status", "pending_approval"),
+            "confidence": metric_data.get("confidence", "high"),
+            "excluded_notes": metric_data.get("description", ""),
+        }
+    }
+
+
 async def create_metric(
     db: AsyncSession,
     connection_id: int,
     metric_data: dict[str, Any],
     user_id: int,
 ) -> SemanticMetricModel:
-    """Create a new metric with version=1, status='draft', and an initial metric_versions record."""
-    definition = MetricDefinition.model_validate(metric_data["definition"])
+    """Create a new metric with version=1, status='pending_approval', and an initial metric_versions record."""
+    raw_def = _coerce_metric_definition(metric_data)
+    definition = MetricDefinition.model_validate(raw_def)
     definition = with_metric_status(definition, "pending_approval")
     table = await validate_metric_definition(db, connection_id, definition)
     payload = definition.model_dump(mode="json")
@@ -206,7 +247,8 @@ async def update_metric(
     if metric.created_by != user_id:
         raise ValueError(f"User {user_id} does not have ownership of metric {metric_id}")
 
-    definition = MetricDefinition.model_validate(metric_data["definition"])
+    raw_def = _coerce_metric_definition(metric_data)
+    definition = MetricDefinition.model_validate(raw_def)
     definition = with_metric_status(definition, "pending_approval")
     table = await validate_metric_definition(db, metric.db_id, definition)
     payload = definition.model_dump(mode="json")

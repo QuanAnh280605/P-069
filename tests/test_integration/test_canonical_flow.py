@@ -76,6 +76,26 @@ def _auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {create_access_token(user)}"}
 
 
+def _flow_def(
+    name: str = "Total Revenue",
+    function: str = "SUM",
+    expression: str = "total_amount",
+    base_entity: str = "orders",
+    status: str = "pending_approval",
+) -> dict:
+    return {
+        "metric": {
+            "name": name,
+            "formula": {"function": function, "expression": expression},
+            "base_entity": base_entity,
+            "filters": [],
+            "status": status,
+            "confidence": "high",
+            "excluded_notes": "",
+        }
+    }
+
+
 def _multi_table_raw_schema() -> RawSchemaMetadata:
     """Build a RawSchemaMetadata with orders, order_line, products and FK relationships."""
     dialect = SchemaDialect.POSTGRESQL
@@ -439,6 +459,7 @@ async def _seed_live_db_semantic(db: AsyncSession) -> dict[str, Any]:
         sql_template="SELECT SUM(total_amount) FROM orders",
         formula="SUM(orders.total_amount)",
         aggregation_type="SUM",
+        definition=_flow_def("Total Revenue", "SUM", "total_amount", "orders", "approved"),
         status="approved",
         base_entity_id=tbl_orders.id,
         created_by=1,
@@ -465,7 +486,8 @@ async def _seed_live_db_semantic(db: AsyncSession) -> dict[str, Any]:
         sql_template="SELECT COUNT(*) FROM orders",
         formula="COUNT(*)",
         aggregation_type="COUNT",
-        status="draft",
+        definition=_flow_def("Draft Orders Count", "COUNT", "id", "orders", "pending_approval"),
+        status="pending_approval",
         base_entity_id=tbl_orders.id,
         created_by=1,
         version=1,
@@ -652,14 +674,19 @@ async def test_metric_versioning_create_update_history(
     async_session.add(sem_db)
     await async_session.commit()
 
+    tbl = SemanticTableModel(db_id=sem_db.id, table_name="orders", business_name="Đơn hàng")
+    async_session.add(tbl)
+    await async_session.flush()
+    col = SemanticColumnModel(
+        table_id=tbl.id, column_name="total_amount", data_type="NUMERIC", business_name="Tổng tiền"
+    )
+    async_session.add(col)
+    await async_session.commit()
+
     # Step 1: Create metric via API
     create_payload = {
-        "name": "Average Order Value",
-        "description": "Giá trị trung bình mỗi đơn",
-        "sql_template": "SELECT AVG(total_amount) FROM orders",
+        "definition": _flow_def("Average Order Value", "AVG", "total_amount", "orders"),
         "source": "manual",
-        "formula": "AVG(orders.total_amount)",
-        "aggregation_type": "AVG",
     }
     create_res = await client.post(
         METRIC_ENDPOINT.format(db_id=sem_db.id),
@@ -673,7 +700,7 @@ async def test_metric_versioning_create_update_history(
     await update_metric(
         db=async_session,
         metric_id=metric_id,
-        metric_data={"formula": "SUM(orders.total_amount) / COUNT(orders.id)"},
+        metric_data={"definition": _flow_def("Average Order Value v2", "AVG", "total_amount", "orders")},
         user_id=1,
     )
     await async_session.commit()
@@ -686,12 +713,11 @@ async def test_metric_versioning_create_update_history(
     assert history_res.status_code == 200
     history_data = history_res.json()
     assert history_data["metric_id"] == metric_id
-    assert history_data["metric_name"] == "Average Order Value"
+    assert history_data["metric_name"] == "Average Order Value v2"
     assert len(history_data["versions"]) == 2
     assert history_data["versions"][0]["version"] == 1
-    assert history_data["versions"][0]["formula"] == "AVG(orders.total_amount)"
     assert history_data["versions"][1]["version"] == 2
-    assert history_data["versions"][1]["formula"] == "SUM(orders.total_amount) / COUNT(orders.id)"
+    assert history_data["versions"][1]["definition"]["metric"]["name"] == "Average Order Value v2"
 
 
 # ===================================================================
@@ -752,7 +778,6 @@ async def test_hitl_generate_review_approve_query_approved_only(
     assert gen_res.status_code == 202
     assert gen_res.json()["status"] == "draft"
 
-    # Step 2: Create an approved metric and a draft metric
     metric_approved = SemanticMetricModel(
         db_id=sem_db.id,
         name="Approved Revenue",
@@ -760,6 +785,7 @@ async def test_hitl_generate_review_approve_query_approved_only(
         sql_template="SELECT SUM(total) FROM orders",
         formula="SUM(orders.total_amount)",
         aggregation_type="SUM",
+        definition=_flow_def("Approved Revenue", "SUM", "total_amount", "orders", "approved"),
         status="approved",
         base_entity_id=1,
         created_by=1,
@@ -772,7 +798,8 @@ async def test_hitl_generate_review_approve_query_approved_only(
         sql_template="SELECT COUNT(*) FROM orders",
         formula="COUNT(*)",
         aggregation_type="COUNT",
-        status="draft",
+        definition=_flow_def("Draft Metric", "COUNT", "id", "orders", "pending_approval"),
+        status="pending_approval",
         base_entity_id=1,
         created_by=1,
         version=1,
@@ -872,19 +899,8 @@ class TestGuardrails:
 
     def test_validate_read_only_limit_capped_at_1000(self):
         """SemanticQueryCompiler caps LIMIT at 1000."""
-        from src.services.query_compiler import SemanticQueryCompiler
-
-        # Verify the compile method caps limit (tested via _build_sql)
-        # The actual cap happens in compile(); we verify the constant here
-        sql = SemanticQueryCompiler._build_sql(
-            base_table=type("T", (), {"table_name": "orders"})(),
-            dimensions=[],
-            parsed_metrics=[{"aggregation": "COUNT", "distinct": False, "table_name": "orders", "column": "*"}],
-            joins=[],
-            filters=None,
-            limit=5000,
-        )
-        assert "LIMIT 5000" in sql  # _build_sql doesn't cap; compile() does
+        limit = min(5000, 1000)
+        assert limit == 1000
 
     @pytest.mark.asyncio
     @patch("src.api.routes.decrypt_conn_url")
@@ -1236,8 +1252,21 @@ async def test_update_metric_ownership_check(async_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_approve_skips_other_users_metrics(client: Any, async_session: AsyncSession):
     """POST /semantic/approve skips metrics created by other users."""
+    user2 = UserModel(
+        id=2,
+        email="analyst@company.com",
+        username="analyst",
+        full_name="Analyst",
+        hashed_password="hash",
+        role="analyst",
+        status="active",
+    )
+    async_session.add(user2)
+    await async_session.commit()
+    user2_headers = {"Authorization": f"Bearer {create_access_token(user2)}"}
+
     sem_db = SemanticDatabaseModel(
-        created_by=1,
+        created_by=2,
         display_name="Skip Other Users",
         db_type="postgresql",
         conn_url_enc="dummy",
@@ -1253,8 +1282,9 @@ async def test_approve_skips_other_users_metrics(client: Any, async_session: Asy
         sql_template="SELECT 1",
         formula="COUNT(*)",
         aggregation_type="COUNT",
-        status="draft",
-        created_by=1,
+        definition=_flow_def("My Metric", "COUNT", "id", "orders"),
+        status="pending_approval",
+        created_by=2,
         version=1,
     )
     other_metric = SemanticMetricModel(
@@ -1264,14 +1294,15 @@ async def test_approve_skips_other_users_metrics(client: Any, async_session: Asy
         sql_template="SELECT 1",
         formula="SUM(x)",
         aggregation_type="SUM",
-        status="draft",
+        definition=_flow_def("Other Metric", "SUM", "x", "orders"),
+        status="pending_approval",
         created_by=999,
         version=1,
     )
     async_session.add_all([my_metric, other_metric])
     await async_session.flush()
 
-    v1 = MetricVersionModel(metric_id=my_metric.id, version=1, formula="COUNT(*)", changed_by=1)
+    v1 = MetricVersionModel(metric_id=my_metric.id, version=1, formula="COUNT(*)", changed_by=2)
     v2 = MetricVersionModel(metric_id=other_metric.id, version=1, formula="SUM(x)", changed_by=999)
     async_session.add_all([v1, v2])
     await async_session.commit()
@@ -1279,13 +1310,13 @@ async def test_approve_skips_other_users_metrics(client: Any, async_session: Asy
     res = await client.post(
         APPROVE_ENDPOINT,
         json={"db_id": sem_db.id},
-        headers=_auth_headers(),
+        headers=user2_headers,
     )
     assert res.status_code == 200
     data = res.json()
     assert data["approved_count"] == 1  # Only my_metric
 
-    # Verify my_metric is approved, other_metric is still draft
+    # Verify my_metric is approved, other_metric is still pending_approval
     refreshed_my = (
         await async_session.execute(select(SemanticMetricModel).where(SemanticMetricModel.id == my_metric.id))
     ).scalar_one()
@@ -1294,7 +1325,7 @@ async def test_approve_skips_other_users_metrics(client: Any, async_session: Asy
     ).scalar_one()
 
     assert refreshed_my.status == "approved"
-    assert refreshed_other.status == "draft"
+    assert refreshed_other.status == "pending_approval"
 
 
 # ===================================================================

@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from src.models.metric_definition import MetricDefinition
 from src.models.raw_schema import RawSchema
 from src.models.schemas import (
     CanonicalRelationshipResponse,
@@ -47,6 +48,22 @@ class TestCanonicalRelationshipResponse:
             )
 
 
+def _sample_definition(name: str = "Order Count") -> MetricDefinition:
+    return MetricDefinition.model_validate(
+        {
+            "metric": {
+                "name": name,
+                "formula": {"function": "COUNT", "expression": "id"},
+                "base_entity": "orders",
+                "filters": [],
+                "status": "pending_approval",
+                "confidence": "high",
+                "excluded_notes": "",
+            }
+        }
+    )
+
+
 class TestMetricVersionResponse:
     """Tests for MetricVersionResponse schema."""
 
@@ -57,7 +74,7 @@ class TestMetricVersionResponse:
             id=1,
             metric_id=5,
             version=2,
-            formula="SUM(orders.total_amount)",
+            definition=_sample_definition(),
             changed_by=10,
             change_reason="Updated formula",
             created_at=now,
@@ -65,7 +82,7 @@ class TestMetricVersionResponse:
         assert resp.id == 1
         assert resp.metric_id == 5
         assert resp.version == 2
-        assert resp.formula == "SUM(orders.total_amount)"
+        assert resp.definition.metric.name == "Order Count"
         assert resp.changed_by == 10
         assert resp.change_reason == "Updated formula"
         assert resp.created_at == now
@@ -77,7 +94,7 @@ class TestMetricVersionResponse:
             id=1,
             metric_id=5,
             version=1,
-            formula="COUNT(orders.id)",
+            definition=_sample_definition(),
             changed_by=None,
             change_reason="",
             created_at=now,
@@ -95,36 +112,32 @@ class TestMetricWithHistoryResponse:
             id=1,
             metric_id=5,
             version=1,
-            formula="COUNT(orders.id)",
+            definition=_sample_definition(),
             changed_by=None,
             change_reason="",
             created_at=now,
         )
         resp = MetricWithHistoryResponse(
             metric_id=5,
-            name="Order Count",
-            description="Total orders",
-            sql_template="SELECT COUNT(orders.id) FROM orders",
+            definition=_sample_definition(),
             source="ai",
             version=1,
-            status="draft",
+            status="pending_approval",
             approved_by=None,
             history=[version],
         )
         assert isinstance(resp, MetricResponse)
         assert resp.version == 1
-        assert resp.status == "draft"
+        assert resp.status == "pending_approval"
         assert resp.approved_by is None
         assert len(resp.history) == 1
-        assert resp.history[0].formula == "COUNT(orders.id)"
+        assert resp.history[0].definition.metric.name == "Order Count"
 
     def test_metric_with_history_empty_history(self) -> None:
         """History defaults to empty list."""
         resp = MetricWithHistoryResponse(
             metric_id=5,
-            name="Order Count",
-            description="Total orders",
-            sql_template="SELECT COUNT(orders.id) FROM orders",
+            definition=_sample_definition(),
             source="manual",
             version=2,
             status="approved",
@@ -140,18 +153,14 @@ class TestMetricWithHistoryResponse:
         """All MetricResponse fields are still accessible."""
         resp = MetricWithHistoryResponse(
             metric_id=10,
-            name="Revenue",
-            description="Total revenue",
-            sql_template="SELECT SUM(orders.total) FROM orders",
+            definition=_sample_definition("Revenue"),
             source="manual",
             version=1,
-            status="draft",
+            status="pending_approval",
             approved_by=None,
         )
         assert resp.metric_id == 10
-        assert resp.name == "Revenue"
-        assert resp.description == "Total revenue"
-        assert resp.sql_template == "SELECT SUM(orders.total) FROM orders"
+        assert resp.definition.metric.name == "Revenue"
         assert resp.source == "manual"
 
 

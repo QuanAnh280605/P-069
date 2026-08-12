@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 
 import sqlglot
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlglot import exp
+
+logger = logging.getLogger(__name__)
 
 MetricFunction = Literal["SUM", "COUNT", "COUNT_DISTINCT", "AVG", "MIN", "MAX"]
 MetricStatus = Literal["pending_approval", "approved", "needs_review"]
@@ -40,23 +43,6 @@ class MetricFormula(BaseModel):
             return value.strip().upper()
         return value
 
-    @field_validator("expression", mode="before")
-    @classmethod
-    def normalize_expression(cls, value: Any) -> Any:
-        """Strip table qualifications if present (e.g. order_header.price -> price)."""
-        if isinstance(value, str):
-            cleaned = value.strip()
-            if "." in cleaned and cleaned != "*":
-                try:
-                    parsed = sqlglot.parse_one(cleaned)
-                    for col in parsed.find_all(exp.Column):
-                        col.set("table", None)
-                    return parsed.sql()
-                except Exception:
-                    pass
-            return cleaned
-        return value
-
     @field_validator("expression")
     @classmethod
     def validate_expression(cls, value: str) -> str:
@@ -76,7 +62,6 @@ class MetricFormula(BaseModel):
             if isinstance(node, exp.Column) and node.table:
                 raise ValueError("Metric expressions cannot reference another entity")
         return cleaned
-
 
     @model_validator(mode="after")
     def validate_star(self) -> MetricFormula:
@@ -161,7 +146,6 @@ class MetricSpec(BaseModel):
                     valid_filters.append({"field": str(fld).strip(), "operator": op, "value": val})
         return valid_filters
 
-
     @field_validator("status", mode="before")
     @classmethod
     def normalize_status(cls, value: Any) -> str:
@@ -175,8 +159,6 @@ class MetricSpec(BaseModel):
         if isinstance(value, str) and value.strip().lower() in {"low", "medium", "high"}:
             return value.strip().lower()
         return "high"
-
-
 
 
 class MetricDefinition(BaseModel):
@@ -201,4 +183,3 @@ class MetricDefinition(BaseModel):
         if not payload["metric"].get("filters"):
             payload["metric"].pop("filters", None)
         return yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
-

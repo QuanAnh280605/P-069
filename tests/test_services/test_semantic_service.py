@@ -366,27 +366,50 @@ async def test_enrich_upserts_tables_on_second_run(async_session: AsyncSession):
 # ---------------------------------------------------------------------------
 
 
+async def _seed_tables(db: AsyncSession, db_id: int) -> None:
+    table = SemanticTableModel(db_id=db_id, table_name="orders", business_name="Đơn hàng")
+    db.add(table)
+    await db.flush()
+    db.add(SemanticColumnModel(table_id=table.id, column_name="id", data_type="INTEGER", business_name="ID"))
+    db.add(SemanticColumnModel(table_id=table.id, column_name="total", data_type="NUMERIC", business_name="Tổng"))
+    db.add(SemanticColumnModel(table_id=table.id, column_name="a", data_type="NUMERIC", business_name="A"))
+    await db.flush()
+
+
+def _make_def(
+    name: str = "Total Orders", function: str = "COUNT", expression: str = "id", base_entity: str = "orders"
+) -> dict:
+    return {
+        "definition": {
+            "metric": {
+                "name": name,
+                "formula": {"function": function, "expression": expression},
+                "base_entity": base_entity,
+                "filters": [],
+                "status": "pending_approval",
+                "confidence": "high",
+                "excluded_notes": "",
+            }
+        }
+    }
+
+
 @pytest.mark.asyncio
 async def test_create_metric(async_session: AsyncSession):
-    """create_metric inserts metric with version=1, status='draft', and a metric_versions record."""
+    """create_metric inserts metric with version=1, status='pending_approval', and a metric_versions record."""
     sem_db_id = await ensure_semantic_database(
         db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
     )
+    await _seed_tables(async_session, sem_db_id)
     metric = await create_metric(
         db=async_session,
         connection_id=sem_db_id,
-        metric_data={
-            "name": "Total Orders",
-            "description": "Total number of orders",
-            "formula": "COUNT(orders.order_id)",
-            "aggregation_type": "COUNT",
-            "sql_template": "SELECT COUNT(order_id) FROM orders",
-        },
+        metric_data=_make_def("Total Orders", "COUNT", "id", "orders"),
         user_id=1,
     )
     assert metric.id > 0
     assert metric.version == 1
-    assert metric.status == "draft"
+    assert metric.status == "pending_approval"
     assert metric.name == "Total Orders"
     assert metric.created_by == 1
 
@@ -411,16 +434,11 @@ async def test_update_metric_increments_version(async_session: AsyncSession):
     sem_db_id = await ensure_semantic_database(
         db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
     )
+    await _seed_tables(async_session, sem_db_id)
     metric = await create_metric(
         db=async_session,
         connection_id=sem_db_id,
-        metric_data={
-            "name": "Revenue",
-            "description": "Total revenue",
-            "formula": "SUM(orders.total)",
-            "aggregation_type": "SUM",
-            "sql_template": "SELECT SUM(total) FROM orders",
-        },
+        metric_data=_make_def("Revenue", "SUM", "total", "orders"),
         user_id=1,
     )
     assert metric.version == 1
@@ -428,12 +446,7 @@ async def test_update_metric_increments_version(async_session: AsyncSession):
     updated = await update_metric(
         db=async_session,
         metric_id=metric.id,
-        metric_data={
-            "name": "Net Revenue",
-            "description": "Revenue after discounts",
-            "formula": "SUM(orders.total) - SUM(orders.discount)",
-            "aggregation_type": "SUM",
-        },
+        metric_data=_make_def("Net Revenue", "SUM", "total", "orders"),
         user_id=1,
     )
     assert updated.version == 2
@@ -461,23 +474,18 @@ async def test_update_metric_ownership_check(async_session: AsyncSession):
     sem_db_id = await ensure_semantic_database(
         db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
     )
+    await _seed_tables(async_session, sem_db_id)
     metric = await create_metric(
         db=async_session,
         connection_id=sem_db_id,
-        metric_data={
-            "name": "X",
-            "description": "X",
-            "formula": "COUNT(*)",
-            "aggregation_type": "COUNT",
-            "sql_template": "SELECT COUNT(*) FROM orders",
-        },
+        metric_data=_make_def("X", "COUNT", "id", "orders"),
         user_id=1,
     )
     with pytest.raises(ValueError, match=" ownership "):
         await update_metric(
             db=async_session,
             metric_id=metric.id,
-            metric_data={"name": "Y"},
+            metric_data=_make_def("Y", "COUNT", "id", "orders"),
             user_id=999,  # different user
         )
 
@@ -493,19 +501,14 @@ async def test_approve_metric(async_session: AsyncSession):
     sem_db_id = await ensure_semantic_database(
         db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
     )
+    await _seed_tables(async_session, sem_db_id)
     metric = await create_metric(
         db=async_session,
         connection_id=sem_db_id,
-        metric_data={
-            "name": "AOV",
-            "description": "Average order value",
-            "formula": "SUM(total)/COUNT(*)",
-            "aggregation_type": "AVG",
-            "sql_template": "SELECT AVG(total) FROM orders",
-        },
+        metric_data=_make_def("AOV", "AVG", "total", "orders"),
         user_id=1,
     )
-    assert metric.status == "draft"
+    assert metric.status == "pending_approval"
 
     approved = await approve_metric(db=async_session, metric_id=metric.id, user_id=1)
     assert approved.status == "approved"
@@ -530,22 +533,17 @@ async def test_get_metric_with_history(async_session: AsyncSession):
     sem_db_id = await ensure_semantic_database(
         db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
     )
+    await _seed_tables(async_session, sem_db_id)
     metric = await create_metric(
         db=async_session,
         connection_id=sem_db_id,
-        metric_data={
-            "name": "Test",
-            "description": "Test metric",
-            "formula": "COUNT(*)",
-            "aggregation_type": "COUNT",
-            "sql_template": "SELECT COUNT(*) FROM orders",
-        },
+        metric_data=_make_def("Test", "COUNT", "id", "orders"),
         user_id=1,
     )
     await update_metric(
         db=async_session,
         metric_id=metric.id,
-        metric_data={"name": "Test v2", "formula": "COUNT(DISTINCT id)"},
+        metric_data=_make_def("Test v2", "COUNT", "id", "orders"),
         user_id=1,
     )
 
@@ -573,15 +571,11 @@ async def test_delete_semantic_database(async_session: AsyncSession):
         display_name="To Delete",
         dialect="postgresql",
     )
+    await _seed_tables(async_session, sem_db_id)
     await create_metric(
         db=async_session,
         connection_id=sem_db_id,
-        metric_data={
-            "name": "Del Metric",
-            "description": "Test",
-            "formula": "SUM(a)",
-            "sql_template": "SELECT SUM(a) FROM t",
-        },
+        metric_data=_make_def("Del Metric", "SUM", "a", "orders"),
         user_id=1,
     )
 
