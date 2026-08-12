@@ -1,0 +1,262 @@
+[
+  {
+    "case_id": "ecommerce_discovery_001",
+    "source_type": "sql_dump",
+    "dialect": "postgresql",
+    "raw_schema_ref": "raw_schema/postgresql_dump.json",
+    "expected": {
+      "entity_refs": [
+        "canonical/entities/cart.yaml",
+        "canonical/entities/customer.yaml",
+        "canonical/entities/order.yaml",
+        "canonical/entities/order_item.yaml",
+        "canonical/entities/payment.yaml",
+        "canonical/entities/product.yaml",
+        "canonical/entities/session.yaml"
+      ],
+      "relationship_expectations": [
+        {
+          "source_entity": "order",
+          "source_field": "customer_id",
+          "target_entity": "customer",
+          "target_field": "id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "order_item",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "order_item",
+          "source_field": "product_id",
+          "target_entity": "product",
+          "target_field": "id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "payment",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "session",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        }
+      ]
+    },
+    "tags": [
+      "postgresql",
+      "declared_fk",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_discovery_002",
+    "source_type": "sql_dump",
+    "dialect": "mysql",
+    "raw_schema_ref": "raw_schema/mysql_dump.json",
+    "expected": {
+      "entity_refs": [
+        "canonical/entities/cart.yaml",
+        "canonical/entities/customer.yaml",
+        "canonical/entities/order.yaml",
+        "canonical/entities/order_item.yaml",
+        "canonical/entities/payment.yaml",
+        "canonical/entities/product.yaml",
+        "canonical/entities/session.yaml"
+      ],
+      "relationship_expectations": [
+        {
+          "source_entity": "order",
+          "source_field": "customer_id",
+          "target_entity": "customer",
+          "target_field": "id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "order_item",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "order_item",
+          "source_field": "product_id",
+          "target_entity": "product",
+          "target_field": "id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "payment",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "session",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        }
+      ]
+    },
+    "tags": [
+      "mysql",
+      "declared_fk",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_discovery_003",
+    "source_type": "live_connection",
+    "dialect": "sqlite",
+    "raw_schema_ref": "raw_schema/sqlite_live.json",
+    "expected": {
+      "entity_refs": [
+        "canonical/entities/cart.yaml",
+        "canonical/entities/customer.yaml",
+        "canonical/entities/order.yaml",
+        "canonical/entities/order_item.yaml",
+        "canonical/entities/payment.yaml",
+        "canonical/entities/product.yaml",
+        "canonical/entities/session.yaml"
+      ],
+      "relationship_expectations": [
+        {
+          "source_entity": "order",
+          "source_field": "customer_id",
+          "target_entity": "customer",
+          "target_field": "id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "order_item",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "order_item",
+          "source_field": "product_id",
+          "target_entity": "product",
+          "target_field": "id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "payment",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "session",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        }
+      ]
+    },
+    "tags": [
+      "sqlite",
+      "live_connection",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_discovery_004",
+    "source_type": "sql_dump",
+    "dialect": "postgresql",
+    "raw_schema_ref": "raw_schema/postgresql_inferred_sessions.json",
+    "expected": {
+      "entity_refs": [
+        "canonical/entities/cart.yaml",
+        "canonical/entities/customer.yaml",
+        "canonical/entities/order.yaml",
+        "canonical/entities/order_item.yaml",
+        "canonical/entities/payment.yaml",
+        "canonical/entities/product.yaml",
+        "canonical/entities/session.yaml"
+      ],
+      "relationship_expectations": [
+        {
+          "source_entity": "order",
+          "source_field": "customer_id",
+          "target_entity": "customer",
+          "target_field": "id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "order_item",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "order_item",
+          "source_field": "product_id",
+          "target_entity": "product",
+          "target_field": "id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "payment",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "session",
+          "source_field": "order_id",
+          "target_entity": "order",
+          "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": true
+        }
+      ]
+    },
+    "tags": [
+      "postgresql",
+      "inferred_fk",
+      "ground_truth",
+      "medium"
+    ]
+  }
+]

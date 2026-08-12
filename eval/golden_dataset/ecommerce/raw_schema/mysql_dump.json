@@ -1,0 +1,727 @@
+{
+  "source": {
+    "type": "sql_dump",
+    "db_engine": "mysql",
+    "connection_id": null,
+    "extracted_at": "2026-08-01T00:00:00Z"
+  },
+  "tables": [
+    {
+      "table_name": "customers",
+      "schema_name": null,
+      "table_type": "BASE TABLE",
+      "row_count_estimate": null,
+      "columns": [
+        {
+          "column_name": "id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "name",
+          "data_type": "varchar(100)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "email",
+          "data_type": "varchar(100)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "city",
+          "data_type": "varchar(50)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "created_at",
+          "data_type": "datetime",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_keys": [],
+      "indexes": []
+    },
+    {
+      "table_name": "fact_carts",
+      "schema_name": null,
+      "table_type": "BASE TABLE",
+      "row_count_estimate": null,
+      "columns": [
+        {
+          "column_name": "cart_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "customer_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "store_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "channel",
+          "data_type": "varchar(30)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "device_type",
+          "data_type": "varchar(20)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "checkout_completed",
+          "data_type": "boolean",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": "FALSE",
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "is_test_order",
+          "data_type": "boolean",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": "FALSE",
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "cart_date",
+          "data_type": "datetime",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        }
+      ],
+      "primary_keys": [
+        "cart_id"
+      ],
+      "foreign_keys": [],
+      "indexes": []
+    },
+    {
+      "table_name": "fact_order_items",
+      "schema_name": null,
+      "table_type": "BASE TABLE",
+      "row_count_estimate": null,
+      "columns": [
+        {
+          "column_name": "line_item_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "order_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": true,
+          "default_value": null,
+          "sample_values": null,
+          "references": {
+            "table": "fact_orders",
+            "column": "order_id",
+            "schema": null
+          }
+        },
+        {
+          "column_name": "product_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": true,
+          "default_value": null,
+          "sample_values": null,
+          "references": {
+            "table": "products",
+            "column": "id",
+            "schema": null
+          }
+        },
+        {
+          "column_name": "quantity",
+          "data_type": "int",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "unit_price",
+          "data_type": "decimal(12,2)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "is_test_order",
+          "data_type": "boolean",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": "FALSE",
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "channel",
+          "data_type": "varchar(30)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "store_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "order_date",
+          "data_type": "datetime",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        }
+      ],
+      "primary_keys": [
+        "line_item_id"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "fk_items_order",
+          "constrained_columns": [
+            "order_id"
+          ],
+          "referred_schema": null,
+          "referred_table": "fact_orders",
+          "referred_columns": [
+            "order_id"
+          ]
+        },
+        {
+          "constraint_name": "fk_items_product",
+          "constrained_columns": [
+            "product_id"
+          ],
+          "referred_schema": null,
+          "referred_table": "products",
+          "referred_columns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "table_name": "fact_orders",
+      "schema_name": null,
+      "table_type": "BASE TABLE",
+      "row_count_estimate": null,
+      "columns": [
+        {
+          "column_name": "order_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "customer_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": true,
+          "default_value": null,
+          "sample_values": null,
+          "references": {
+            "table": "customers",
+            "column": "id",
+            "schema": null
+          }
+        },
+        {
+          "column_name": "store_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "gross_amount",
+          "data_type": "decimal(12,2)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "discount_amount",
+          "data_type": "decimal(12,2)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": "0",
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "return_amount",
+          "data_type": "decimal(12,2)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": "0",
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "cogs_amount",
+          "data_type": "decimal(12,2)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "order_status",
+          "data_type": "varchar(20)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "is_test_order",
+          "data_type": "boolean",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": "FALSE",
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "channel",
+          "data_type": "varchar(30)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "order_date",
+          "data_type": "datetime",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "customer_order_seq",
+          "data_type": "int",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        }
+      ],
+      "primary_keys": [
+        "order_id"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "fk_orders_customer",
+          "constrained_columns": [
+            "customer_id"
+          ],
+          "referred_schema": null,
+          "referred_table": "customers",
+          "referred_columns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "table_name": "fact_sessions",
+      "schema_name": null,
+      "table_type": "BASE TABLE",
+      "row_count_estimate": null,
+      "columns": [
+        {
+          "column_name": "session_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "order_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": true,
+          "default_value": null,
+          "sample_values": null,
+          "references": {
+            "table": "fact_orders",
+            "column": "order_id",
+            "schema": null
+          }
+        },
+        {
+          "column_name": "store_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "channel",
+          "data_type": "varchar(30)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "device_type",
+          "data_type": "varchar(20)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "is_bot_traffic",
+          "data_type": "boolean",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": "FALSE",
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "session_date",
+          "data_type": "datetime",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        }
+      ],
+      "primary_keys": [
+        "session_id"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "fk_sessions_order",
+          "constrained_columns": [
+            "order_id"
+          ],
+          "referred_schema": null,
+          "referred_table": "fact_orders",
+          "referred_columns": [
+            "order_id"
+          ]
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "table_name": "payments",
+      "schema_name": null,
+      "table_type": "BASE TABLE",
+      "row_count_estimate": null,
+      "columns": [
+        {
+          "column_name": "id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "order_id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": true,
+          "default_value": null,
+          "sample_values": null,
+          "references": {
+            "table": "fact_orders",
+            "column": "order_id",
+            "schema": null
+          }
+        },
+        {
+          "column_name": "payment_method",
+          "data_type": "varchar(30)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "amount",
+          "data_type": "decimal(12,2)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "payment_date",
+          "data_type": "datetime",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "fk_payments_order",
+          "constrained_columns": [
+            "order_id"
+          ],
+          "referred_schema": null,
+          "referred_table": "fact_orders",
+          "referred_columns": [
+            "order_id"
+          ]
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "table_name": "products",
+      "schema_name": null,
+      "table_type": "BASE TABLE",
+      "row_count_estimate": null,
+      "columns": [
+        {
+          "column_name": "id",
+          "data_type": "bigint",
+          "is_nullable": false,
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "name",
+          "data_type": "varchar(100)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "category",
+          "data_type": "varchar(50)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "price",
+          "data_type": "decimal(12,2)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar(20)",
+          "is_nullable": false,
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "default_value": null,
+          "sample_values": null,
+          "references": null
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_keys": [],
+      "indexes": []
+    }
+  ],
+  "relationships": [
+    {
+      "from_table": "fact_order_items",
+      "from_column": "order_id",
+      "to_table": "fact_orders",
+      "to_column": "order_id",
+      "relationship_type": "many_to_one"
+    },
+    {
+      "from_table": "fact_order_items",
+      "from_column": "product_id",
+      "to_table": "products",
+      "to_column": "id",
+      "relationship_type": "many_to_one"
+    },
+    {
+      "from_table": "fact_orders",
+      "from_column": "customer_id",
+      "to_table": "customers",
+      "to_column": "id",
+      "relationship_type": "many_to_one"
+    },
+    {
+      "from_table": "fact_sessions",
+      "from_column": "order_id",
+      "to_table": "fact_orders",
+      "to_column": "order_id",
+      "relationship_type": "many_to_one"
+    },
+    {
+      "from_table": "payments",
+      "from_column": "order_id",
+      "to_table": "fact_orders",
+      "to_column": "order_id",
+      "relationship_type": "many_to_one"
+    }
+  ]
+}

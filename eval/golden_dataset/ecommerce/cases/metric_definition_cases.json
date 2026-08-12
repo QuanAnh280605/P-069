@@ -1,0 +1,663 @@
+[
+  {
+    "case_id": "ecommerce_metric_001",
+    "request": "Doanh thu thực nhận sau khi trừ chiết khấu, hoàn trả và thuế trên tổng giá trị đơn hàng.",
+    "canonical_context": {
+      "entities": [
+        "order"
+      ],
+      "dimensions": [
+        "order.gross_amount",
+        "order.discount_amount",
+        "order.return_amount",
+        "order.is_test_order",
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ]
+    },
+    "expected_metric": {
+      "name": "net_revenue",
+      "business_name": "Doanh thu thuần",
+      "description": "Doanh thu thực nhận sau khi trừ chiết khấu, hoàn trả và thuế trên tổng giá trị đơn hàng.",
+      "synonyms": [
+        "doanh thu thuần",
+        "doanh thu ròng",
+        "net sales"
+      ],
+      "metric_type": "simple",
+      "target_entity": "order",
+      "source_table": "fact_orders",
+      "aggregation": "sum",
+      "field": null,
+      "business_formula": "SUM(Order Amount) - SUM(Discounts) - SUM(Returns)",
+      "sql_expression": "gross_amount - discount_amount - return_amount",
+      "dependencies": [],
+      "default_filters": [
+        {
+          "condition": "is_test_order = FALSE"
+        }
+      ],
+      "allowed_dimensions": [
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ],
+      "default_time_grain": "day",
+      "reference_source": "Shopify Analytics Fields",
+      "status": "draft",
+      "owner": "Seller"
+    },
+    "expected_preview_facts": [
+      "Doanh thu thực nhận sau khi trừ chiết khấu, hoàn trả và thuế trên tổng giá trị đơn hàng.",
+      "Formula: SUM(Order Amount) - SUM(Discounts) - SUM(Returns)",
+      "Filter: is_test_order = FALSE"
+    ],
+    "expected_error": null,
+    "tags": [
+      "simple",
+      "sum",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_metric_002",
+    "request": "Tổng số đơn hàng hợp lệ được đặt thành công trong kỳ, không tính đơn hủy hoặc đơn test.",
+    "canonical_context": {
+      "entities": [
+        "order"
+      ],
+      "dimensions": [
+        "order.order_id",
+        "order.order_status",
+        "order.is_test_order",
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ]
+    },
+    "expected_metric": {
+      "name": "order_count",
+      "business_name": "Tổng số đơn hàng",
+      "description": "Tổng số đơn hàng hợp lệ được đặt thành công trong kỳ, không tính đơn hủy hoặc đơn test.",
+      "synonyms": [
+        "tổng đơn hàng",
+        "số lượng đơn",
+        "total orders",
+        "order count"
+      ],
+      "metric_type": "simple",
+      "target_entity": "order",
+      "source_table": "fact_orders",
+      "aggregation": "count",
+      "field": "order_id",
+      "business_formula": "COUNT(Order ID)",
+      "sql_expression": "COUNT(DISTINCT order_id)",
+      "dependencies": [],
+      "default_filters": [
+        {
+          "condition": "is_test_order = FALSE AND order_status <> 'cancelled'"
+        }
+      ],
+      "allowed_dimensions": [
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ],
+      "default_time_grain": "day",
+      "reference_source": "Shopify Analytics Fields",
+      "status": "draft",
+      "owner": "Seller"
+    },
+    "expected_preview_facts": [
+      "Tổng số đơn hàng hợp lệ được đặt thành công trong kỳ, không tính đơn hủy hoặc đơn test.",
+      "Formula: COUNT(Order ID)",
+      "Filter: is_test_order = FALSE AND order_status <> 'cancelled'"
+    ],
+    "expected_error": null,
+    "tags": [
+      "simple",
+      "count",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_metric_003",
+    "request": "Giá trị trung bình mỗi đơn hàng, tính bằng doanh thu thuần chia cho tổng số đơn hàng.",
+    "canonical_context": {
+      "entities": [
+        "order"
+      ],
+      "dimensions": [
+        "order.order_id",
+        "order.gross_amount",
+        "order.discount_amount",
+        "order.return_amount",
+        "order.is_test_order",
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ]
+    },
+    "expected_metric": {
+      "name": "average_order_value",
+      "business_name": "Giá trị đơn hàng trung bình",
+      "description": "Giá trị trung bình mỗi đơn hàng, tính bằng doanh thu thuần chia cho tổng số đơn hàng.",
+      "synonyms": [
+        "AOV",
+        "giá trị đơn hàng TB",
+        "average order value"
+      ],
+      "metric_type": "derived",
+      "target_entity": "order",
+      "source_table": "fact_orders",
+      "aggregation": "avg",
+      "field": null,
+      "business_formula": "Net Sales / Total Orders",
+      "sql_expression": "SUM(gross_amount - discount_amount - return_amount) / COUNT(DISTINCT order_id)",
+      "dependencies": [
+        "net_revenue",
+        "order_count"
+      ],
+      "default_filters": [
+        {
+          "condition": "is_test_order = FALSE"
+        }
+      ],
+      "allowed_dimensions": [
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ],
+      "default_time_grain": "day",
+      "reference_source": "Shopify Analytics Fields",
+      "status": "draft",
+      "owner": "Seller"
+    },
+    "expected_preview_facts": [
+      "Giá trị trung bình mỗi đơn hàng, tính bằng doanh thu thuần chia cho tổng số đơn hàng.",
+      "Formula: Net Sales / Total Orders",
+      "Filter: is_test_order = FALSE"
+    ],
+    "expected_error": null,
+    "tags": [
+      "derived",
+      "avg",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_metric_004",
+    "request": "Tỷ lệ phần trăm phiên truy cập cửa hàng dẫn đến đơn hàng mua thành công.",
+    "canonical_context": {
+      "entities": [
+        "session"
+      ],
+      "dimensions": [
+        "session.session_id",
+        "session.order_id",
+        "session.is_bot_traffic",
+        "session.session_date",
+        "session.channel",
+        "session.device_type",
+        "session.store_id"
+      ]
+    },
+    "expected_metric": {
+      "name": "conversion_rate",
+      "business_name": "Tỷ lệ chuyển đổi",
+      "description": "Tỷ lệ phần trăm phiên truy cập cửa hàng dẫn đến đơn hàng mua thành công.",
+      "synonyms": [
+        "tỷ lệ chuyển đổi",
+        "CR",
+        "conversion rate"
+      ],
+      "metric_type": "derived",
+      "target_entity": "session",
+      "source_table": "fact_sessions",
+      "aggregation": "ratio",
+      "field": null,
+      "business_formula": "Total Orders / Total Sessions",
+      "sql_expression": "COUNT(DISTINCT order_id) / COUNT(DISTINCT session_id)",
+      "dependencies": [],
+      "default_filters": [
+        {
+          "condition": "is_bot_traffic = FALSE"
+        }
+      ],
+      "allowed_dimensions": [
+        "session.session_date",
+        "session.channel",
+        "session.device_type",
+        "session.store_id"
+      ],
+      "default_time_grain": "day",
+      "reference_source": "Shopify Analytics Fields",
+      "status": "draft",
+      "owner": "Seller"
+    },
+    "expected_preview_facts": [
+      "Tỷ lệ phần trăm phiên truy cập cửa hàng dẫn đến đơn hàng mua thành công.",
+      "Formula: Total Orders / Total Sessions",
+      "Filter: is_bot_traffic = FALSE"
+    ],
+    "expected_error": null,
+    "tags": [
+      "derived",
+      "ratio",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_metric_005",
+    "request": "Tỷ lệ phần trăm đơn hàng bị hoàn trả hoặc hoàn tiền trên tổng số đơn hàng đã bán.",
+    "canonical_context": {
+      "entities": [
+        "order"
+      ],
+      "dimensions": [
+        "order.order_id",
+        "order.order_status",
+        "order.is_test_order",
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ]
+    },
+    "expected_metric": {
+      "name": "return_rate",
+      "business_name": "Tỷ lệ hoàn trả",
+      "description": "Tỷ lệ phần trăm đơn hàng bị hoàn trả hoặc hoàn tiền trên tổng số đơn hàng đã bán.",
+      "synonyms": [
+        "tỷ lệ hoàn trả",
+        "return rate",
+        "refund rate"
+      ],
+      "metric_type": "derived",
+      "target_entity": "order",
+      "source_table": "fact_orders",
+      "aggregation": "ratio",
+      "field": null,
+      "business_formula": "Returned Orders / Total Orders",
+      "sql_expression": "COUNT(DISTINCT CASE WHEN order_status = 'returned' THEN order_id END) / COUNT(DISTINCT order_id)",
+      "dependencies": [],
+      "default_filters": [
+        {
+          "condition": "is_test_order = FALSE"
+        }
+      ],
+      "allowed_dimensions": [
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ],
+      "default_time_grain": "month",
+      "reference_source": "Shopify Analytics Fields",
+      "status": "draft",
+      "owner": "Seller"
+    },
+    "expected_preview_facts": [
+      "Tỷ lệ phần trăm đơn hàng bị hoàn trả hoặc hoàn tiền trên tổng số đơn hàng đã bán.",
+      "Formula: Returned Orders / Total Orders",
+      "Filter: is_test_order = FALSE"
+    ],
+    "expected_error": null,
+    "tags": [
+      "derived",
+      "ratio",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_metric_006",
+    "request": "Tổng số đơn vị sản phẩm (SKU) đã bán ra trong các đơn hàng hợp lệ.",
+    "canonical_context": {
+      "entities": [
+        "order_item"
+      ],
+      "dimensions": [
+        "order_item.quantity",
+        "order_item.is_test_order",
+        "order_item.order_date",
+        "order_item.product_id",
+        "order_item.channel",
+        "order_item.store_id"
+      ]
+    },
+    "expected_metric": {
+      "name": "units_sold",
+      "business_name": "Số lượng sản phẩm bán ra",
+      "description": "Tổng số đơn vị sản phẩm (SKU) đã bán ra trong các đơn hàng hợp lệ.",
+      "synonyms": [
+        "số lượng bán",
+        "units sold",
+        "sản phẩm bán ra"
+      ],
+      "metric_type": "simple",
+      "target_entity": "order_item",
+      "source_table": "fact_order_items",
+      "aggregation": "sum",
+      "field": "quantity",
+      "business_formula": "SUM(Quantity)",
+      "sql_expression": "SUM(quantity)",
+      "dependencies": [],
+      "default_filters": [
+        {
+          "condition": "is_test_order = FALSE"
+        }
+      ],
+      "allowed_dimensions": [
+        "order_item.order_date",
+        "order_item.product_id",
+        "order_item.channel",
+        "order_item.store_id"
+      ],
+      "default_time_grain": "day",
+      "reference_source": "Shopify Analytics Fields",
+      "status": "draft",
+      "owner": "Seller"
+    },
+    "expected_preview_facts": [
+      "Tổng số đơn vị sản phẩm (SKU) đã bán ra trong các đơn hàng hợp lệ.",
+      "Formula: SUM(Quantity)",
+      "Filter: is_test_order = FALSE"
+    ],
+    "expected_error": null,
+    "tags": [
+      "simple",
+      "sum",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_metric_007",
+    "request": "Tổng số khách hàng riêng biệt đã đặt ít nhất một đơn hàng trong kỳ.",
+    "canonical_context": {
+      "entities": [
+        "order"
+      ],
+      "dimensions": [
+        "order.customer_id",
+        "order.is_test_order",
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ]
+    },
+    "expected_metric": {
+      "name": "customer_count",
+      "business_name": "Số khách hàng",
+      "description": "Tổng số khách hàng riêng biệt đã đặt ít nhất một đơn hàng trong kỳ.",
+      "synonyms": [
+        "số khách hàng",
+        "unique buyers",
+        "customer count"
+      ],
+      "metric_type": "simple",
+      "target_entity": "order",
+      "source_table": "fact_orders",
+      "aggregation": "count_distinct",
+      "field": "customer_id",
+      "business_formula": "COUNT(DISTINCT Customer ID)",
+      "sql_expression": "COUNT(DISTINCT customer_id)",
+      "dependencies": [],
+      "default_filters": [
+        {
+          "condition": "is_test_order = FALSE"
+        }
+      ],
+      "allowed_dimensions": [
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ],
+      "default_time_grain": "day",
+      "reference_source": "Shopify Analytics Fields",
+      "status": "draft",
+      "owner": "Seller"
+    },
+    "expected_preview_facts": [
+      "Tổng số khách hàng riêng biệt đã đặt ít nhất một đơn hàng trong kỳ.",
+      "Formula: COUNT(DISTINCT Customer ID)",
+      "Filter: is_test_order = FALSE"
+    ],
+    "expected_error": null,
+    "tags": [
+      "simple",
+      "count_distinct",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_metric_008",
+    "request": "Tỷ lệ phần trăm khách hàng đã mua hàng từ lần thứ hai trở lên trên tổng số khách hàng.",
+    "canonical_context": {
+      "entities": [
+        "order"
+      ],
+      "dimensions": [
+        "order.customer_id",
+        "order.customer_order_seq",
+        "order.is_test_order",
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ]
+    },
+    "expected_metric": {
+      "name": "returning_customer_rate",
+      "business_name": "Tỷ lệ khách hàng quay lại",
+      "description": "Tỷ lệ phần trăm khách hàng đã mua hàng từ lần thứ hai trở lên trên tổng số khách hàng.",
+      "synonyms": [
+        "tỷ lệ khách quay lại",
+        "returning customer rate",
+        "repeat purchase rate"
+      ],
+      "metric_type": "derived",
+      "target_entity": "order",
+      "source_table": "fact_orders",
+      "aggregation": "ratio",
+      "field": null,
+      "business_formula": "Returning Customers / Total Customers",
+      "sql_expression": "COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) / COUNT(DISTINCT customer_id)",
+      "dependencies": [
+        "customer_count"
+      ],
+      "default_filters": [
+        {
+          "condition": "is_test_order = FALSE"
+        }
+      ],
+      "allowed_dimensions": [
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ],
+      "default_time_grain": "month",
+      "reference_source": "Shopify Analytics Fields",
+      "status": "draft",
+      "owner": "Seller"
+    },
+    "expected_preview_facts": [
+      "Tỷ lệ phần trăm khách hàng đã mua hàng từ lần thứ hai trở lên trên tổng số khách hàng.",
+      "Formula: Returning Customers / Total Customers",
+      "Filter: is_test_order = FALSE"
+    ],
+    "expected_error": null,
+    "tags": [
+      "derived",
+      "ratio",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_metric_009",
+    "request": "Tỷ lệ phần trăm giỏ hàng được tạo nhưng không hoàn tất thanh toán trên tổng số giỏ hàng.",
+    "canonical_context": {
+      "entities": [
+        "cart"
+      ],
+      "dimensions": [
+        "cart.cart_id",
+        "cart.checkout_completed",
+        "cart.is_test_order",
+        "cart.cart_date",
+        "cart.channel",
+        "cart.device_type",
+        "cart.store_id"
+      ]
+    },
+    "expected_metric": {
+      "name": "cart_abandonment_rate",
+      "business_name": "Tỷ lệ bỏ giỏ hàng",
+      "description": "Tỷ lệ phần trăm giỏ hàng được tạo nhưng không hoàn tất thanh toán trên tổng số giỏ hàng.",
+      "synonyms": [
+        "tỷ lệ bỏ giỏ",
+        "cart abandonment rate"
+      ],
+      "metric_type": "derived",
+      "target_entity": "cart",
+      "source_table": "fact_carts",
+      "aggregation": "ratio",
+      "field": null,
+      "business_formula": "1 - (Completed Checkouts / Total Carts Created)",
+      "sql_expression": "1 - (COUNT(DISTINCT CASE WHEN checkout_completed = TRUE THEN cart_id END) / COUNT(DISTINCT cart_id))",
+      "dependencies": [],
+      "default_filters": [
+        {
+          "condition": "is_test_order = FALSE"
+        }
+      ],
+      "allowed_dimensions": [
+        "cart.cart_date",
+        "cart.channel",
+        "cart.device_type",
+        "cart.store_id"
+      ],
+      "default_time_grain": "day",
+      "reference_source": "Shopify Analytics Fields",
+      "status": "draft",
+      "owner": "Seller"
+    },
+    "expected_preview_facts": [
+      "Tỷ lệ phần trăm giỏ hàng được tạo nhưng không hoàn tất thanh toán trên tổng số giỏ hàng.",
+      "Formula: 1 - (Completed Checkouts / Total Carts Created)",
+      "Filter: is_test_order = FALSE"
+    ],
+    "expected_error": null,
+    "tags": [
+      "derived",
+      "ratio",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_metric_010",
+    "request": "Tỷ lệ phần trăm lợi nhuận gộp trên doanh thu thuần, sau khi trừ giá vốn hàng bán (COGS).",
+    "canonical_context": {
+      "entities": [
+        "order"
+      ],
+      "dimensions": [
+        "order.gross_amount",
+        "order.discount_amount",
+        "order.return_amount",
+        "order.cogs_amount",
+        "order.is_test_order",
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ]
+    },
+    "expected_metric": {
+      "name": "gross_margin",
+      "business_name": "Biên lợi nhuận gộp",
+      "description": "Tỷ lệ phần trăm lợi nhuận gộp trên doanh thu thuần, sau khi trừ giá vốn hàng bán (COGS).",
+      "synonyms": [
+        "biên lợi nhuận gộp",
+        "gross margin",
+        "gross profit margin"
+      ],
+      "metric_type": "derived",
+      "target_entity": "order",
+      "source_table": "fact_orders",
+      "aggregation": "ratio",
+      "field": null,
+      "business_formula": "(Net Sales - COGS) / Net Sales",
+      "sql_expression": "(SUM(gross_amount - discount_amount - return_amount) - SUM(cogs_amount)) / SUM(gross_amount - discount_amount - return_amount)",
+      "dependencies": [
+        "net_revenue"
+      ],
+      "default_filters": [
+        {
+          "condition": "is_test_order = FALSE"
+        }
+      ],
+      "allowed_dimensions": [
+        "order.order_date",
+        "order.channel",
+        "order.store_id"
+      ],
+      "default_time_grain": "month",
+      "reference_source": "Shopify Analytics Fields",
+      "status": "draft",
+      "owner": "Seller"
+    },
+    "expected_preview_facts": [
+      "Tỷ lệ phần trăm lợi nhuận gộp trên doanh thu thuần, sau khi trừ giá vốn hàng bán (COGS).",
+      "Formula: (Net Sales - COGS) / Net Sales",
+      "Filter: is_test_order = FALSE"
+    ],
+    "expected_error": null,
+    "tags": [
+      "derived",
+      "ratio",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_metric_011",
+    "request": "Định nghĩa lợi nhuận sau chi phí marketing nhưng schema không có marketing_cost.",
+    "canonical_context": {
+      "entities": [
+        "order"
+      ],
+      "dimensions": [
+        "order.gross_amount",
+        "order.cogs_amount"
+      ]
+    },
+    "expected_metric": null,
+    "expected_preview_facts": [],
+    "expected_error": "UNKNOWN_DIMENSION",
+    "tags": [
+      "invalid_field",
+      "negative",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_metric_012",
+    "request": "Tạo chỉ số hiệu quả thương mại tốt nhất.",
+    "canonical_context": {
+      "entities": [
+        "order",
+        "session",
+        "cart"
+      ],
+      "dimensions": [
+        "order.gross_amount",
+        "session.session_id",
+        "cart.cart_id"
+      ]
+    },
+    "expected_metric": null,
+    "expected_preview_facts": [],
+    "expected_error": "AMBIGUOUS_METRIC_REQUEST",
+    "tags": [
+      "ambiguous",
+      "negative",
+      "ground_truth"
+    ]
+  }
+]
