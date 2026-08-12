@@ -28,18 +28,6 @@
         ]
       }
     ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash scripts/_pyrun.sh scripts/format_on_edit.py",
-            "shell": "bash"
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
