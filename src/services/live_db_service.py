@@ -4,14 +4,17 @@ Provides:
   - Zero-data schema introspection via SQLAlchemy Inspector.
   - Fernet encryption for connection URLs.
   - Persistence of live target database metadata in Metadata Store.
+  - Auto-creation of SemanticDatabase and background enrichment for live DBs.
 """
 
+import asyncio
+import logging
 from typing import Any
 
 from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.db import LiveTargetDbModel
+from src.models.db import LiveTargetDbModel, SemanticDatabaseModel
 from src.models.schema_metadata import (
     ColumnMetadata,
     ForeignKeyMetadata,
@@ -24,7 +27,12 @@ from src.models.schema_metadata import (
     default_schema_identifier,
 )
 from src.models.schemas import LiveDbResponse, LiveDbSummaryResponse
-from src.services.database import encrypt_conn_url
+from src.services.database import encrypt_conn_url, get_db_session
+from src.services.semantic_service import enrich_and_save_canonical_schema, ensure_semantic_database
+
+logger = logging.getLogger(__name__)
+
+_background_tasks: set[asyncio.Task[Any]] = set()
 
 
 def introspect_live_database(conn_url: str, dialect: str | SchemaDialect) -> RawSchemaMetadata:
@@ -182,8 +190,15 @@ async def create_live_target_db(
     conn_url: str,
 ) -> LiveDbResponse:
     """Introspect live database, encrypt connection URL, and save record."""
+    logger.info("Connecting and introspecting live target DB '%s'...", display_name)
     resolved_dialect = resolve_and_validate_dialect(conn_url, dialect)
     raw_schema = introspect_live_database(conn_url, resolved_dialect)
+    logger.info(
+        "Introspection completed for '%s': dialect=%s, tables_found=%d",
+        display_name,
+        resolved_dialect.value,
+        len(raw_schema.tables),
+    )
     conn_url_enc = encrypt_conn_url(conn_url)
     model = LiveTargetDbModel(
         created_by=user_id,
@@ -195,7 +210,41 @@ async def create_live_target_db(
     db.add(model)
     await db.commit()
     await db.refresh(model)
+    logger.info("Saved LiveTargetDbModel record ID=%d for '%s'", model.id, display_name)
+
+    try:
+        semantic_db_id = await ensure_semantic_database(
+            db=db,
+            source_type="live_target_db",
+            source_id=model.id,
+            user_id=user_id,
+            display_name=display_name,
+            dialect=resolved_dialect.value,
+        )
+        model.semantic_db_id = semantic_db_id
+        await db.commit()
+        await db.refresh(model)
+
+        logger.info(
+            "Created SemanticDatabaseModel ID=%d for live DB %d. Dispatching background AI enrichment task...",
+            semantic_db_id,
+            model.id,
+        )
+        task = asyncio.create_task(
+            _run_enrichment_background(
+                user_id=user_id,
+                connection_id=semantic_db_id,
+                raw_schema=raw_schema,
+                dialect=resolved_dialect.value,
+            )
+        )
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    except Exception:
+        logger.warning("Failed to create semantic database for live DB %d", model.id, exc_info=True)
+
     return _model_to_response(model, raw_schema)
+
 
 
 async def list_live_target_dbs(db: AsyncSession, user_id: int) -> list[LiveDbSummaryResponse]:
@@ -225,7 +274,7 @@ async def get_live_target_db(db: AsyncSession, user_id: int, db_id: int) -> Live
 
 
 async def delete_live_target_db(db: AsyncSession, user_id: int, db_id: int) -> bool:
-    """Delete a user-owned live target database record."""
+    """Delete a user-owned live target database record and all related semantic layer metadata."""
     stmt = select(LiveTargetDbModel).where(
         LiveTargetDbModel.id == db_id,
         LiveTargetDbModel.created_by == user_id,
@@ -234,9 +283,50 @@ async def delete_live_target_db(db: AsyncSession, user_id: int, db_id: int) -> b
     record = result.scalar_one_or_none()
     if not record:
         return False
+
+    sem_db_id = record.semantic_db_id
     await db.delete(record)
+
+    if sem_db_id:
+        sem_db = await db.get(SemanticDatabaseModel, sem_db_id)
+        if sem_db:
+            await db.delete(sem_db)
+    else:
+        conn_key = f"semantic:live:{db_id}"
+        sem_stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.conn_url_enc == conn_key)
+        sem_db = (await db.execute(sem_stmt)).scalar_one_or_none()
+        if sem_db:
+            await db.delete(sem_db)
+
     await db.commit()
     return True
+
+
+async def _run_enrichment_background(
+    user_id: int,
+    connection_id: int,
+    raw_schema: RawSchemaMetadata,
+    dialect: str,
+) -> None:
+    """Run schema enrichment in background with its own DB session."""
+    logger.info(
+        "Starting background AI semantic enrichment for connection_id=%d (%d tables)...",
+        connection_id,
+        len(raw_schema.tables),
+    )
+    try:
+        async for session in get_db_session():
+            await enrich_and_save_canonical_schema(
+                db=session,
+                user_id=user_id,
+                connection_id=connection_id,
+                raw_schema=raw_schema,
+                dialect=dialect,
+            )
+            await session.commit()
+            logger.info("Successfully completed AI semantic enrichment for connection_id=%d", connection_id)
+    except Exception as exc:
+        logger.warning("Background enrichment failed for connection_id=%d: %s", connection_id, exc, exc_info=True)
 
 
 def _model_to_summary(model: LiveTargetDbModel) -> LiveDbSummaryResponse:

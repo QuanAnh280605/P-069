@@ -1,4 +1,4 @@
-﻿"""Authentication routes for User Registration, Login, and Google OAuth.
+"""Authentication routes for User Registration, Login, and Google OAuth.
 
 Provides JWT access token and refresh token issuance with session management.
 """
@@ -447,4 +447,3 @@ async def logout_user(
             await db.commit()
 
     return {"message": "Logged out successfully"}
-

@@ -1,7 +1,15 @@
-"""Metric Suggest Node — Flow 1 Step 3.
+"""Metric Suggest Node — On-demand AI Metric Generator & SQL Guardrail.
 
-Dùng LLM (via get_llm()) để phân tích canonical / raw schema và đề xuất
+LƯU Ý: Đây là node phụ trợ DÙNG KHI CÓ YÊU CẦU (On-demand) cho tính năng sinh
+chỉ số bằng AI hoặc kiểm tra SQL Guardrail, KHÔNG BẮT BUỘC trong luồng enrich
+mặc định của hệ thống.
+
+Dùng LLM (via get_llm()) để phân tích canonical schema (enriched_schema) và đề xuất
 Business Metrics kèm SQL template tham chiếu (không thực thi SQL).
+
+QUAN TRỌNG: Node này CHỈ đọc enriched_schema (semantic layer), KHÔNG đọc raw_schema.
+AI phải hiểu cấu trúc semantic layer (business_name, description) chứ không phải
+cấu trúc kỹ thuật thô của database.
 
 Toàn bộ phân tích ngữ nghĩa (phân loại cột tiền tệ, trạng thái, soft-delete,
 phát hiện mối quan hệ ngầm, v.v.) được giao cho LLM thay vì hardcode.
@@ -30,17 +38,19 @@ FORBIDDEN_SQL_PATTERN = re.compile(
 VALID_AGGREGATIONS = frozenset({"sum", "count", "avg", "min", "max", "count_distinct"})
 
 
-async def metric_suggest_node(state: AgentState) -> dict[str, Any]:
-    """Call LLM to propose Business Metrics based on canonical schema.
+async def on_demand_metric_suggest_node(state: AgentState) -> dict[str, Any]:
+    """Call LLM to propose Business Metrics based on canonical schema (On-demand).
 
-    Input state fields: enriched_schema | raw_schema
+    Input state fields: enriched_schema (semantic layer with business_name, description)
     Output state fields: suggested_metrics | error
-
-    Note: LangGraph Interrupt (HITL) is triggered after this node.
+    
+    LƯU Ý: Node này CHỈ đọc enriched_schema (semantic layer), KHÔNG đọc raw_schema.
+    AI phải hiểu cấu trúc semantic layer (business_name, description) chứ không phải
+    cấu trúc kỹ thuật thô của database.
     """
-    schema_info = state.get("enriched_schema") or state.get("raw_schema")
+    schema_info = state.get("enriched_schema")
     if not schema_info:
-        return {"error": "metric_suggest_node: schema is empty"}
+        return {"error": "on_demand_metric_suggest_node: enriched_schema is empty. AI must read semantic layer, not raw schema."}
 
     schema_text = _format_schema_for_prompt(schema_info)
     prompt = _build_metric_prompt(schema_text, schema_info)
@@ -50,11 +60,11 @@ async def metric_suggest_node(state: AgentState) -> dict[str, Any]:
         response = await llm.ainvoke(prompt)
         raw = response.content if hasattr(response, "content") else str(response)
         metrics = _parse_and_validate_metrics(raw)
-        logger.info("metric_suggest_node: proposed %d metrics", len(metrics))
+        logger.info("on_demand_metric_suggest_node: proposed %d metrics", len(metrics))
         return {"suggested_metrics": metrics}
     except Exception as exc:
-        logger.warning("metric_suggest_node failed: %s", exc)
-        return {"error": f"metric_suggest_node: {exc}"}
+        logger.warning("on_demand_metric_suggest_node failed: %s", exc)
+        return {"error": f"on_demand_metric_suggest_node: {exc}"}
 
 
 # ---------------------------------------------------------------------------

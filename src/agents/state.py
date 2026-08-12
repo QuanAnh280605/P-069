@@ -20,6 +20,9 @@ class AgentState(TypedDict, total=False):
     db_id: int
     """ID của semantic_databases record trong Metadata Store."""
 
+    user_id: int
+    """ID của user đang thực hiện pipeline — cần cho semantic_service."""
+
     conn_url_enc: str
     """Connection URL đã được Fernet encrypt — không bao giờ plaintext."""
 

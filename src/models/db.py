@@ -7,6 +7,8 @@ Includes tables:
   - semantic_tables
   - semantic_columns
   - semantic_metrics
+  - canonical_relationships
+  - metric_versions
 """
 
 from datetime import UTC, datetime
@@ -68,7 +70,13 @@ class UserModel(Base):
     live_target_dbs: Mapped[list["LiveTargetDbModel"]] = relationship(
         "LiveTargetDbModel", back_populates="creator", cascade="all, delete-orphan"
     )
-    created_metrics: Mapped[list["SemanticMetricModel"]] = relationship("SemanticMetricModel", back_populates="creator")
+    created_metrics: Mapped[list["SemanticMetricModel"]] = relationship(
+        "SemanticMetricModel", back_populates="creator", foreign_keys="SemanticMetricModel.created_by"
+    )
+    created_tables: Mapped[list["SemanticTableModel"]] = relationship("SemanticTableModel", back_populates="creator")
+    approved_metrics: Mapped[list["SemanticMetricModel"]] = relationship(
+        "SemanticMetricModel", back_populates="approver", foreign_keys="SemanticMetricModel.approved_by"
+    )
 
 
 class UserSessionModel(Base):
@@ -103,12 +111,16 @@ class ImportedSchemaModel(Base):
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     dialect: Mapped[str] = mapped_column(String(50), nullable=False)
     schema_metadata: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    semantic_db_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("semantic_databases.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
 
     creator: Mapped["UserModel"] = relationship("UserModel", back_populates="imported_schemas")
+    semantic_database: Mapped["SemanticDatabaseModel | None"] = relationship("SemanticDatabaseModel")
 
 
 class LiveTargetDbModel(Base):
@@ -123,12 +135,16 @@ class LiveTargetDbModel(Base):
     dialect: Mapped[str] = mapped_column(String(50), nullable=False)
     conn_url_enc: Mapped[str] = mapped_column(Text, nullable=False)
     schema_metadata: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    semantic_db_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("semantic_databases.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
 
     creator: Mapped["UserModel"] = relationship("UserModel", back_populates="live_target_dbs")
+    semantic_database: Mapped["SemanticDatabaseModel | None"] = relationship("SemanticDatabaseModel")
 
 
 class SemanticDatabaseModel(Base):
@@ -154,6 +170,9 @@ class SemanticDatabaseModel(Base):
     metrics: Mapped[list["SemanticMetricModel"]] = relationship(
         "SemanticMetricModel", back_populates="database", cascade="all, delete-orphan"
     )
+    relationships: Mapped[list["CanonicalRelationshipModel"]] = relationship(
+        "CanonicalRelationshipModel", back_populates="database", cascade="all, delete-orphan"
+    )
 
 
 class SemanticTableModel(Base):
@@ -168,12 +187,16 @@ class SemanticTableModel(Base):
     business_name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     row_count_approx: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    physical_schema: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    primary_key_column: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
 
     database: Mapped["SemanticDatabaseModel"] = relationship("SemanticDatabaseModel", back_populates="tables")
+    creator: Mapped["UserModel | None"] = relationship("UserModel", back_populates="created_tables")
     columns: Mapped[list["SemanticColumnModel"]] = relationship(
         "SemanticColumnModel", back_populates="table", cascade="all, delete-orphan"
     )
@@ -196,6 +219,8 @@ class SemanticColumnModel(Base):
     fk_target_table: Mapped[str | None] = mapped_column(String(200), nullable=True)
     fk_target_column: Mapped[str | None] = mapped_column(String(200), nullable=True)
     is_nullable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_time_dimension: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    allowed_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
@@ -217,11 +242,72 @@ class SemanticMetricModel(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     sql_template: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    base_entity_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("semantic_tables.id", ondelete="SET NULL"), nullable=True
+    )
+    formula: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    aggregation_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    approved_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
 
     database: Mapped["SemanticDatabaseModel"] = relationship("SemanticDatabaseModel", back_populates="metrics")
-    creator: Mapped["UserModel | None"] = relationship("UserModel", back_populates="created_metrics")
+    creator: Mapped["UserModel | None"] = relationship(
+        "UserModel", back_populates="created_metrics", foreign_keys=[created_by]
+    )
+    base_entity: Mapped["SemanticTableModel | None"] = relationship("SemanticTableModel")
+    approver: Mapped["UserModel | None"] = relationship(
+        "UserModel", back_populates="approved_metrics", foreign_keys=[approved_by]
+    )
+    versions: Mapped[list["MetricVersionModel"]] = relationship(
+        "MetricVersionModel", back_populates="metric", cascade="all, delete-orphan"
+    )
+
+
+class CanonicalRelationshipModel(Base):
+    """Represents a canonical relationship between two semantic tables."""
+
+    __tablename__ = "canonical_relationships"
+    __table_args__ = (UniqueConstraint("connection_id", "from_entity_id", "to_entity_id", name="uq_canonical_rel"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    connection_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("semantic_databases.id", ondelete="CASCADE"), nullable=False
+    )
+    from_entity_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("semantic_tables.id", ondelete="CASCADE"), nullable=False
+    )
+    to_entity_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("semantic_tables.id", ondelete="CASCADE"), nullable=False
+    )
+    relationship_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    join_condition: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    database: Mapped["SemanticDatabaseModel"] = relationship("SemanticDatabaseModel", back_populates="relationships")
+    from_entity: Mapped["SemanticTableModel"] = relationship("SemanticTableModel", foreign_keys=[from_entity_id])
+    to_entity: Mapped["SemanticTableModel"] = relationship("SemanticTableModel", foreign_keys=[to_entity_id])
+
+
+class MetricVersionModel(Base):
+    """Version history for a semantic metric formula."""
+
+    __tablename__ = "metric_versions"
+    __table_args__ = (Index("idx_metric_versions_metric_version", "metric_id", "version"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    metric_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("semantic_metrics.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    formula: Mapped[str] = mapped_column(Text, nullable=False)
+    changed_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    change_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    metric: Mapped["SemanticMetricModel"] = relationship("SemanticMetricModel", back_populates="versions")
+    changer: Mapped["UserModel | None"] = relationship("UserModel")

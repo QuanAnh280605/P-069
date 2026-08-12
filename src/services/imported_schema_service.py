@@ -1,11 +1,21 @@
 """Persistence operations for user-owned imported schema metadata."""
 
+import asyncio
+import logging
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.db import ImportedSchemaModel
+from src.models.db import ImportedSchemaModel, SemanticDatabaseModel
 from src.models.schema_metadata import RawSchemaMetadata
 from src.models.schemas import ImportedSchemaResponse, ImportedSchemaSummaryResponse
+from src.services.database import get_db_session
+from src.services.semantic_service import enrich_and_save_canonical_schema, ensure_semantic_database
+
+logger = logging.getLogger(__name__)
+
+_background_tasks: set[asyncio.Task[Any]] = set()
 
 
 async def create_imported_schema(
@@ -15,6 +25,7 @@ async def create_imported_schema(
     raw_schema: RawSchemaMetadata,
 ) -> ImportedSchemaResponse:
     """Persist validated schema metadata for one authenticated user."""
+    logger.info("Saving imported schema '%s' (%d tables, dialect=%s)...", display_name, len(raw_schema.tables), raw_schema.dialect.value)
     record = ImportedSchemaModel(
         created_by=owner_id,
         display_name=display_name.strip(),
@@ -24,7 +35,41 @@ async def create_imported_schema(
     db.add(record)
     await db.commit()
     await db.refresh(record)
+    logger.info("Saved ImportedSchemaModel record ID=%d for '%s'", record.id, display_name)
+
+    try:
+        semantic_db_id = await ensure_semantic_database(
+            db=db,
+            source_type="imported_schema",
+            source_id=record.id,
+            user_id=owner_id,
+            display_name=display_name.strip(),
+            dialect=raw_schema.dialect.value,
+        )
+        record.semantic_db_id = semantic_db_id
+        await db.commit()
+        await db.refresh(record)
+
+        logger.info(
+            "Created SemanticDatabaseModel ID=%d for imported schema %d. Dispatching background AI enrichment task...",
+            semantic_db_id,
+            record.id,
+        )
+        task = asyncio.create_task(
+            _run_enrichment_background(
+                user_id=owner_id,
+                connection_id=semantic_db_id,
+                raw_schema=raw_schema,
+                dialect=raw_schema.dialect.value,
+            )
+        )
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    except Exception:
+        logger.warning("Failed to create semantic database for imported schema %d", record.id, exc_info=True)
+
     return _full_response(record)
+
 
 
 async def list_imported_schemas(
@@ -52,11 +97,25 @@ async def get_imported_schema(
 
 
 async def delete_imported_schema(db: AsyncSession, owner_id: int, schema_id: int) -> bool:
-    """Delete one persisted schema only when it belongs to the user."""
+    """Delete one persisted schema and all related semantic layer metadata when it belongs to the user."""
     record = await _owned_record(db, owner_id, schema_id)
     if record is None:
         return False
+
+    sem_db_id = record.semantic_db_id
     await db.delete(record)
+
+    if sem_db_id:
+        sem_db = await db.get(SemanticDatabaseModel, sem_db_id)
+        if sem_db:
+            await db.delete(sem_db)
+    else:
+        conn_key = f"semantic:import:{schema_id}"
+        sem_stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.conn_url_enc == conn_key)
+        sem_db = (await db.execute(sem_stmt)).scalar_one_or_none()
+        if sem_db:
+            await db.delete(sem_db)
+
     await db.commit()
     return True
 
@@ -89,3 +148,31 @@ def _full_response(record: ImportedSchemaModel) -> ImportedSchemaResponse:
     summary = _summary_response(record)
     raw_schema = RawSchemaMetadata.model_validate(record.schema_metadata)
     return ImportedSchemaResponse(**summary.model_dump(), raw_schema=raw_schema)
+
+
+async def _run_enrichment_background(
+    user_id: int,
+    connection_id: int,
+    raw_schema: RawSchemaMetadata,
+    dialect: str,
+) -> None:
+    """Run schema enrichment in background with its own DB session."""
+    logger.info(
+        "Starting background AI semantic enrichment for imported schema connection_id=%d (%d tables)...",
+        connection_id,
+        len(raw_schema.tables),
+    )
+    try:
+        async for session in get_db_session():
+            await enrich_and_save_canonical_schema(
+                db=session,
+                user_id=user_id,
+                connection_id=connection_id,
+                raw_schema=raw_schema,
+                dialect=dialect,
+            )
+            await session.commit()
+            logger.info("Successfully completed AI semantic enrichment for connection_id=%d", connection_id)
+    except Exception as exc:
+        logger.warning("Background enrichment failed for connection_id=%d: %s", connection_id, exc, exc_info=True)
+

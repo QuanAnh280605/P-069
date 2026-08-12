@@ -14,6 +14,7 @@ from src.models.db import (
 from src.models.schemas import (
     ApproveRequest,
     ApproveResponse,
+    CanonicalRelationshipResponse,
     DBConnectionRequest,
     DBConnectionResponse,
     GenerateRequest,
@@ -22,6 +23,8 @@ from src.models.schemas import (
     MetricCreate,
     MetricResponse,
     MetricUpdate,
+    MetricVersionResponse,
+    MetricWithHistoryResponse,
     RefreshTokenRequest,
     SemanticColumnUpdate,
     SemanticTableUpdate,
@@ -33,6 +36,7 @@ from src.models.schemas import (
 
 __all__ = [
     "Base",
+    "CanonicalRelationshipResponse",
     "ImportedSchemaModel",
     "LiveTargetDbModel",
     "UserModel",
@@ -52,6 +56,8 @@ __all__ = [
     "MetricCreate",
     "MetricUpdate",
     "MetricResponse",
+    "MetricVersionResponse",
+    "MetricWithHistoryResponse",
     "GenerateRequest",
     "GenerateResponse",
     "GoogleAuthRequest",

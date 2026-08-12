@@ -16,11 +16,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agents.nodes.metric_suggest_node import (
+from src.agents.nodes.on_demand_metric_suggest_node import (
     _format_schema_for_prompt,
     _parse_and_validate_metrics,
     _resolve_name,
-    metric_suggest_node,
+    on_demand_metric_suggest_node,
 )
 
 # ---------------------------------------------------------------------------
@@ -29,10 +29,10 @@ from src.agents.nodes.metric_suggest_node import (
 
 
 @pytest.fixture
-def raw_schema_state() -> dict:
-    """Fixture: AgentState with a standard e-commerce raw_schema."""
+def enriched_schema_state() -> dict:
+    """Fixture: AgentState with a standard e-commerce enriched_schema (semantic layer)."""
     return {
-        "raw_schema": {
+        "enriched_schema": {
             "source": {
                 "type": "live_connection",
                 "db_engine": "postgresql",
@@ -42,6 +42,8 @@ def raw_schema_state() -> dict:
             "tables": [
                 {
                     "table_name": "orders",
+                    "business_name": "Đơn hàng",
+                    "description": "Bảng lưu thông tin đơn hàng",
                     "schema_name": "public",
                     "table_type": "BASE TABLE",
                     "primary_keys": ["id"],
@@ -49,6 +51,8 @@ def raw_schema_state() -> dict:
                     "columns": [
                         {
                             "column_name": "id",
+                            "business_name": "Mã đơn hàng",
+                            "description": "Định danh duy nhất của đơn hàng",
                             "data_type": "INTEGER",
                             "is_primary_key": True,
                             "is_foreign_key": False,
@@ -56,6 +60,8 @@ def raw_schema_state() -> dict:
                         },
                         {
                             "column_name": "total_amount",
+                            "business_name": "Tổng tiền",
+                            "description": "Tổng giá trị đơn hàng",
                             "data_type": "NUMERIC",
                             "is_primary_key": False,
                             "is_foreign_key": False,
@@ -63,6 +69,8 @@ def raw_schema_state() -> dict:
                         },
                         {
                             "column_name": "status",
+                            "business_name": "Trạng thái",
+                            "description": "Trạng thái đơn hàng (PENDING, COMPLETED, CANCELLED)",
                             "data_type": "VARCHAR",
                             "is_primary_key": False,
                             "is_foreign_key": False,
@@ -70,6 +78,8 @@ def raw_schema_state() -> dict:
                         },
                         {
                             "column_name": "is_deleted",
+                            "business_name": "Đã xóa mềm",
+                            "description": "Đánh dấu đơn hàng đã bị xóa mềm",
                             "data_type": "BOOLEAN",
                             "is_primary_key": False,
                             "is_foreign_key": False,
@@ -77,6 +87,8 @@ def raw_schema_state() -> dict:
                         },
                         {
                             "column_name": "customer_id",
+                            "business_name": "Mã khách hàng",
+                            "description": "Khóa ngoại tham chiếu đến bảng users",
                             "data_type": "INTEGER",
                             "is_primary_key": False,
                             "is_foreign_key": True,
@@ -87,6 +99,8 @@ def raw_schema_state() -> dict:
                 },
                 {
                     "table_name": "users",
+                    "business_name": "Người dùng",
+                    "description": "Bảng lưu thông tin người dùng",
                     "schema_name": "public",
                     "table_type": "BASE TABLE",
                     "primary_keys": ["id"],
@@ -94,6 +108,8 @@ def raw_schema_state() -> dict:
                     "columns": [
                         {
                             "column_name": "id",
+                            "business_name": "Mã người dùng",
+                            "description": "Định danh duy nhất của người dùng",
                             "data_type": "INTEGER",
                             "is_primary_key": True,
                             "is_foreign_key": False,
@@ -148,24 +164,24 @@ def valid_llm_json() -> str:
 
 @pytest.mark.asyncio
 async def test_empty_state_returns_error() -> None:
-    """Return error when both enriched_schema and raw_schema are absent."""
-    result = await metric_suggest_node({})
+    """Return error when enriched_schema is absent."""
+    result = await on_demand_metric_suggest_node({})
     assert "error" in result
-    assert "empty" in result["error"]
+    assert "enriched_schema is empty" in result["error"]
 
 
 @pytest.mark.asyncio
-async def test_success_with_mocked_llm(raw_schema_state: dict, valid_llm_json: str) -> None:
+async def test_success_with_mocked_llm(enriched_schema_state: dict, valid_llm_json: str) -> None:
     """Propose valid metrics with mocked LLM — no hardcoded classification."""
     mock_response = MagicMock()
     mock_response.content = valid_llm_json
 
-    with patch("src.agents.nodes.metric_suggest_node.get_llm") as mock_get_llm:
+    with patch("src.agents.nodes.on_demand_metric_suggest_node.get_llm") as mock_get_llm:
         mock_llm = AsyncMock()
         mock_llm.ainvoke.return_value = mock_response
         mock_get_llm.return_value = mock_llm
 
-        result = await metric_suggest_node(raw_schema_state)
+        result = await on_demand_metric_suggest_node(enriched_schema_state)
 
     assert "suggested_metrics" in result
     assert "error" not in result
@@ -177,37 +193,36 @@ async def test_success_with_mocked_llm(raw_schema_state: dict, valid_llm_json: s
 
 
 @pytest.mark.asyncio
-async def test_prefers_enriched_schema(raw_schema_state: dict, valid_llm_json: str) -> None:
-    """Prefer enriched_schema over raw_schema when both present."""
-    state = {**raw_schema_state, "enriched_schema": raw_schema_state["raw_schema"]}
+async def test_prefers_enriched_schema(enriched_schema_state: dict, valid_llm_json: str) -> None:
+    """Use enriched_schema (semantic layer) — raw_schema is not used."""
     mock_response = MagicMock()
     mock_response.content = valid_llm_json
 
-    with patch("src.agents.nodes.metric_suggest_node.get_llm") as mock_get_llm:
+    with patch("src.agents.nodes.on_demand_metric_suggest_node.get_llm") as mock_get_llm:
         mock_llm = AsyncMock()
         mock_llm.ainvoke.return_value = mock_response
         mock_get_llm.return_value = mock_llm
-        result = await metric_suggest_node(state)
+        result = await on_demand_metric_suggest_node(enriched_schema_state)
 
     assert "suggested_metrics" in result
 
 
 @pytest.mark.asyncio
-async def test_llm_exception_returns_error(raw_schema_state: dict) -> None:
+async def test_llm_exception_returns_error(enriched_schema_state: dict) -> None:
     """Return error dict gracefully when LLM raises an exception."""
-    with patch("src.agents.nodes.metric_suggest_node.get_llm") as mock_get_llm:
+    with patch("src.agents.nodes.on_demand_metric_suggest_node.get_llm") as mock_get_llm:
         mock_llm = AsyncMock()
         mock_llm.ainvoke.side_effect = RuntimeError("API timeout")
         mock_get_llm.return_value = mock_llm
-        result = await metric_suggest_node(raw_schema_state)
+        result = await on_demand_metric_suggest_node(enriched_schema_state)
 
     assert "error" in result
-    assert "metric_suggest_node" in result["error"]
+    assert "on_demand_metric_suggest_node" in result["error"]
 
 
 @pytest.mark.asyncio
-async def test_prompt_includes_schema_structure(raw_schema_state: dict, valid_llm_json: str) -> None:
-    """Verify the prompt sent to LLM contains table names and column info."""
+async def test_prompt_includes_schema_structure(enriched_schema_state: dict, valid_llm_json: str) -> None:
+    """Verify the prompt sent to LLM contains table names, column info, and business names."""
     mock_response = MagicMock()
     mock_response.content = valid_llm_json
     captured_prompt = None
@@ -217,11 +232,11 @@ async def test_prompt_includes_schema_structure(raw_schema_state: dict, valid_ll
         captured_prompt = prompt
         return mock_response
 
-    with patch("src.agents.nodes.metric_suggest_node.get_llm") as mock_get_llm:
+    with patch("src.agents.nodes.on_demand_metric_suggest_node.get_llm") as mock_get_llm:
         mock_llm = AsyncMock()
         mock_llm.ainvoke = capture_ainvoke
         mock_get_llm.return_value = mock_llm
-        await metric_suggest_node(raw_schema_state)
+        await on_demand_metric_suggest_node(enriched_schema_state)
 
     assert captured_prompt is not None
     assert "orders" in captured_prompt

@@ -2,491 +2,551 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import ImportedSchemaList from '@/components/ImportedSchemaList';
-import LiveDbList from '@/components/LiveDbList';
-import SqlDumpPreviewUploader from '@/components/SqlDumpPreviewUploader';
-import { getLocalLayers, updateLayer, deleteLayer, connectLiveTargetDb, SemanticLayerData } from '@/lib/api';
+import { useTheme } from '@/context/ThemeContext';
+import { ConnectDbModal } from '@/components/modals/ConnectDbModal';
+import { SettingsModal } from '@/components/modals/SettingsModal';
+import { MetricModal } from '@/components/modals/MetricModal';
+import { AIStudioView } from '@/components/views/AIStudioView';
+import { MetricsCatalogView } from '@/components/views/MetricsCatalogView';
+import { ExportPlaygroundView } from '@/components/views/ExportPlaygroundView';
+import {
+  getLocalLayers,
+  updateLayer,
+  deleteLayer,
+  listLiveTargetDbs,
+  listImportedSchemas,
+  getLiveTargetDb,
+  getImportedSchema,
+  convertRawSchemaToLayer,
+  SemanticLayerData,
+  BusinessMetric,
+  MetricSuggestion,
+  deleteMetricApi,
+  deleteDatabaseApi,
+} from '@/lib/api';
 import {
   Database,
   PlusCircle,
-  Zap,
-  CheckCircle2,
-  Loader2,
-  Clock,
-  ExternalLink,
-  Trash2,
-  FolderKanban,
-  Server,
-  KeyRound,
   Sparkles,
+  BarChart3,
+  Share2,
+  Sun,
+  Moon,
+  Settings,
+  LogOut,
+  Loader2,
+  Trash2,
+  CheckCircle2,
+  ShieldCheck,
 } from 'lucide-react';
 
-export default function DashboardPage() {
-  const router = useRouter();
-  const { user, token, isLoading } = useAuth();
-  const [layers, setLayers] = useState<SemanticLayerData[]>([]);
-  const [savedSchemaRevision, setSavedSchemaRevision] = useState(0);
+export type CubeNavTab = 'studio' | 'metrics' | 'export';
+
+export default function ChatGPTDashboardPage() {
+  const { user, token, logout, isLoading } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
-  // Form State
-  const [dbName, setDbName] = useState('');
-  const [dbType, setDbType] = useState<'auto' | 'postgresql' | 'mysql' | 'sqlite'>('auto');
-  const [connUrl, setConnUrl] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisStep, setAnalysisStep] = useState<number>(0); // 0: Idle, 1: Introspect, 2: Enrich, 3: Metrics, 4: Done
-  const [liveDbRevision, setLiveDbRevision] = useState(0);
-  const [liveDbError, setLiveDbError] = useState('');
+  const [layers, setLayers] = useState<SemanticLayerData[]>([]);
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<CubeNavTab>('studio');
+
+  // Modals
+  const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isMetricModalOpen, setIsMetricModalOpen] = useState(false);
+  const [editingMetric, setEditingMetric] = useState<BusinessMetric | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
-    setLayers(getLocalLayers());
-  }, []);
+    async function syncBackendData() {
+      let local = getLocalLayers();
+      if (token) {
+        try {
+          const [liveDbs, importedSchemas] = await Promise.all([
+            listLiveTargetDbs(token).catch(() => []),
+            listImportedSchemas(token).catch(() => []),
+          ]);
 
-  const handleStartAnalysis = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!dbName.trim() || !connUrl.trim()) return;
+          for (const live of liveDbs) {
+            const idStr = String(live.id);
+            if (!local.some((l) => l.id === idStr)) {
+              const fullRecord = await getLiveTargetDb(live.id, token).catch(() => null);
+              if (fullRecord) {
+                const layer = convertRawSchemaToLayer(
+                  fullRecord.id,
+                  fullRecord.display_name,
+                  fullRecord.dialect,
+                  fullRecord.raw_schema,
+                  undefined,
+                  fullRecord.updated_at
+                );
+                updateLayer(layer);
+              }
+            }
+          }
 
-    setIsAnalyzing(true);
-    setAnalysisStep(1);
-    setLiveDbError('');
-
-    if (token) {
-      try {
-        await connectLiveTargetDb(dbName.trim(), dbType, connUrl.trim(), token);
-        setAnalysisStep(4);
-        setLiveDbRevision((rev) => rev + 1);
-        setDbName('');
-        setConnUrl('');
-        setIsAnalyzing(false);
-        return;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Kết nối và trích xuất schema thất bại';
-        setLiveDbError(msg);
-        setIsAnalyzing(false);
-        return;
+          for (const imp of importedSchemas) {
+            const idStr = String(imp.id);
+            if (!local.some((l) => l.id === idStr)) {
+              const fullRecord = await getImportedSchema(imp.id, token).catch(() => null);
+              if (fullRecord) {
+                const layer = convertRawSchemaToLayer(
+                  fullRecord.id,
+                  fullRecord.display_name,
+                  fullRecord.dialect,
+                  fullRecord.raw_schema,
+                  undefined,
+                  fullRecord.updated_at
+                );
+                updateLayer(layer);
+              }
+            }
+          }
+          local = getLocalLayers();
+        } catch {
+          // Fallback to local
+        }
+      }
+      setLayers(local);
+      if (local.length > 0 && !selectedLayerId) {
+        setSelectedLayerId(local[0].id);
       }
     }
+    syncBackendData();
+  }, [token]);
 
-    // Simulate 3-step progress feedback: Introspect -> Enrich -> Metrics
-    setTimeout(() => {
-      setAnalysisStep(2);
-      setTimeout(() => {
-        setAnalysisStep(3);
-        setTimeout(() => {
-          setAnalysisStep(4);
-          // Create new layer
-          const newId = `db-${Date.now()}`;
-          const newLayer: SemanticLayerData = {
-            id: newId,
-            db_name: dbName.trim(),
-            db_type: dbType,
-            conn_url: connUrl.trim(),
-            status: 'Draft',
-            updated_at: new Date().toISOString().replace('T', ' ').slice(0, 16),
-            tables: [
-              {
-                table_name: 'orders',
-                business_name: 'Đơn hàng',
-                description: 'Bảng chứa lịch sử giao dịch bán hàng',
-                columns: [
-                  { column_name: 'order_id', data_type: 'INTEGER (PK)', business_name: 'Mã đơn hàng', sample_value: '1001' },
-                  { column_name: 'customer_id', data_type: 'INTEGER (FK)', business_name: 'Mã khách hàng', sample_value: 'C-01' },
-                  { column_name: 'total_amount', data_type: 'NUMERIC', business_name: 'Tổng tiền', sample_value: '500,000' },
-                  { column_name: 'order_status', data_type: 'VARCHAR(20)', business_name: 'Trạng thái đơn', sample_value: 'COMPLETED' },
-                  { column_name: 'created_at', data_type: 'TIMESTAMP', business_name: 'Ngày tạo đơn', sample_value: '2026-08-01' },
-                ],
-              },
-              {
-                table_name: 'products',
-                business_name: 'Sản phẩm',
-                description: 'Bảng danh mục sản phẩm kinh doanh',
-                columns: [
-                  { column_name: 'product_id', data_type: 'INTEGER (PK)', business_name: 'Mã sản phẩm', sample_value: 'P-10' },
-                  { column_name: 'product_name', data_type: 'VARCHAR(100)', business_name: 'Tên sản phẩm', sample_value: 'Laptop Pro 15' },
-                  { column_name: 'unit_price', data_type: 'NUMERIC', business_name: 'Đơn giá', sample_value: '25,000,000' },
-                ],
-              },
-            ],
-            metrics: [
-              {
-                id: `m_${Date.now()}_1`,
-                name: 'Tổng doanh thu bán hàng',
-                description: 'Tổng tiền các đơn hàng đã hoàn thành (COMPLETED)',
-                sql_template: `SELECT SUM(total_amount) FROM orders WHERE order_status = 'COMPLETED'`,
-                source: 'ai',
-              },
-              {
-                id: `m_${Date.now()}_2`,
-                name: 'Số lượng sản phẩm kinh doanh',
-                description: 'Đếm tổng số mặt hàng trong danh mục',
-                sql_template: `SELECT COUNT(*) FROM products`,
-                source: 'ai',
-              },
-            ],
-          };
-
-          updateLayer(newLayer);
-          setLayers(getLocalLayers());
-          setIsAnalyzing(false);
-          router.push(`/semantic/${newId}/review`);
-        }, 1200);
-      }, 1400);
-    }, 1200);
+  const refreshLayers = (preferredId?: string) => {
+    const updated = getLocalLayers();
+    setLayers(updated);
+    if (preferredId) {
+      setSelectedLayerId(preferredId);
+    } else if (updated.length > 0 && !selectedLayerId) {
+      setSelectedLayerId(updated[0].id);
+    }
   };
 
-  const handleDelete = (id: string) => {
-    deleteLayer(id);
-    setLayers(getLocalLayers());
+  const activeLayer = layers.find((l) => l.id === selectedLayerId) || layers[0] || null;
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleDbConnectedSuccess = (newDbName: string, newDbId?: string) => {
+    refreshLayers(newDbId);
+    showToast(`🎉 Đã kết nối thành công Database "${newDbName}"!`);
+  };
+
+  const handleDeleteDb = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('Bạn có chắc chắn muốn xóa kết nối Database này và toàn bộ dữ liệu liên quan?')) {
+      if (token) {
+        try {
+          await deleteDatabaseApi(id, token);
+        } catch (err) {
+          console.error('Lỗi khi xóa DB trên server:', err);
+        }
+      }
+      deleteLayer(id);
+      const remaining = getLocalLayers();
+      setLayers(remaining);
+      if (selectedLayerId === id) {
+        setSelectedLayerId(remaining.length > 0 ? remaining[0].id : null);
+      }
+      showToast('🗑️ Đã xóa kết nối Database và dữ liệu liên quan.');
+    }
+  };
+
+  const handleSaveMetric = (savedMetric: BusinessMetric) => {
+    if (!activeLayer) return;
+    const existingIdx = activeLayer.metrics.findIndex((m) => m.id === savedMetric.id);
+    let updatedMetrics = [...activeLayer.metrics];
+    if (existingIdx >= 0) {
+      updatedMetrics[existingIdx] = savedMetric;
+    } else {
+      updatedMetrics = [...activeLayer.metrics, savedMetric];
+    }
+    const updatedLayer = { ...activeLayer, metrics: updatedMetrics, status: 'Draft' as const };
+    updateLayer(updatedLayer);
+    refreshLayers(activeLayer.id);
+    setIsMetricModalOpen(false);
+    showToast(`✅ Đã cập nhật chỉ số "${savedMetric.name}"!`);
+  };
+
+  const handleDeleteMetric = async (mId: string) => {
+    if (!activeLayer) return;
+    try {
+      await deleteMetricApi(activeLayer.id, mId);
+    } catch {
+      // offline fallback
+    }
+    const updatedMetrics = activeLayer.metrics.filter((m) => m.id !== mId);
+    const updatedLayer = { ...activeLayer, metrics: updatedMetrics, status: 'Draft' as const };
+    updateLayer(updatedLayer);
+    refreshLayers(activeLayer.id);
+    showToast('🗑️ Đã xóa chỉ số khỏi thư viện.');
+  };
+
+  const handleAddMetricFromStudio = (newMetric: MetricSuggestion) => {
+    if (!activeLayer) return;
+    const localMetric: BusinessMetric = {
+      id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: newMetric.name,
+      description: newMetric.description,
+      sql_template: newMetric.sql_template,
+      source: 'ai',
+      created_at: new Date().toISOString(),
+    };
+    const updatedMetrics = [...activeLayer.metrics, localMetric];
+    const updatedLayer = { ...activeLayer, metrics: updatedMetrics, status: 'Draft' as const };
+    updateLayer(updatedLayer);
+    refreshLayers(activeLayer.id);
+  };
+
+  const handleEditSuggestion = (sugg: MetricSuggestion) => {
+    const draftId = `draft_${Math.random().toString(36).slice(2, 9)}`;
+    setEditingMetric({
+      id: draftId,
+      name: sugg.name,
+      description: sugg.description,
+      sql_template: sugg.sql_template,
+      source: 'ai',
+    });
+    setIsMetricModalOpen(true);
   };
 
   if (!mounted || isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="space-y-12 py-6 animate-in fade-in">
-        {/* Hero Guest Banner */}
-        <div className="glass-card rounded-3xl p-8 md:p-12 border border-indigo-500/20 shadow-2xl relative overflow-hidden text-center max-w-4xl mx-auto">
-          <div className="absolute top-0 right-1/2 translate-x-1/2 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
-
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-bold mb-6">
-            <Sparkles className="w-4 h-4" /> AI SEMANTIC LAYER AGENT PLATFORM
-          </div>
-
-          <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white leading-tight">
-            Chuẩn hóa Semantic Layer & Business Metrics bằng <span className="gradient-text">AI Agent</span>
-          </h1>
-
-          <p className="text-sm md:text-base text-slate-300 mt-4 max-w-2xl mx-auto leading-relaxed">
-            Tự động Introspect DB Schema, đề xuất tên nghiệp vụ, định nghĩa Business Metrics thống nhất và xuất cấu hình JSON / YAML cho dbt, Metabase và Looker Studio.
-          </p>
-
-          {/* Auth Required Notice & CTA */}
-          <div className="mt-8 pt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link
-              href="/login"
-              className="gradient-btn w-full sm:w-auto px-8 py-3 text-sm font-bold text-white rounded-xl shadow-xl flex items-center justify-center gap-2 group"
-            >
-              <KeyRound className="w-4 h-4" /> Đăng nhập ngay (JWT / Google)
-            </Link>
-
-            <Link
-              href="/register"
-              className="w-full sm:w-auto px-8 py-3 text-sm font-bold text-slate-200 bg-slate-900 border border-slate-700 hover:border-indigo-500/80 rounded-xl flex items-center justify-center gap-2 transition-all"
-            >
-              <PlusCircle className="w-4 h-4 text-cyan-400" /> Tạo tài khoản mới
-            </Link>
-          </div>
-        </div>
-
-        {/* Feature Highlights Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          <div className="glass-card rounded-2xl p-6 border border-slate-800 space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
-              <Server className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white">Schema Introspection</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Đọc metadata schema PostgreSQL, MySQL, SQLite qua SQLAlchemy Inspector mà không thực thi bất kỳ truy vấn SELECT data nào.
-            </p>
-          </div>
-
-          <div className="glass-card rounded-2xl p-6 border border-slate-800 space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-600/20 text-purple-400 flex items-center justify-center border border-purple-500/30">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white">LLM Business Enrich</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              AI tự động chuyển đổi tên bảng/cột kỹ thuật sang tên nghiệp vụ tiếng Việt dễ hiểu và đề xuất Business Metrics chuẩn hóa.
-            </p>
-          </div>
-
-          <div className="glass-card rounded-2xl p-6 border border-slate-800 space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-cyan-600/20 text-cyan-400 flex items-center justify-center border border-cyan-500/30">
-              <FolderKanban className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white">HITL Review & Export</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Quy trình duyệt Human-In-The-Loop cho phép chỉnh sửa 1-click trước khi xuất cấu hình chính thức ra file JSON hoặc YAML.
-            </p>
-          </div>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-[#0B0F19] text-indigo-600 dark:text-indigo-400">
+        <div className="flex items-center gap-3">
+          <Loader2 className="w-6 h-6 animate-spin" />
+          <span className="text-sm font-semibold">Đang khởi tạo AI Agent Workspace...</span>
         </div>
       </div>
     );
   }
+
+  const isDark = theme === 'dark';
 
   return (
-    <div className="space-y-8 animate-in fade-in">
-      {/* Welcome Banner */}
-      <div className="glass-card rounded-2xl p-6 md:p-8 border border-indigo-500/20 shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden">
-        <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div className={`min-h-screen flex h-screen overflow-hidden transition-colors ${isDark ? 'bg-[#0B0F19] text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-6 right-6 z-60 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xl border border-slate-700 animate-in slide-in-from-top flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* LEFT SIDEBAR (ChatGPT Style) */}
+      <aside className={`w-64 md:w-72 flex flex-col justify-between border-r shrink-0 h-screen sticky top-0 transition-colors select-none ${isDark ? 'bg-[#0E1526] border-slate-800' : 'bg-white border-slate-200 shadow-2xs'}`}>
         <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold mb-3">
-            <Sparkles className="w-3.5 h-3.5" /> AI Governance Engine v1.0
-          </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
-            Quản lý Kết nối Database & Semantic Layers
-          </h1>
-          <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-            Tự động phân tích Metadata Schema, enrich tên nghiệp vụ bằng LLM và định nghĩa Business Metrics chuẩn hóa với quy trình duyệt Human-In-The-Loop.
-          </p>
-        </div>
-      </div>
+          {/* Brand Header */}
+          <div className={`p-4 border-b flex items-center justify-between transition-colors ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+            <Link href="/" className="flex items-center gap-2.5 group">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-cyan-400 p-0.5 shadow-md group-hover:scale-105 transition-transform">
+                <div className={`w-full h-full rounded-[10px] flex items-center justify-center ${isDark ? 'bg-slate-950' : 'bg-white'}`}>
+                  <Database className="w-4.5 h-4.5 text-indigo-600 dark:text-indigo-400" />
+                </div>
+              </div>
+              <div>
+                <span className="font-extrabold text-sm tracking-wider gradient-text block leading-none">
+                  S206 SEMANTIC
+                </span>
+                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">AI Agent Governance</span>
+              </div>
+            </Link>
 
-      <SqlDumpPreviewUploader onSaved={() => setSavedSchemaRevision((value) => value + 1)} />
-
-      {token && <ImportedSchemaList token={token} refreshKey={savedSchemaRevision} />}
-
-      {/* Section 1: Connect New Database Form */}
-      <div className="glass-card rounded-2xl p-6 md:p-8 border border-indigo-500/20 shadow-xl">
-        <div className="flex items-center gap-3 pb-4 mb-6 border-b border-slate-800">
-          <div className="w-9 h-9 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
-            <PlusCircle className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-slate-100 uppercase tracking-wide">
-              ➕ KẾT NỐI DATABASE MỚI
-            </h2>
-            <p className="text-xs text-slate-400">
-              Nhập thông tin kết nối để AI tự động Introspect & Enrich Schema
-            </p>
-          </div>
-        </div>
-
-        <form onSubmit={handleStartAnalysis} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="md:col-span-2">
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Tên gợi nhớ DB
-              </label>
-              <input
-                type="text"
-                required
-                disabled={isAnalyzing}
-                placeholder="e.g. E-Commerce Production Database"
-                value={dbName}
-                onChange={(e) => setDbName(e.target.value)}
-                className="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all placeholder:text-slate-500 disabled:opacity-50"
-              />
-            </div>
-
-            <div className="md:col-span-1">
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                DIALECT OVERRIDE
-              </label>
-              <select
-                disabled={isAnalyzing}
-                value={dbType}
-                onChange={(e) => setDbType(e.target.value as 'auto' | 'postgresql' | 'mysql' | 'sqlite')}
-                className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all cursor-pointer disabled:opacity-50"
-              >
-                <option value="auto">Auto detect</option>
-                <option value="postgresql">PostgreSQL</option>
-                <option value="mysql">MySQL</option>
-                <option value="sqlite">SQLite</option>
-              </select>
-            </div>
+            <button
+              onClick={toggleTheme}
+              className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                isDark
+                  ? 'border-slate-800 text-slate-400 hover:text-amber-400 hover:bg-slate-800'
+                  : 'border-slate-200 text-slate-600 hover:text-indigo-600 hover:bg-slate-100'
+              }`}
+              title={isDark ? 'Chuyển sang Light Theme' : 'Chuyển sang Dark Theme'}
+            >
+              {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 flex items-center justify-between">
-              <span>Connection URL (Fernet Encrypted)</span>
-              <span className="text-[11px] text-cyan-400 normal-case flex items-center gap-1">
-                <KeyRound className="w-3 h-3" /> Chỉ đọc Metadata (Zero SELECT Data)
-              </span>
-            </label>
-            <input
-              type="text"
-              required
-              disabled={isAnalyzing}
-              placeholder="postgresql://user:pass@localhost:5432/ecommerce_db"
-              value={connUrl}
-              onChange={(e) => setConnUrl(e.target.value)}
-              className="w-full bg-slate-950 font-mono border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-emerald-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all placeholder:text-slate-600 disabled:opacity-50"
-            />
+          {/* New Connection Button */}
+          <div className="p-3">
+            <button
+              onClick={() => setIsConnectModalOpen(true)}
+              className="gradient-btn w-full py-2.5 px-3 text-xs font-bold text-white rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer hover:opacity-95"
+            >
+              <PlusCircle className="w-4 h-4" />
+              <span>➕ Thêm Kết Nối Database</span>
+            </button>
           </div>
 
-          <button
-            type="submit"
-            disabled={isAnalyzing}
-            className="gradient-btn w-full md:w-auto px-6 py-3 text-sm font-bold text-white rounded-xl shadow-lg flex items-center justify-center gap-2.5 disabled:opacity-50"
-          >
-            {isAnalyzing ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-white" />
-                Đang xử lý phân tích Schema...
-              </>
+          {/* Connected Databases List Header */}
+          <div className={`px-4 py-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            <span>Danh sách Database ({layers.length})</span>
+            <Database className="w-3.5 h-3.5 text-slate-400" />
+          </div>
+
+          {/* Connected Databases Items */}
+          <div className="px-3 overflow-y-auto max-h-[calc(100vh-280px)] space-y-1">
+            {layers.length === 0 ? (
+              <div className={`p-4 text-center text-xs border border-dashed rounded-xl my-2 ${isDark ? 'text-slate-400 border-slate-800' : 'text-slate-500 border-slate-200'}`}>
+                Chưa có DB nào.
+                <br />
+                Hãy bấm nút ở trên để thêm kết nối.
+              </div>
             ) : (
-              <>
-                <Zap className="w-4 h-4 text-cyan-300 fill-cyan-300" />
-                ⚡ Bắt đầu Phân tích Schema (Auto Introspect & Enrich)
-              </>
+              layers.map((layer) => {
+                const isSelected = layer.id === selectedLayerId;
+                return (
+                  <div
+                    key={layer.id}
+                    onClick={() => {
+                      setSelectedLayerId(layer.id);
+                      setActiveTab('studio');
+                    }}
+                    className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 group ${
+                      isSelected
+                        ? isDark
+                          ? 'bg-indigo-950/80 border-indigo-500/80 shadow-xs'
+                          : 'bg-indigo-50 border-indigo-300 shadow-2xs'
+                        : isDark
+                        ? 'bg-slate-900/40 hover:bg-slate-900 border-slate-800 text-slate-300'
+                        : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-800'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                        <span className={`text-xs font-bold truncate ${isSelected ? (isDark ? 'text-white' : 'text-indigo-950') : (isDark ? 'text-slate-200' : 'text-slate-800')}`}>
+                          {layer.db_name}
+                        </span>
+                      </div>
+                      <div className={`text-[10px] truncate mt-0.5 font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        {layer.db_type.toUpperCase()} • {layer.tables.length} bảng • {layer.metrics.length} metrics
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={(e) => handleDeleteDb(layer.id, e)}
+                      className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 transition-opacity cursor-pointer"
+                      title="Xóa DB"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })
             )}
-          </button>
-          {liveDbError && (
-            <p className="mt-2 text-xs font-semibold text-red-400 bg-red-500/10 border border-red-500/20 p-2.5 rounded-xl">
-              ❌ {liveDbError}
-            </p>
+          </div>
+        </div>
+
+        {/* Footer User Info & Settings */}
+        <div className={`p-3 border-t space-y-2 transition-colors ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setIsSettingsModalOpen(true)}
+              className={`flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors ${
+                isDark ? 'text-slate-300 hover:text-indigo-400' : 'text-slate-700 hover:text-indigo-600'
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5 text-slate-500" /> Cấu hình System
+            </button>
+            <span className={`text-[10px] font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>AST Validated</span>
+          </div>
+
+          {user && (
+            <div className={`flex items-center justify-between p-2 rounded-xl border transition-colors ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
+              <div className="flex items-center gap-2 truncate">
+                <div className="w-6 h-6 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <span className={`text-xs font-bold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{user.name}</span>
+              </div>
+              <button
+                onClick={logout}
+                className="p-1 text-slate-400 hover:text-red-500 cursor-pointer"
+                title="Đăng xuất"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
           )}
-        </form>
+        </div>
+      </aside>
 
-        {/* Progress Feedback Indicator */}
-        {isAnalyzing && (
-          <div className="mt-6 p-5 bg-slate-900/90 rounded-2xl border border-indigo-500/30 space-y-3 animate-in fade-in">
-            <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> ⚙️ ĐANG PHÂN TÍCH SCHEMA...
-            </h3>
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950/60 border border-slate-800">
-                <span className="flex items-center gap-2 text-slate-200">
-                  {analysisStep > 1 ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  ) : (
-                    <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                  )}
-                  ● Introspecting schema metadata via SQLAlchemy Inspector...
+      {/* CENTER WORKSPACE CANVAS */}
+      <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+        {!activeLayer ? (
+          /* EMPTY STATE: CENTERED DATABASE CONNECTION BUTTON */
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in">
+            <div className={`max-w-md w-full glass-card p-8 md:p-10 rounded-3xl border shadow-2xl space-y-5 relative overflow-hidden transition-colors ${
+              isDark ? 'bg-slate-900 border-indigo-500/30' : 'bg-white border-slate-200'
+            }`}>
+              <div className="absolute top-0 right-1/2 translate-x-1/2 w-72 h-72 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
+
+              <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto shadow-xs">
+                <Database className="w-8 h-8" />
+              </div>
+
+              <div>
+                <h1 className={`text-xl md:text-2xl font-extrabold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                  Bắt Đầu Với AI Semantic Agent
+                </h1>
+                <p className={`text-xs md:text-sm mt-2 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  Chưa có Database nào được chọn. Hãy bấm nút bên dưới để kết nối Live Target DB hoặc Import file SQL Dump schema DDL.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setIsConnectModalOpen(true)}
+                className="gradient-btn w-full py-3.5 px-6 text-sm font-extrabold text-white rounded-2xl shadow-xl flex items-center justify-center gap-2.5 cursor-pointer hover:scale-[1.02] transition-all"
+              >
+                <PlusCircle className="w-5 h-5" />
+                <span>➕ Thêm Kết Nối Database</span>
+              </button>
+
+              <div className={`pt-2 flex items-center justify-center gap-4 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                <span className="flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> Read-Only Security
                 </span>
-                <span className="text-[11px] font-semibold text-slate-400">
-                  {analysisStep > 1 ? '✅ Xong (1.2s)' : '⏳ Đang xử lý...'}
+                <span>•</span>
+                <span className="flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> LLM Enrich
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* ACTIVE CHAT WORKSPACE */
+          <div className="flex-1 flex flex-col h-screen overflow-hidden">
+            {/* Top Workspace Bar */}
+            <header className={`px-6 py-3 border-b flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shrink-0 transition-colors ${
+              isDark ? 'bg-[#0B0F19] border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900 shadow-2xs'
+            }`}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className={`flex items-center gap-1.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  <Database className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Workspace</span>
+                  <span className="text-slate-400">/</span>
+                  <span className={`font-bold ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`}>{activeLayer.db_name}</span>
+                </div>
+
+                <span className={`text-[11px] font-mono uppercase px-2.5 py-0.5 rounded font-bold border ${
+                  isDark ? 'bg-slate-800 text-slate-200 border-slate-700' : 'bg-slate-100 text-slate-800 border-slate-200'
+                }`}>
+                  {activeLayer.db_type}
+                </span>
+
+                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 inline-flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> {activeLayer.status}
                 </span>
               </div>
 
-              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950/60 border border-slate-800">
-                <span className="flex items-center gap-2 text-slate-200">
-                  {analysisStep > 2 ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  ) : analysisStep === 2 ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                  ) : (
-                    <Clock className="w-4 h-4 text-slate-600" />
-                  )}
-                  ● Enriching table & column business names via LLM...
-                </span>
-                <span className="text-[11px] font-semibold text-slate-400">
-                  {analysisStep > 2
-                    ? '✅ Xong (1.4s)'
-                    : analysisStep === 2
-                    ? '⏳ Đang xử lý...'
-                    : '⏸ Chờ bước trên'}
-                </span>
-              </div>
+              {/* Navigation Tabs */}
+              <div className={`flex items-center p-1 rounded-xl border ${
+                isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'
+              }`}>
+                <button
+                  onClick={() => setActiveTab('studio')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'studio'
+                      ? isDark
+                        ? 'bg-slate-800 text-indigo-400 shadow-xs font-extrabold'
+                        : 'bg-white text-indigo-600 shadow-2xs font-extrabold'
+                      : isDark
+                      ? 'text-slate-400 hover:text-slate-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> 💬 AI Chat Studio
+                </button>
 
-              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950/60 border border-slate-800">
-                <span className="flex items-center gap-2 text-slate-200">
-                  {analysisStep > 3 ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  ) : analysisStep === 3 ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                  ) : (
-                    <Clock className="w-4 h-4 text-slate-600" />
-                  )}
-                  ● Suggesting business metrics & SQL templates...
-                </span>
-                <span className="text-[11px] font-semibold text-slate-400">
-                  {analysisStep > 3
-                    ? '✅ Xong (1.2s)'
-                    : analysisStep === 3
-                    ? '⏳ Đang xử lý...'
-                    : '⏸ Chờ bước trên'}
-                </span>
+                <button
+                  onClick={() => setActiveTab('metrics')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'metrics'
+                      ? isDark
+                        ? 'bg-slate-800 text-indigo-400 shadow-xs font-extrabold'
+                        : 'bg-white text-indigo-600 shadow-2xs font-extrabold'
+                      : isDark
+                      ? 'text-slate-400 hover:text-slate-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <BarChart3 className="w-3.5 h-3.5 text-emerald-500" /> Catalog ({activeLayer.metrics.length})
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('export')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'export'
+                      ? isDark
+                        ? 'bg-slate-800 text-indigo-400 shadow-xs font-extrabold'
+                        : 'bg-white text-indigo-600 shadow-2xs font-extrabold'
+                      : isDark
+                      ? 'text-slate-400 hover:text-slate-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Share2 className="w-3.5 h-3.5 text-purple-500" /> Export Code
+                </button>
               </div>
+            </header>
+
+            {/* Workspace Tab View Content */}
+            <div className="flex-1 p-4 md:p-5 overflow-y-auto w-full">
+              {activeTab === 'studio' && (
+                <AIStudioView
+                  layer={activeLayer}
+                  theme={theme}
+                  onMetricAddedToLibrary={handleAddMetricFromStudio}
+                  onEditMetricRequest={handleEditSuggestion}
+                />
+              )}
+
+              {activeTab === 'metrics' && (
+                <MetricsCatalogView
+                  metrics={activeLayer.metrics}
+                  theme={theme}
+                  onDeleteMetric={handleDeleteMetric}
+                  onEditMetric={(m) => {
+                    setEditingMetric(m);
+                    setIsMetricModalOpen(true);
+                  }}
+                  onOpenStudio={() => setActiveTab('studio')}
+                />
+              )}
+
+              {activeTab === 'export' && (
+                <ExportPlaygroundView layer={activeLayer} theme={theme} />
+              )}
             </div>
           </div>
         )}
-      </div>
+      </main>
 
-      {token && <LiveDbList token={token} refreshKey={liveDbRevision} />}
+      {/* Modals */}
+      <ConnectDbModal
+        isOpen={isConnectModalOpen}
+        onClose={() => setIsConnectModalOpen(false)}
+        onSuccess={handleDbConnectedSuccess}
+      />
 
-      {/* Section 2: List of Created Semantic Layers */}
-      <div className="glass-card rounded-2xl p-6 md:p-8 border border-indigo-500/20 shadow-xl">
-        <div className="flex items-center justify-between pb-4 mb-6 border-b border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-purple-600/20 text-purple-400 flex items-center justify-center border border-purple-500/30">
-              <FolderKanban className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-slate-100 uppercase tracking-wide">
-                📁 DANH SÁCH SEMANTIC LAYERS ĐÃ TẠO
-              </h2>
-              <p className="text-xs text-slate-400">
-                Quản lý các cơ sở dữ liệu đã phân tích và hoàn thiện Semantic Governance
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-semibold text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1 rounded-full">
-            {layers.length} Database Layers
-          </span>
-        </div>
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+      />
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm border-collapse">
-            <thead>
-              <tr className="border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-900/40">
-                <th className="py-3 px-4">Tên Database</th>
-                <th className="py-3 px-4">Loại DB</th>
-                <th className="py-3 px-4">Trạng thái</th>
-                <th className="py-3 px-4">Ngày cập nhật</th>
-                <th className="py-3 px-4 text-right">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60">
-              {layers.map((layer) => (
-                <tr key={layer.id} className="hover:bg-slate-900/40 transition-colors">
-                  <td className="py-3.5 px-4 font-semibold text-slate-200">
-                    <div className="flex items-center gap-2">
-                      <Server className="w-4 h-4 text-indigo-400" />
-                      {layer.db_name}
-                    </div>
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <span className="bg-slate-800/80 text-slate-300 border border-slate-700/60 px-2.5 py-0.5 rounded text-xs uppercase font-mono">
-                      {layer.db_type}
-                    </span>
-                  </td>
-                  <td className="py-3.5 px-4">
-                    {layer.status === 'Saved' ? (
-                      <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Saved
-                      </span>
-                    ) : (
-                      <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> Draft
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-3.5 px-4 text-xs text-slate-400 font-mono">
-                    {layer.updated_at}
-                  </td>
-                  <td className="py-3.5 px-4 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Link
-                        href={`/semantic/${layer.id}/review`}
-                        className="gradient-btn px-3 py-1.5 text-xs font-semibold text-white rounded-lg flex items-center gap-1.5 shadow"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" /> [ Mở Review ]
-                      </Link>
-                      <button
-                        onClick={() => handleDelete(layer.id)}
-                        className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                        title="Xóa Layer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <MetricModal
+        isOpen={isMetricModalOpen}
+        onClose={() => setIsMetricModalOpen(false)}
+        onSave={handleSaveMetric}
+        initialMetric={editingMetric}
+      />
     </div>
   );
 }
