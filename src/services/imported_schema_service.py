@@ -140,6 +140,7 @@ def _summary_response(record: ImportedSchemaModel) -> ImportedSchemaSummaryRespo
     raw_schema = RawSchemaMetadata.model_validate(record.schema_metadata)
     return ImportedSchemaSummaryResponse(
         id=record.id,
+        semantic_db_id=record.semantic_db_id,
         display_name=record.display_name,
         dialect=raw_schema.dialect,
         table_count=len(raw_schema.tables),

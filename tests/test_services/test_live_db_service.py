@@ -75,6 +75,16 @@ def test_introspect_live_database_with_string_auto_dialect(temp_sqlite_db: str):
     assert schema.tables is not None
 
 
+def test_introspect_live_database_accepts_async_driver_url(temp_sqlite_db: str):
+    """Normalize async driver URLs before synchronous Inspector introspection."""
+    conn_url = f"sqlite+aiosqlite:///{temp_sqlite_db}"
+
+    schema = introspect_live_database(conn_url, "auto")
+
+    assert schema.dialect == SchemaDialect.SQLITE
+    assert {table.table_name.raw_name for table in schema.tables} == {"customers", "orders"}
+
+
 @pytest.mark.asyncio
 async def test_create_and_manage_live_target_db(async_session: AsyncSession, temp_sqlite_db: str):
     """Test full CRUD lifecycle for live target database records."""

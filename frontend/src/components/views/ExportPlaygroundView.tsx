@@ -1,247 +1,34 @@
 'use client';
 
-import React, { useState } from 'react';
-import { SemanticLayerData } from '@/lib/api';
-import { Share2, Download, Copy, Check } from 'lucide-react';
+import { Copy, Download, Loader2, Share2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+
+import { exportSemanticLayerApi } from '@/lib/api';
 
 interface ExportPlaygroundViewProps {
-  layer: SemanticLayerData;
-  theme: 'light' | 'dark';
+  dbId?: number | null;
 }
 
-export const ExportPlaygroundView: React.FC<ExportPlaygroundViewProps> = ({ layer, theme }) => {
-  const [format, setFormat] = useState<'cube' | 'dbt' | 'json'>('cube');
+export function ExportPlaygroundView({ dbId }: ExportPlaygroundViewProps) {
+  const [format, setFormat] = useState<'json' | 'yaml'>('yaml');
+  const [content, setContent] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const isDark = theme === 'dark';
+  useEffect(() => {
+    if (!dbId) return;
+    setLoading(true);
+    setError('');
+    exportSemanticLayerApi(String(dbId), format).then(setContent).catch((caught) => setError(caught instanceof Error ? caught.message : 'Không thể export')).finally(() => setLoading(false));
+  }, [dbId, format]);
 
-  // Generate Cube.js JS Schema format
-  const generateCubeSchema = (): string => {
-    return `// Cube.js Universal Semantic Layer Data Models
-// Generated for Database: ${layer.db_name} (${layer.db_type})
-
-${layer.tables
-  .map(
-    (t) => `cube('${t.table_name.charAt(0).toUpperCase() + t.table_name.slice(1)}', {
-  sql: \`SELECT * FROM public.${t.table_name}\`,
-  title: '${t.business_name}',
-  description: '${t.description}',
-
-  dimensions: {
-${t.columns
-  .filter((c) => !c.data_type.toUpperCase().includes('NUMERIC') && !c.data_type.toUpperCase().includes('INT'))
-  .map(
-    (c) => `    ${c.column_name}: {
-      sql: \`${c.column_name}\`,
-      type: 'string',
-      title: '${c.business_name}'
-    }`
-  )
-  .join(',\n')}
-  },
-
-  measures: {
-    count: {
-      type: 'count',
-      title: 'Số lượng bản ghi'
-    }
-  }
-});`
-  )
-  .join('\n\n')}
-
-// Business Metrics Defined:
-${layer.metrics
-  .map(
-    (m) => `// Metric: ${m.name}
-// Description: ${m.description}
-// SQL: ${m.sql_template}`
-  )
-  .join('\n\n')}`;
+  const copy = async () => { await navigator.clipboard.writeText(content); setCopied(true); window.setTimeout(() => setCopied(false), 1500); };
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = `semantic-layer.${format === 'yaml' ? 'yaml' : 'json'}`; anchor.click(); URL.revokeObjectURL(url);
   };
 
-  // Generate dbt Semantic Layer YAML format
-  const generateDbtYaml = (): string => {
-    return `version: 2
-
-semantic_models:
-${layer.tables
-  .map(
-    (t) => `  - name: ${t.table_name}
-    description: "${t.business_name} - ${t.description}"
-    model: ref('${t.table_name}')
-    defaults:
-      agg_time_dimension: created_at
-
-    entities:
-      - name: ${t.table_name}_id
-        type: primary
-
-    measures:
-${layer.metrics
-  .map(
-    (m) => `      - name: ${m.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}
-        description: "${m.description}"
-        expr: "${m.sql_template.replace(/\n/g, ' ')}"
-        agg: sum`
-  )
-  .join('\n')}`
-  )
-  .join('\n')}
-`;
-  };
-
-  // Generate JSON format
-  const generateJson = (): string => {
-    return JSON.stringify(
-      {
-        db_name: layer.db_name,
-        db_type: layer.db_type,
-        status: layer.status,
-        generated_at: new Date().toISOString(),
-        tables: layer.tables,
-        metrics: layer.metrics,
-      },
-      null,
-      2
-    );
-  };
-
-  const getActiveCode = () => {
-    switch (format) {
-      case 'cube':
-        return generateCubeSchema();
-      case 'dbt':
-        return generateDbtYaml();
-      case 'json':
-        return generateJson();
-    }
-  };
-
-  const activeCode = getActiveCode();
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(activeCode);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // fallback
-    }
-  };
-
-  const handleDownload = () => {
-    const ext = format === 'cube' ? 'js' : format === 'dbt' ? 'yml' : 'json';
-    const blob = new Blob([activeCode], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `semantic_layer_${layer.db_name}.${ext}`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  return (
-    <div className="space-y-4 animate-in fade-in">
-      {/* Top Header */}
-      <div
-        className={`p-4 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 ${
-          isDark
-            ? 'bg-slate-900/60 border-slate-800 shadow-lg text-white'
-            : 'bg-white border-slate-200 shadow-2xs text-slate-900'
-        }`}
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 text-purple-600 dark:text-purple-400 flex items-center justify-center">
-            <Share2 className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-sm font-bold tracking-tight text-slate-900 dark:text-white">Semantic Layer Export & Integrations</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Xuất mô hình dữ liệu sang Cube.js Schema, dbt Semantic Layer YAML hoặc JSON chuẩn hóa
-            </p>
-          </div>
-        </div>
-
-        {/* Format Selector Pills */}
-        <div className="flex items-center gap-2">
-          <div className={`flex items-center p-1 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>
-            <button
-              onClick={() => setFormat('cube')}
-              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                format === 'cube'
-                  ? isDark
-                    ? 'bg-slate-900 text-indigo-400 shadow-xs font-extrabold'
-                    : 'bg-white text-indigo-600 shadow-2xs font-extrabold'
-                  : isDark
-                  ? 'text-slate-400 hover:text-slate-200'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Cube.js Schema
-            </button>
-            <button
-              onClick={() => setFormat('dbt')}
-              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                format === 'dbt'
-                  ? isDark
-                    ? 'bg-slate-900 text-indigo-400 shadow-xs font-extrabold'
-                    : 'bg-white text-indigo-600 shadow-2xs font-extrabold'
-                  : isDark
-                  ? 'text-slate-400 hover:text-slate-200'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              dbt YAML
-            </button>
-            <button
-              onClick={() => setFormat('json')}
-              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                format === 'json'
-                  ? isDark
-                    ? 'bg-slate-900 text-indigo-400 shadow-xs font-extrabold'
-                    : 'bg-white text-indigo-600 shadow-2xs font-extrabold'
-                  : isDark
-                  ? 'text-slate-400 hover:text-slate-200'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              JSON Schema
-            </button>
-          </div>
-
-          <button
-            onClick={handleCopy}
-            className={`px-3.5 py-1.5 text-xs font-bold border rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs ${
-              isDark
-                ? 'text-slate-200 bg-slate-900 border-slate-700 hover:bg-slate-800'
-                : 'text-slate-700 bg-white border-slate-200 hover:bg-slate-50'
-            }`}
-          >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copied ? 'Đã sao chép' : 'Copy'}</span>
-          </button>
-
-          <button
-            onClick={handleDownload}
-            className="px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Tải file</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Code Editor Container */}
-      <div
-        className={`rounded-2xl border p-4 font-mono text-xs overflow-x-auto leading-relaxed shadow-xs ${
-          isDark
-            ? 'bg-slate-950 border-slate-800 text-slate-200'
-            : 'bg-white border-slate-200 text-slate-900'
-        }`}
-      >
-        <pre className="whitespace-pre overflow-x-auto select-text">{activeCode}</pre>
-      </div>
-    </div>
-  );
-};
+  return <div className='space-y-4'><header className='flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900'><div><h2 className='flex items-center gap-2 text-sm font-bold'><Share2 className='h-5 w-5 text-purple-500' />Semantic Layer Export</h2><p className='mt-1 text-xs text-slate-500'>Nội dung do backend tạo; chỉ metric đã approved được export.</p></div><div className='flex gap-2'><select value={format} onChange={(event) => setFormat(event.target.value as 'json' | 'yaml')} className='form-input'><option value='yaml'>YAML</option><option value='json'>JSON</option></select><button onClick={() => void copy()} disabled={!content} className='rounded-xl border px-3 py-2 text-xs'><Copy className='mr-1 inline h-4 w-4' />{copied ? 'Đã sao chép' : 'Copy'}</button><button onClick={download} disabled={!content} className='rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white'><Download className='mr-1 inline h-4 w-4' />Tải file</button></div></header>{loading ? <p className='p-10 text-center text-sm'><Loader2 className='mr-2 inline h-5 w-5 animate-spin' />Đang tải export...</p> : error ? <p className='rounded-xl bg-red-50 p-4 text-sm text-red-700'>{error}</p> : <pre className='overflow-auto whitespace-pre rounded-2xl border border-slate-800 bg-slate-950 p-4 text-xs leading-5 text-emerald-300'>{content}</pre>}</div>;
+}

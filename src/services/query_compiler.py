@@ -1,16 +1,10 @@
-"""Semantic Query Compiler — compiles approved metrics and dimensions into read-only SQL.
-
-Provides:
-  - SemanticQueryCompiler: compiles metrics + dimensions into SQL via semantic metadata.
-  - CompiledQuery: dataclass holding compiled SQL, parameters, and metadata.
-  - validate_read_only: SQL guardrail ensuring only SELECT statements are allowed.
-"""
+"""Compile approved metric definitions into parameterized read-only SQL."""
 
 from __future__ import annotations
 
-import re
 from collections import deque
 from dataclasses import dataclass, field
+from typing import Any
 
 import sqlglot
 from sqlalchemy import select
@@ -20,104 +14,47 @@ from sqlglot import exp
 from src.models.db import (
     CanonicalRelationshipModel,
     SemanticColumnModel,
+    SemanticDatabaseModel,
     SemanticMetricModel,
     SemanticTableModel,
 )
+from src.models.metric_definition import MetricDefinition, MetricFilter
+from src.models.schemas import SemanticQueryFilter
 
 
 @dataclass
 class CompiledQuery:
-    """Result of compiling metrics and dimensions into SQL."""
+    """Hold compiled SQL, bound values, and observable metadata."""
 
     sql: str
-    parameters: dict = field(default_factory=dict)
-    metadata: dict = field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------
-# validate_read_only — SQL guardrail
-# ---------------------------------------------------------------------------
+    parameters: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def validate_read_only(sql: str) -> bool:
-    """Validate that SQL is read-only (SELECT only).
-
-    Raises ValueError with a clear message if any rule is violated:
-    - Root AST node must be Select
-    - No multi-statement (semicolon-separated)
-    - No SELECT ... INTO ...
-    - No CTEs containing DML
-    - No INSERT / UPDATE / DELETE / DROP / ALTER / TRUNCATE
-    """
-    _check_multi_statement(sql)
-    parsed = _parse_sql(sql)
-    _check_root_is_select(parsed)
-    _check_no_select_into(parsed)
-    _check_no_cte_dml(parsed)
-    _check_no_forbidden_nodes(parsed)
+    """Require exactly one SELECT without write-capable AST nodes."""
+    try:
+        statements = sqlglot.parse(sql, error_level=sqlglot.ErrorLevel.RAISE)
+    except sqlglot.errors.ParseError as exc:
+        raise ValueError(f"Invalid SQL: {exc}") from exc
+    if len(statements) != 1:
+        raise ValueError("Multi-statement queries are not allowed")
+    if not isinstance(statements[0], exp.Select):
+        raise ValueError(f"Only SELECT statements are allowed, got {type(statements[0]).__name__}")
+    parsed = statements[0]
+    if parsed.find(exp.Into):
+        raise ValueError("SELECT INTO is not allowed")
+    dml = (exp.Insert, exp.Update, exp.Delete)
+    if any(isinstance(node, dml) for node in parsed.walk()):
+        raise ValueError("CTE containing DML is not allowed")
+    ddl = (exp.Drop, exp.Alter, exp.TruncateTable)
+    if any(isinstance(node, ddl) for node in parsed.walk()):
+        raise ValueError("DDL is not allowed")
     return True
 
 
-def _check_multi_statement(sql: str) -> None:
-    """Reject semicolon-separated multi-statement queries."""
-    stripped = sql.strip().rstrip(";")
-    if ";" in stripped:
-        raise ValueError("Multi-statement queries are not allowed")
-
-
-def _parse_sql(sql: str) -> exp.Expression:
-    """Parse SQL into an AST; raise ValueError on parse failure."""
-    try:
-        return sqlglot.parse_one(sql, error_level=sqlglot.ErrorLevel.RAISE)
-    except sqlglot.errors.ParseError as exc:
-        raise ValueError(f"Invalid SQL: {exc}") from exc
-
-
-def _check_root_is_select(parsed: exp.Expression) -> None:
-    """Reject anything that is not a top-level SELECT."""
-    if not isinstance(parsed, exp.Select):
-        raise ValueError(f"Only SELECT statements are allowed, got {type(parsed).__name__}")
-
-
-def _check_no_select_into(parsed: exp.Expression) -> None:
-    """Reject SELECT ... INTO ..."""
-    if parsed.find(exp.Into):
-        raise ValueError("SELECT ... INTO is not allowed")
-
-
-def _check_no_cte_dml(parsed: exp.Expression) -> None:
-    """Reject CTEs whose body is INSERT / UPDATE / DELETE."""
-    with_block = parsed.find(exp.With)
-    if with_block is None:
-        return
-    for cte in with_block.find_all(exp.CTE):
-        cte_body = cte.this
-        if isinstance(cte_body, (exp.Insert, exp.Update, exp.Delete)):
-            raise ValueError("CTE containing DML (INSERT/UPDATE/DELETE) is not allowed")
-
-
-def _check_no_forbidden_nodes(parsed: exp.Expression) -> None:
-    """Walk the AST and reject any INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE."""
-    for node in parsed.walk(bfs=False):
-        if isinstance(node, (exp.Insert, exp.Update, exp.Delete)):
-            raise ValueError(f"Statement containing {type(node).__name__} is not allowed")
-        if isinstance(node, exp.Drop):
-            raise ValueError("DROP statement is not allowed")
-        if isinstance(node, exp.Alter):
-            raise ValueError("ALTER statement is not allowed")
-        if isinstance(node, exp.TruncateTable):
-            raise ValueError("TRUNCATE statement is not allowed")
-
-
-# ---------------------------------------------------------------------------
-# SemanticQueryCompiler
-# ---------------------------------------------------------------------------
-
-_FORMULA_RE = re.compile(r"(\w+)\(\s*(?:DISTINCT\s+)?(?:(\w+)\.)?(\w+|\*)\s*\)", re.IGNORECASE)
-
-
 class SemanticQueryCompiler:
-    """Compiles approved metrics and dimensions into read-only SQL."""
+    """Compile approved definitions and selected dimensions through one interface."""
 
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
@@ -127,269 +64,248 @@ class SemanticQueryCompiler:
         connection_id: int,
         metric_ids: list[int],
         dimension_ids: list[int],
-        filters: str | None = None,
+        filters: list[SemanticQueryFilter] | None = None,
         limit: int = 100,
     ) -> CompiledQuery:
-        """Compile metrics and dimensions into a SQL query.
+        """Compile semantic selections without accepting SQL from the caller."""
+        dialect = await self._load_dialect(connection_id)
+        metrics = await self._load_metrics(connection_id, metric_ids)
+        definitions = [MetricDefinition.model_validate(item.definition) for item in metrics]
+        base_name = self._require_same_base(definitions)
+        tables = await self._load_tables(connection_id)
+        table_by_id = {table.id: table for table in tables}
+        table_by_name = {table.table_name: table for table in tables}
+        base = table_by_name.get(base_name)
+        if base is None:
+            raise ValueError(f"Unknown base entity: {base_name}")
+        dimensions = await self._load_dimensions(connection_id, dimension_ids)
+        joins = await self._resolve_joins(connection_id, base, dimensions, table_by_id)
+        runtime_filters = await self._load_runtime_filters(connection_id, filters or [])
+        return self._build_query(dialect, definitions, base, dimensions, joins, runtime_filters, min(limit, 1000))
 
-        Args:
-            connection_id: Semantic database ID.
-            metric_ids: List of metric IDs (must be status='approved').
-            dimension_ids: List of column IDs for GROUP BY dimensions.
-            filters: Optional WHERE clause (without the WHERE keyword).
-            limit: Maximum rows to return (default 100, max 1000).
+    async def _load_dialect(self, connection_id: int) -> str:
+        record = await self._db.get(SemanticDatabaseModel, connection_id)
+        if record is None:
+            raise ValueError("Semantic database not found")
+        return {"postgresql": "postgres", "mysql": "mysql", "sqlite": "sqlite"}.get(record.db_type, record.db_type)
 
-        Returns:
-            CompiledQuery with sql, parameters, and metadata.
-
-        Raises:
-            ValueError: If metrics not approved, dimensions not found, or no join path.
-        """
-        limit = min(limit, 1000)
-        metrics = await self._fetch_approved_metrics(metric_ids)
-        dimensions = await self._fetch_dimensions(dimension_ids)
-        all_tables = await self._fetch_tables(connection_id)
-        table_by_name = {t.table_name: t for t in all_tables}
-        table_by_id = {t.id: t for t in all_tables}
-
-        parsed_metrics = [self._parse_formula(m, table_by_name, table_by_id) for m in metrics]
-        base_table = table_by_id[metrics[0].base_entity_id]
-
-        joins, tables_used = await self._resolve_joins(
-            connection_id, base_table, parsed_metrics, dimensions, table_by_id
+    async def _load_metrics(self, db_id: int, ids: list[int]) -> list[SemanticMetricModel]:
+        result = await self._db.execute(
+            select(SemanticMetricModel).where(
+                SemanticMetricModel.db_id == db_id,
+                SemanticMetricModel.id.in_(ids),
+            )
         )
-        sql = self._build_sql(base_table, dimensions, parsed_metrics, joins, filters, limit)
-        validate_read_only(sql)
-
-        return CompiledQuery(
-            sql=sql,
-            parameters={},
-            metadata={
-                "tables": [table_by_id[tid].table_name for tid in tables_used],
-                "joins": joins,
-                "metrics": [m.name for m in metrics],
-                "dimensions": [f"{d['table_name']}.{d['column_name']}" for d in dimensions],
-            },
-        )
-
-    # ------------------------------------------------------------------
-    # Data fetching helpers
-    # ------------------------------------------------------------------
-
-    async def _fetch_approved_metrics(self, metric_ids: list[int]) -> list[SemanticMetricModel]:
-        """Fetch metrics by IDs, raise if any missing or not approved."""
-        stmt = select(SemanticMetricModel).where(SemanticMetricModel.id.in_(metric_ids))
-        result = await self._db.execute(stmt)
-        metrics = list(result.scalars().all())
-
-        if len(metrics) != len(metric_ids):
-            found = {m.id for m in metrics}
-            raise ValueError(f"Metrics not found: {set(metric_ids) - found}")
-
-        for m in metrics:
-            if m.status != "approved":
-                raise ValueError(f"Metric '{m.name}' (id={m.id}) is not approved (status={m.status})")
+        found = {item.id: item for item in result.scalars().all()}
+        if missing := set(ids) - found.keys():
+            raise ValueError(f"Metrics not found: {missing}")
+        metrics = [found[item_id] for item_id in ids]
+        for metric in metrics:
+            if metric.status != "approved" or metric.definition is None:
+                raise ValueError(f"Metric '{metric.name}' is not an approved definition")
         return metrics
 
-    async def _fetch_dimensions(self, dimension_ids: list[int]) -> list[dict[str, object]]:
-        """Fetch dimension columns with their parent table info."""
-        stmt = (
-            select(SemanticColumnModel, SemanticTableModel)
-            .join(
-                SemanticTableModel,
-                SemanticColumnModel.table_id == SemanticTableModel.id,
-            )
-            .where(SemanticColumnModel.id.in_(dimension_ids))
-        )
-        result = await self._db.execute(stmt)
-        rows = list(result.all())
+    @staticmethod
+    def _require_same_base(definitions: list[MetricDefinition]) -> str:
+        bases = {item.metric.base_entity for item in definitions}
+        if len(bases) != 1:
+            raise ValueError("All selected metrics must use the same base entity")
+        return bases.pop()
 
-        if len(rows) != len(dimension_ids):
-            found = {c.id for c, _ in rows}
-            raise ValueError(f"Dimension columns not found: {set(dimension_ids) - found}")
-
-        return [
-            {
-                "column_id": col.id,
-                "table_id": tbl.id,
-                "table_name": tbl.table_name,
-                "column_name": col.column_name,
-            }
-            for col, tbl in rows
-        ]
-
-    async def _fetch_tables(self, connection_id: int) -> list[SemanticTableModel]:
-        """Fetch all semantic tables for a connection."""
-        stmt = select(SemanticTableModel).where(SemanticTableModel.db_id == connection_id)
-        result = await self._db.execute(stmt)
+    async def _load_tables(self, db_id: int) -> list[SemanticTableModel]:
+        result = await self._db.execute(select(SemanticTableModel).where(SemanticTableModel.db_id == db_id))
         return list(result.scalars().all())
 
-    # ------------------------------------------------------------------
-    # Formula parsing
-    # ------------------------------------------------------------------
+    async def _load_dimensions(self, db_id: int, ids: list[int]) -> list[dict[str, Any]]:
+        if not ids:
+            return []
+        stmt = (
+            select(SemanticColumnModel, SemanticTableModel)
+            .join(SemanticTableModel, SemanticColumnModel.table_id == SemanticTableModel.id)
+            .where(SemanticTableModel.db_id == db_id, SemanticColumnModel.id.in_(ids))
+        )
+        rows = list((await self._db.execute(stmt)).all())
+        by_id = {column.id: _column_info(column, table) for column, table in rows}
+        if missing := set(ids) - by_id.keys():
+            raise ValueError(f"Dimensions not found: {missing}")
+        return [by_id[item_id] for item_id in ids]
 
-    @staticmethod
-    def _parse_formula(
-        metric: SemanticMetricModel,
-        table_by_name: dict[str, SemanticTableModel],
-        table_by_id: dict[int, SemanticTableModel],
-    ) -> dict[str, object]:
-        """Parse metric formula to extract aggregation, table, and column.
-
-        Formula formats:
-            SUM(orders.total_amount)
-            COUNT(DISTINCT orders.customer_id)
-            COUNT(*)
-            AVG(price)  — no table prefix, resolve via base_entity_id
-        """
-        formula = metric.formula or metric.sql_template or ""
-        match = _FORMULA_RE.match(formula.strip())
-
-        if not match:
-            tbl = table_by_id.get(metric.base_entity_id)
-            return {
-                "aggregation": metric.aggregation_type or "COUNT",
-                "distinct": False,
-                "table_id": metric.base_entity_id,
-                "table_name": tbl.table_name if tbl else "",
-                "column": "*",
-            }
-
-        aggregation = match.group(1).upper()
-        raw_table_name = match.group(2)
-        column = match.group(3)
-        distinct = "distinct" in formula.lower()
-
-        if raw_table_name:
-            table = table_by_name.get(raw_table_name)
-            return {
-                "aggregation": aggregation,
-                "distinct": distinct,
-                "table_id": table.id if table else None,
-                "table_name": table.table_name if table else raw_table_name,
-                "column": column,
-            }
-
-        table = table_by_id.get(metric.base_entity_id)
-        return {
-            "aggregation": aggregation,
-            "distinct": distinct,
-            "table_id": metric.base_entity_id,
-            "table_name": table.table_name if table else "",
-            "column": column,
-        }
-
-    # ------------------------------------------------------------------
-    # Join resolution (BFS)
-    # ------------------------------------------------------------------
+    async def _load_runtime_filters(self, db_id: int, filters: list[SemanticQueryFilter]) -> list[dict[str, Any]]:
+        if not filters:
+            return []
+        columns = await self._load_dimensions(db_id, [item.column_id for item in filters])
+        return [
+            {**column, "operator": item.operator, "value": item.value}
+            for column, item in zip(columns, filters, strict=True)
+        ]
 
     async def _resolve_joins(
         self,
-        connection_id: int,
-        base_table: SemanticTableModel,
-        parsed_metrics: list[dict],
-        dimensions: list[dict],
-        table_by_id: dict[int, SemanticTableModel],
-    ) -> tuple[list[dict[str, str]], set[int]]:
-        """Resolve join clauses needed to connect all required tables.
-
-        Returns (joins, tables_used) where each join dict has
-        'table_name' and 'condition'.
-        """
-        tables_needed: set[int] = {base_table.id}
-        for pm in parsed_metrics:
-            if pm["table_id"]:
-                tables_needed.add(pm["table_id"])
-        for dim in dimensions:
-            tables_needed.add(dim["table_id"])
-
-        relationships = await self._fetch_relationships(connection_id)
-
+        db_id: int,
+        base: SemanticTableModel,
+        dimensions: list[dict[str, Any]],
+        tables: dict[int, SemanticTableModel],
+    ) -> list[dict[str, str]]:
+        result = await self._db.execute(
+            select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.connection_id == db_id)
+        )
+        relationships = list(result.scalars().all())
         joins: list[dict[str, str]] = []
-        tables_used: set[int] = {base_table.id}
-
-        for table_id in tables_needed:
-            if table_id == base_table.id:
-                continue
-            path = self._find_join_path(relationships, base_table.id, table_id)
+        joined = {base.id}
+        for table_id in {item["table_id"] for item in dimensions} - joined:
+            path = _many_to_one_path(relationships, base.id, table_id)
             if path is None:
-                target = table_by_id.get(table_id)
-                target_name = target.table_name if target else str(table_id)
-                raise ValueError(f"Cannot join tables: no path from {base_table.table_name} to {target_name}")
-            for join_table_id, condition in path:
-                if join_table_id not in tables_used:
-                    joins.append(
-                        {
-                            "table_name": table_by_id[join_table_id].table_name,
-                            "condition": condition,
-                        }
-                    )
-                    tables_used.add(join_table_id)
+                raise ValueError("Dimension is not reachable through a safe many-to-one path")
+            for target_id, condition in path:
+                if target_id not in joined:
+                    joins.append({"table_name": tables[target_id].table_name, "condition": condition})
+                    joined.add(target_id)
+        return joins
 
-        return joins, tables_used
-
-    async def _fetch_relationships(self, connection_id: int) -> list[CanonicalRelationshipModel]:
-        """Fetch all canonical relationships for a connection."""
-        stmt = select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.connection_id == connection_id)
-        result = await self._db.execute(stmt)
-        return list(result.scalars().all())
-
-    @staticmethod
-    def _find_join_path(
-        relationships: list[CanonicalRelationshipModel],
-        from_table_id: int,
-        to_table_id: int,
-    ) -> list[tuple[int, str]] | None:
-        """BFS to find the shortest join path between two tables.
-
-        Returns a list of (table_id, join_condition) pairs, or None if
-        no path exists.
-        """
-        graph: dict[int, list[tuple[int, str]]] = {}
-        for rel in relationships:
-            graph.setdefault(rel.from_entity_id, []).append((rel.to_entity_id, rel.join_condition))
-            graph.setdefault(rel.to_entity_id, []).append((rel.from_entity_id, rel.join_condition))
-
-        queue: deque[tuple[int, list[tuple[int, str]]]] = deque([(from_table_id, [])])
-        visited: set[int] = {from_table_id}
-
-        while queue:
-            node, path = queue.popleft()
-            if node == to_table_id:
-                return path
-            for neighbor, condition in graph.get(node, []):
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append((neighbor, path + [(neighbor, condition)]))
-
-        return None
-
-    # ------------------------------------------------------------------
-    # SQL generation
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _build_sql(
-        base_table: SemanticTableModel,
-        dimensions: list[dict],
-        parsed_metrics: list[dict],
+    def _build_query(
+        self,
+        dialect: str,
+        definitions: list[MetricDefinition],
+        base: SemanticTableModel,
+        dimensions: list[dict[str, Any]],
         joins: list[dict[str, str]],
-        filters: str | None,
+        runtime_filters: list[dict[str, Any]],
         limit: int,
-    ) -> str:
-        """Build the final SQL string from resolved components."""
-        dim_exprs = [f"{d['table_name']}.{d['column_name']}" for d in dimensions]
-        metric_exprs = []
-        for pm in parsed_metrics:
-            distinct = "DISTINCT " if pm["distinct"] else ""
-            metric_exprs.append(f"{pm['aggregation']}({distinct}{pm['table_name']}.{pm['column']})")
-
-        select_clause = ", ".join(dim_exprs + metric_exprs)
-        sql = f"SELECT {select_clause} FROM {base_table.table_name}"  # noqa: S608
-        for j in joins:
-            sql += f" JOIN {j['table_name']} ON {j['condition']}"
-        if filters:
-            sql += f" WHERE {filters}"
-        sql += f" GROUP BY {', '.join(dim_exprs)}"
+    ) -> CompiledQuery:
+        parameters: dict[str, Any] = {}
+        dim_sql = [_qualified(item["table_name"], item["column_name"], dialect) for item in dimensions]
+        metric_sql = [_compile_metric(item, base.table_name, dialect) for item in definitions]
+        sql = f"SELECT {', '.join(dim_sql + metric_sql)} FROM {_quoted(base.table_name, dialect)}"  # noqa: S608
+        for join in joins:
+            condition = _validated_join_condition(join["condition"], dialect)
+            sql += f" JOIN {_quoted(join['table_name'], dialect)} ON {condition}"
+        predicates = _fixed_predicates(definitions, base.table_name, dialect, parameters)
+        predicates.extend(_runtime_predicates(runtime_filters, dialect, parameters))
+        if predicates:
+            sql += f" WHERE {' AND '.join(predicates)}"
+        if dim_sql:
+            sql += f" GROUP BY {', '.join(dim_sql)}"
         sql += f" LIMIT {limit}"
-        return sql
+        validate_read_only(sql)
+        return CompiledQuery(sql=sql, parameters=parameters, metadata={"base_entity": base.table_name})
+
+
+def _column_info(column: SemanticColumnModel, table: SemanticTableModel) -> dict[str, Any]:
+    return {
+        "column_id": column.id,
+        "column_name": column.column_name,
+        "table_id": table.id,
+        "table_name": table.table_name,
+    }
+
+
+def _many_to_one_path(
+    relationships: list[CanonicalRelationshipModel], start: int, target: int
+) -> list[tuple[int, str]] | None:
+    graph: dict[int, list[tuple[int, str]]] = {}
+    for rel in relationships:
+        if rel.relationship_type in {"many_to_one", "many-to-one"}:
+            graph.setdefault(rel.from_entity_id, []).append((rel.to_entity_id, rel.join_condition))
+    queue: deque[tuple[int, list[tuple[int, str]]]] = deque([(start, [])])
+    visited = {start}
+    while queue:
+        current, path = queue.popleft()
+        if current == target:
+            return path
+        for neighbor, condition in graph.get(current, []):
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append((neighbor, [*path, (neighbor, condition)]))
+    return None
+
+
+def _quoted(name: str, dialect: str) -> str:
+    return exp.to_identifier(name, quoted=True).sql(dialect=dialect)
+
+
+def _qualified(table: str, column: str, dialect: str) -> str:
+    return exp.column(column, table=table, quoted=True).sql(dialect=dialect)
+
+
+def _compile_metric(definition: MetricDefinition, table: str, dialect: str) -> str:
+    formula = definition.metric.formula
+    if formula.expression == "*":
+        argument = "*"
+    else:
+        parsed = sqlglot.parse_one(formula.expression)
+        for column in parsed.find_all(exp.Column):
+            column.set("table", exp.to_identifier(table, quoted=True))
+            column.set("this", exp.to_identifier(column.name, quoted=True))
+        argument = parsed.sql(dialect=dialect)
+    if formula.function == "COUNT_DISTINCT":
+        aggregate = f"COUNT(DISTINCT {argument})"
+    else:
+        aggregate = f"{formula.function}({argument})"
+    return f"{aggregate} AS {_quoted(definition.metric.name, dialect)}"
+
+
+def _validated_join_condition(condition: str, dialect: str) -> str:
+    parsed = sqlglot.parse_one(condition, read=dialect)
+    allowed = (exp.EQ, exp.Column, exp.Identifier)
+    if any(not isinstance(node, allowed) for node in parsed.walk()):
+        raise ValueError("Unsafe join condition in semantic metadata")
+    for column in parsed.find_all(exp.Column):
+        column.set("this", exp.to_identifier(column.name, quoted=True))
+        column.set("table", exp.to_identifier(column.table, quoted=True))
+    return parsed.sql(dialect=dialect)
+
+
+def _fixed_predicates(
+    definitions: list[MetricDefinition],
+    table: str,
+    dialect: str,
+    parameters: dict[str, Any],
+) -> list[str]:
+    predicates: list[str] = []
+    seen: set[tuple[str, str, str]] = set()
+    for definition in definitions:
+        for item in definition.metric.filters:
+            key = (item.field, item.operator, repr(item.value))
+            if key not in seen:
+                seen.add(key)
+                predicates.append(_predicate(table, item, dialect, parameters, "metric"))
+    return predicates
+
+
+def _runtime_predicates(filters: list[dict[str, Any]], dialect: str, parameters: dict[str, Any]) -> list[str]:
+    return [
+        _predicate(
+            item["table_name"],
+            MetricFilter(field=item["column_name"], operator=item["operator"], value=item["value"]),
+            dialect,
+            parameters,
+            "runtime",
+        )
+        for item in filters
+    ]
+
+
+def _predicate(
+    table: str,
+    item: MetricFilter,
+    dialect: str,
+    parameters: dict[str, Any],
+    prefix: str,
+) -> str:
+    column = _qualified(table, item.field, dialect)
+    if item.operator == "is_null":
+        return f"{column} IS NULL"
+    if item.operator == "is_not_null":
+        return f"{column} IS NOT NULL"
+    if item.operator in {"in", "not_in"}:
+        names = [_bind(parameters, prefix, value) for value in item.value]
+        keyword = "IN" if item.operator == "in" else "NOT IN"
+        return f"{column} {keyword} ({', '.join(names)})"
+    symbols = {"eq": "=", "neq": "<>", "gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
+    return f"{column} {symbols[item.operator]} {_bind(parameters, prefix, item.value)}"
+
+
+def _bind(parameters: dict[str, Any], prefix: str, value: Any) -> str:
+    name = f"{prefix}_{len(parameters)}"
+    parameters[name] = value
+    return f":{name}"

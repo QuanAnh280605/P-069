@@ -157,8 +157,13 @@ export default function RegisterPage() {
             <GoogleLogin
               onSuccess={async (credentialResponse) => {
                 if (credentialResponse.credential) {
-                  await loginWithGoogle(credentialResponse.credential);
-                  router.push('/');
+                  try {
+                    setError('');
+                    await loginWithGoogle(credentialResponse.credential);
+                    router.push('/');
+                  } catch (err: unknown) {
+                    setError(err instanceof Error ? err.message : 'Đăng nhập Google thất bại');
+                  }
                 }
               }}
               onError={() => {

@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 from sqlalchemy import create_engine, inspect, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.db import LiveTargetDbModel, SemanticDatabaseModel
@@ -34,13 +35,29 @@ logger = logging.getLogger(__name__)
 
 _background_tasks: set[asyncio.Task[Any]] = set()
 
+_SYNC_INSPECTION_DRIVERS = {
+    "postgresql+asyncpg": "postgresql+psycopg2",
+    "mysql+asyncmy": "mysql+pymysql",
+    "mysql+aiomysql": "mysql+pymysql",
+    "sqlite+aiosqlite": "sqlite",
+}
+
+
+def _sync_introspection_url(conn_url: str) -> str:
+    """Return an Inspector-safe URL while preserving credentials and options."""
+    url = make_url(conn_url)
+    driver_name = _SYNC_INSPECTION_DRIVERS.get(url.drivername)
+    if driver_name is None:
+        return conn_url
+    return url.set(drivername=driver_name).render_as_string(hide_password=False)
+
 
 def introspect_live_database(conn_url: str, dialect: str | SchemaDialect) -> RawSchemaMetadata:
     """Introspect technical schema metadata from a live target database without executing data queries."""
     resolved_dialect = (
         dialect if isinstance(dialect, SchemaDialect) else resolve_and_validate_dialect(conn_url, dialect)
     )
-    engine = create_engine(conn_url)
+    engine = create_engine(_sync_introspection_url(conn_url))
     try:
         inspector = inspect(engine)
         default_schema = default_schema_identifier(resolved_dialect)
@@ -333,6 +350,7 @@ def _model_to_summary(model: LiveTargetDbModel) -> LiveDbSummaryResponse:
     raw_schema = RawSchemaMetadata.model_validate(model.schema_metadata)
     return LiveDbSummaryResponse(
         id=model.id,
+        semantic_db_id=model.semantic_db_id,
         display_name=model.display_name,
         dialect=SchemaDialect(model.dialect),
         table_count=len(raw_schema.tables),
@@ -345,6 +363,7 @@ def _model_to_response(model: LiveTargetDbModel, raw_schema: RawSchemaMetadata) 
     """Convert model and raw schema to LiveDbResponse."""
     return LiveDbResponse(
         id=model.id,
+        semantic_db_id=model.semantic_db_id,
         display_name=model.display_name,
         dialect=SchemaDialect(model.dialect),
         table_count=len(raw_schema.tables),
