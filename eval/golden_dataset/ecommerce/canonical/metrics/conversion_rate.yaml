@@ -1,0 +1,21 @@
+metric: conversion_rate
+business_name: "Tỷ lệ chuyển đổi"
+domain: ecommerce
+metric_type: derived
+target_entity: session
+source_table: fact_sessions
+aggregation: ratio
+field: null
+business_formula: "Total Orders / Total Sessions"
+sql_expression: "COUNT(DISTINCT order_id) / COUNT(DISTINCT session_id)"
+dependencies: []
+description: "Tỷ lệ phần trăm phiên truy cập cửa hàng dẫn đến đơn hàng mua thành công."
+default_filters:
+  - condition: "is_bot_traffic = FALSE"
+allowed_dimensions: [session.session_date, session.channel, session.device_type, session.store_id]
+default_time_grain: day
+reference_source: "Shopify Analytics Fields"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#conversion_rate"
+synonyms: ["tỷ lệ chuyển đổi", "CR", "conversion rate"]

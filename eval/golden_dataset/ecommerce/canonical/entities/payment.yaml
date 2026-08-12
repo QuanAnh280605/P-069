@@ -1,0 +1,34 @@
+entity: payment
+table_mapping: payments
+business_name: "Thanh toán"
+description: "Thông tin giao dịch thanh toán liên kết với đơn hàng."
+synonyms: ["lần thanh toán", "giao dịch chuyển khoản", "payment"]
+accepted_business_names: ["Thanh toán", "Giao dịch thanh toán"]
+dimensions:
+  - name: id
+    business_name: "Mã thanh toán"
+    type: number
+    field: id
+    primary_key: true
+  - name: order_id
+    business_name: "Mã đơn hàng"
+    type: number
+    field: order_id
+  - name: payment_method
+    business_name: "Phương thức thanh toán"
+    type: string
+    field: payment_method
+    synonyms: ["hình thức thanh toán"]
+  - name: amount
+    business_name: "Số tiền thanh toán"
+    type: number
+    field: amount
+  - name: payment_date
+    business_name: "Thời gian thanh toán"
+    type: time
+    field: payment_date
+relationships:
+  - target_entity: order
+    relation_type: BELONGS_TO
+    join_condition: "payments.order_id = fact_orders.order_id"
+    inferred: false

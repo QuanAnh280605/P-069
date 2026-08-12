@@ -1,0 +1,21 @@
+metric: order_count
+business_name: "Tổng số đơn hàng"
+domain: ecommerce
+metric_type: simple
+target_entity: order
+source_table: fact_orders
+aggregation: count
+field: order_id
+business_formula: "COUNT(Order ID)"
+sql_expression: "COUNT(DISTINCT order_id)"
+dependencies: []
+description: "Tổng số đơn hàng hợp lệ được đặt thành công trong kỳ, không tính đơn hủy hoặc đơn test."
+default_filters:
+  - condition: "is_test_order = FALSE AND order_status <> 'cancelled'"
+allowed_dimensions: [order.order_date, order.channel, order.store_id]
+default_time_grain: day
+reference_source: "Shopify Analytics Fields"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#order_count"
+synonyms: ["tổng đơn hàng", "số lượng đơn", "total orders", "order count"]

@@ -1,0 +1,35 @@
+entity: customer
+table_mapping: customers
+business_name: "Khách hàng"
+description: "Thông tin tham chiếu của khách hàng phát sinh đơn hàng."
+synonyms: ["người mua", "bên mua", "customer"]
+accepted_business_names: ["Khách hàng", "Người mua"]
+dimensions:
+  - name: id
+    business_name: "Mã khách hàng"
+    type: number
+    field: id
+    primary_key: true
+  - name: name
+    business_name: "Tên khách hàng"
+    type: string
+    field: name
+    synonyms: ["họ tên", "tên người mua"]
+  - name: email
+    business_name: "Địa chỉ email"
+    type: string
+    field: email
+  - name: city
+    business_name: "Tỉnh thành phố"
+    type: string
+    field: city
+    synonyms: ["thành phố", "tỉnh thành", "địa bàn"]
+  - name: created_at
+    business_name: "Ngày đăng ký"
+    type: time
+    field: created_at
+relationships:
+  - target_entity: order
+    relation_type: HAS_MANY
+    join_condition: "customers.id = fact_orders.customer_id"
+    inferred: false

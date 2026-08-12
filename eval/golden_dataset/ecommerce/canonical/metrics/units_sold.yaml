@@ -1,0 +1,21 @@
+metric: units_sold
+business_name: "Số lượng sản phẩm bán ra"
+domain: ecommerce
+metric_type: simple
+target_entity: order_item
+source_table: fact_order_items
+aggregation: sum
+field: quantity
+business_formula: "SUM(Quantity)"
+sql_expression: "SUM(quantity)"
+dependencies: []
+description: "Tổng số đơn vị sản phẩm (SKU) đã bán ra trong các đơn hàng hợp lệ."
+default_filters:
+  - condition: "is_test_order = FALSE"
+allowed_dimensions: [order_item.order_date, order_item.product_id, order_item.channel, order_item.store_id]
+default_time_grain: day
+reference_source: "Shopify Analytics Fields"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#units_sold"
+synonyms: ["số lượng bán", "units sold", "sản phẩm bán ra"]

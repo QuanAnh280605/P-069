@@ -1,0 +1,53 @@
+entity: order_item
+table_mapping: fact_order_items
+business_name: "Dòng sản phẩm đơn hàng"
+description: "Fact chi tiết sản phẩm, kèm các chiều chuẩn của đơn hàng."
+synonyms: ["order line", "line item", "chi tiết đơn hàng"]
+accepted_business_names: ["Dòng sản phẩm đơn hàng", "Chi tiết đơn hàng"]
+dimensions:
+  - name: line_item_id
+    business_name: "Mã dòng sản phẩm"
+    type: number
+    field: line_item_id
+    primary_key: true
+  - name: order_id
+    business_name: "Mã đơn hàng"
+    type: number
+    field: order_id
+  - name: product_id
+    business_name: "Mã sản phẩm"
+    type: number
+    field: product_id
+  - name: quantity
+    business_name: "Số lượng"
+    type: number
+    field: quantity
+  - name: unit_price
+    business_name: "Đơn giá"
+    type: number
+    field: unit_price
+  - name: is_test_order
+    business_name: "Đơn hàng test"
+    type: boolean
+    field: is_test_order
+  - name: channel
+    business_name: "Kênh bán hàng"
+    type: string
+    field: channel
+  - name: store_id
+    business_name: "Mã cửa hàng"
+    type: number
+    field: store_id
+  - name: order_date
+    business_name: "Ngày đặt hàng"
+    type: time
+    field: order_date
+relationships:
+  - target_entity: order
+    relation_type: BELONGS_TO
+    join_condition: "fact_order_items.order_id = fact_orders.order_id"
+    inferred: false
+  - target_entity: product
+    relation_type: BELONGS_TO
+    join_condition: "fact_order_items.product_id = products.id"
+    inferred: false
