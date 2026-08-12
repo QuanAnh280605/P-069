@@ -64,5 +64,12 @@ out/
 plan*.md
 plan_*.md
 
+# Local evaluation artifacts and personal workspace files
+/eval/results/*/
+/implementation_plan.md
+/Ecommerce_Metric_Dictionary_Ground_Truth.xlsx
+/docs/superpowers/
+/eval/harness/*/
+
 .hyper
 
