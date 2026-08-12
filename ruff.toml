@@ -19,6 +19,7 @@ ignore = [
     "S104",  # allow 0.0.0.0 binding for Docker container configuration
     "S105",  # hardcoded password binding check false positives
     "S106",  # hardcoded password in function call false positives
+    "UP038",  # keep isinstance(x, (A, B)) tuple form; avoid churn across services
 ]
 
 [format]
