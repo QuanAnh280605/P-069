@@ -368,4 +368,3 @@ async def test_delete_live_target_db_cascades_all_related_models(async_session: 
     assert await async_session.get(SemanticDatabaseModel, sem_db_id) is None
     assert await async_session.get(SemanticTableModel, table_id) is None
     assert await async_session.get(SemanticMetricModel, metric_id) is None
-

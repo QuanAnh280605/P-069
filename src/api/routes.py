@@ -254,7 +254,6 @@ async def connect_live_target_db(
         raise HTTPException(status_code=400, detail=f"Failed to connect and introspect target database: {exc}") from exc
 
 
-
 @router.get("/semantic/db/saved", response_model=list[LiveDbSummaryResponse])
 async def get_saved_live_target_dbs(
     current_user: UserModel = Depends(get_current_user),
@@ -549,10 +548,10 @@ async def _load_schema_context_for_db(db: AsyncSession, db_id: Any) -> dict[str,
                         ],
                     }
                 return schema_dict
-        except Exception:
-            pass
-    except (ValueError, TypeError):
-        pass
+        except Exception as exc:
+            logger.warning("Failed to fallback raw schema in custom metrics: %s", exc)
+    except (ValueError, TypeError) as exc:
+        logger.warning("Invalid db_id format in custom metrics: %s", exc)
 
     return DEMO_RETAIL_SCHEMA
 

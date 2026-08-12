@@ -559,9 +559,7 @@ async def test_metric_version_creation(seed_user_and_db):
     async_db_session.add(mv)
     await async_db_session.commit()
 
-    result = await async_db_session.execute(
-        select(MetricVersionModel).where(MetricVersionModel.id == mv.id)
-    )
+    result = await async_db_session.execute(select(MetricVersionModel).where(MetricVersionModel.id == mv.id))
     fetched = result.scalar_one()
     assert fetched.version == 1
     assert fetched.formula == "SUM(orders.total)"
@@ -593,9 +591,7 @@ async def test_metric_version_metric_relationship(seed_user_and_db):
     async_db_session.add(mv)
     await async_db_session.commit()
 
-    result = await async_db_session.execute(
-        select(MetricVersionModel).where(MetricVersionModel.id == mv.id)
-    )
+    result = await async_db_session.execute(select(MetricVersionModel).where(MetricVersionModel.id == mv.id))
     fetched = result.scalar_one()
     assert fetched.metric.name == "AOV"
 
@@ -623,9 +619,7 @@ async def test_metric_version_changer_relationship(seed_user_and_db):
     async_db_session.add(mv)
     await async_db_session.commit()
 
-    result = await async_db_session.execute(
-        select(MetricVersionModel).where(MetricVersionModel.id == mv.id)
-    )
+    result = await async_db_session.execute(select(MetricVersionModel).where(MetricVersionModel.id == mv.id))
     fetched = result.scalar_one()
     assert fetched.changer.username == "creator"
 

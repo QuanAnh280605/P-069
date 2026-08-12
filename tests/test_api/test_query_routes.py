@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth import create_access_token
 from src.models.db import (
-    CanonicalRelationshipModel,
     ImportedSchemaModel,
     LiveTargetDbModel,
     SemanticColumnModel,

@@ -566,9 +566,14 @@ async def test_get_metric_with_history_not_found(async_session: AsyncSession):
 async def test_delete_semantic_database(async_session: AsyncSession):
     """delete_semantic_database removes SemanticDatabaseModel and all child records."""
     sem_db_id = await ensure_semantic_database(
-        db=async_session, source_type="live_target", source_id=10, user_id=1, display_name="To Delete", dialect="postgresql"
+        db=async_session,
+        source_type="live_target",
+        source_id=10,
+        user_id=1,
+        display_name="To Delete",
+        dialect="postgresql",
     )
-    metric = await create_metric(
+    await create_metric(
         db=async_session,
         connection_id=sem_db_id,
         metric_data={
@@ -587,4 +592,3 @@ async def test_delete_semantic_database(async_session: AsyncSession):
     # Verify deleted
     db_res = await async_session.get(SemanticDatabaseModel, sem_db_id)
     assert db_res is None
-

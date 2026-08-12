@@ -43,14 +43,16 @@ async def on_demand_metric_suggest_node(state: AgentState) -> dict[str, Any]:
 
     Input state fields: enriched_schema (semantic layer with business_name, description)
     Output state fields: suggested_metrics | error
-    
+
     LƯU Ý: Node này CHỈ đọc enriched_schema (semantic layer), KHÔNG đọc raw_schema.
     AI phải hiểu cấu trúc semantic layer (business_name, description) chứ không phải
     cấu trúc kỹ thuật thô của database.
     """
     schema_info = state.get("enriched_schema")
     if not schema_info:
-        return {"error": "on_demand_metric_suggest_node: enriched_schema is empty. AI must read semantic layer, not raw schema."}
+        return {
+            "error": "on_demand_metric_suggest_node: enriched_schema is empty. AI must read semantic layer, not raw schema."
+        }
 
     schema_text = _format_schema_for_prompt(schema_info)
     prompt = _build_metric_prompt(schema_text, schema_info)

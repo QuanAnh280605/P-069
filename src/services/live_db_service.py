@@ -246,7 +246,6 @@ async def create_live_target_db(
     return _model_to_response(model, raw_schema)
 
 
-
 async def list_live_target_dbs(db: AsyncSession, user_id: int) -> list[LiveDbSummaryResponse]:
     """List live target databases owned by a user."""
     stmt = (

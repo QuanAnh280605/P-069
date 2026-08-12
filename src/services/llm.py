@@ -82,4 +82,3 @@ def get_llm() -> ChatOpenAI:
         kwargs["base_url"] = base_url
 
     return ChatOpenAI(**kwargs)
-
