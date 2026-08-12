@@ -42,7 +42,23 @@ export function AIStudioView({ layer, theme, onMetricsChanged, onEditMetricReque
     await onMetricsChanged();
   };
 
-  return <div className='h-full min-h-[560px]'><StudioChatStream messages={messages} onSendMessage={send} isLoading={loading} tableNames={layer.tables.map((table) => table.table_name)} onAddMetric={save} onEditMetric={onEditMetricRequest} onRefineWithAI={(suggestion) => setActivePrompt(`Hãy điều chỉnh chỉ số ${suggestion.definition.metric.name}: `)} activePromptText={activePrompt} theme={theme} /></div>;
+  return (
+    <div className="flex h-[calc(100vh-130px)] min-h-[620px] w-full flex-col">
+      <StudioChatStream
+        messages={messages}
+        onSendMessage={send}
+        isLoading={loading}
+        tableNames={layer.tables.map((table) => table.table_name)}
+        onAddMetric={save}
+        onEditMetric={onEditMetricRequest}
+        onRefineWithAI={(suggestion) =>
+          setActivePrompt(`Hãy điều chỉnh chỉ số ${suggestion.definition.metric.name}: `)
+        }
+        activePromptText={activePrompt}
+        theme={theme}
+      />
+    </div>
+  );
 }
 
 function appendError(setter: React.Dispatch<React.SetStateAction<ChatMessage[]>>, text: string): void {

@@ -22,20 +22,25 @@ export type FilterOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' |
 
 export interface MetricFilter {
   field: string;
+  column_id?: number | null;
   operator: FilterOperator;
   value: unknown;
 }
 
 export interface MetricDefinition {
+  schema_version?: 1 | 2;
   metric: {
     name: string;
     formula: { function: MetricFunction; expression: string };
     base_entity: string;
+    base_entity_id?: number | null;
+    grain?: { column_ids: number[] };
     filters: MetricFilter[];
     status: MetricStatus;
     confidence?: MetricConfidence | null;
     excluded_notes: string;
   };
+  diagnostics?: Array<{ code: string; message: string }>;
 }
 
 export interface MetricRecord {
@@ -113,9 +118,23 @@ export interface SemanticQueryFilter {
 
 export interface SemanticQueryRequest {
   metric_ids: number[];
-  dimension_ids: number[];
+  dimensions: DimensionSelection[];
   filters: SemanticQueryFilter[];
   limit: number;
+}
+
+export type TimeGrain = 'day' | 'week' | 'month' | 'quarter' | 'year';
+
+export interface DimensionSelection {
+  column_id: number;
+  time_grain?: TimeGrain | null;
+}
+
+export interface SemanticQueryPreview {
+  sql: string;
+  parameters: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  diagnostics: Array<{ code: string; message: string }>;
 }
 
 export interface SemanticQueryResult {
@@ -468,6 +487,16 @@ export async function executeSemanticQueryApi(
   request: SemanticQueryRequest,
 ): Promise<SemanticQueryResult> {
   return semanticRequest<SemanticQueryResult>(`/api/v1/semantic/${dbId}/query`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function compileSemanticQueryApi(
+  dbId: string,
+  request: SemanticQueryRequest,
+): Promise<SemanticQueryPreview> {
+  return semanticRequest<SemanticQueryPreview>('/api/v1/semantic/' + dbId + '/query/compile', {
     method: 'POST',
     body: JSON.stringify(request),
   });

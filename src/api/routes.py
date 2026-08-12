@@ -23,6 +23,7 @@ from src.models.db import (
 from src.models.schema_metadata import DiagnosticCode, RawSchemaMetadata, SchemaDialect
 from src.models.schemas import (
     ApproveRequest,
+    CanonicalRelationshipResponse,
     CustomMetricGenerateRequest,
     CustomMetricGenerateResponse,
     GenerateRequest,
@@ -44,6 +45,7 @@ from src.models.schemas import (
     SemanticCatalogTable,
     SemanticColumnUpdate,
     SemanticGenerateV2Response,
+    SemanticQueryCompileResponse,
     SemanticQueryRequest,
     SemanticQueryResponse,
     SemanticTableUpdate,
@@ -68,6 +70,7 @@ from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
 from src.services.query_compiler import SemanticQueryCompiler
 from src.services.query_execution import execute_compiled_query
 from src.services.schema_ingestion import parse_sql_dump_preview
+from src.services.semantic_compile_error import SemanticCompileError
 from src.services.semantic_service import (
     approve_metric,
     create_metric,
@@ -573,6 +576,10 @@ async def _load_schema_context_for_db(db: AsyncSession, db_id: Any) -> dict[str,
                             "business_name": col.business_name or col.column_name,
                             "is_primary_key": col.is_primary_key,
                             "is_foreign_key": col.is_foreign_key,
+                            "is_nullable": col.is_nullable,
+                            "fk_target_table": col.fk_target_table,
+                            "fk_target_column": col.fk_target_column,
+                            "description": col.description or "",
                         }
                         for col in tbl.columns
                     ],
@@ -596,6 +603,7 @@ async def _load_schema_context_for_db(db: AsyncSession, db_id: Any) -> dict[str,
                                 "business_name": col.column_name.raw_name,
                                 "is_primary_key": col.primary_key,
                                 "is_foreign_key": False,
+                                "is_nullable": col.nullable,
                             }
                             for col in tbl.columns
                         ],
@@ -783,10 +791,28 @@ def _catalog_table(table: SemanticTableModel) -> SemanticCatalogTable:
     )
 
 
-async def _catalog_relationships(db: AsyncSession, db_id: int) -> list[CanonicalRelationshipModel]:
+def _catalog_relationship(rel: CanonicalRelationshipModel) -> CanonicalRelationshipResponse:
+    """Map a canonical relationship model to its public catalog representation."""
+    return CanonicalRelationshipResponse(
+        id=rel.id,
+        connection_id=rel.connection_id,
+        from_entity_id=rel.from_entity_id,
+        to_entity_id=rel.to_entity_id,
+        relationship_type=rel.relationship_type,
+        join_condition=rel.join_condition,
+        created_at=rel.created_at,
+    )
+
+
+async def _catalog_relationships(db: AsyncSession, db_id: int) -> list[CanonicalRelationshipResponse]:
     """Load canonical relationships for a semantic database."""
-    stmt = select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.connection_id == db_id)
-    return list((await db.execute(stmt)).scalars().all())
+    stmt = (
+        select(CanonicalRelationshipModel)
+        .where(CanonicalRelationshipModel.connection_id == db_id)
+        .order_by(CanonicalRelationshipModel.id)
+    )
+    records = (await db.execute(stmt)).scalars().all()
+    return [_catalog_relationship(rel) for rel in records]
 
 
 async def _catalog_source_type(db: AsyncSession, db_id: int) -> str:
@@ -908,6 +934,58 @@ async def export_semantic_layer(
 # ---------------------------------------------------------------------------
 
 
+async def _query_target(
+    db: AsyncSession,
+    db_id: int,
+    user_id: int,
+) -> tuple[SemanticDatabaseModel, LiveTargetDbModel]:
+    stmt = select(SemanticDatabaseModel).where(
+        SemanticDatabaseModel.id == db_id,
+        SemanticDatabaseModel.created_by == user_id,
+    )
+    semantic_db = (await db.execute(stmt)).scalar_one_or_none()
+    if semantic_db is None:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+    live_stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.semantic_db_id == db_id)
+    live_db = (await db.execute(live_stmt)).scalar_one_or_none()
+    if live_db is None:
+        raise HTTPException(status_code=400, detail="Query only supported for Live DB connections")
+    return semantic_db, live_db
+
+
+async def _compile_request(
+    db: AsyncSession,
+    db_id: int,
+    body: SemanticQueryRequest,
+) -> Any:
+    try:
+        return await SemanticQueryCompiler(db).compile(db_id, body.to_spec())
+    except SemanticCompileError as exc:
+        raise HTTPException(status_code=400, detail=exc.to_detail()) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/semantic/{db_id}/query/compile",
+    response_model=SemanticQueryCompileResponse,
+)
+async def compile_semantic_query(
+    db_id: int,
+    body: SemanticQueryRequest,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> SemanticQueryCompileResponse:
+    """Compile a semantic query preview without connecting to the target database."""
+    await _query_target(db, db_id, current_user.id)
+    compiled = await _compile_request(db, db_id, body)
+    return SemanticQueryCompileResponse(
+        sql=compiled.sql,
+        parameters=compiled.parameters,
+        metadata=compiled.metadata,
+    )
+
+
 @router.post("/semantic/{db_id}/query", response_model=SemanticQueryResponse)
 async def execute_semantic_query(
     db_id: str,
@@ -944,18 +1022,7 @@ async def execute_semantic_query(
             detail="Query only supported for Live DB connections",
         )
 
-    # Compile semantic query
-    compiler = SemanticQueryCompiler(db)
-    try:
-        compiled = await compiler.compile(
-            connection_id=parsed_id,
-            metric_ids=body.metric_ids,
-            dimension_ids=body.dimension_ids,
-            filters=body.filters,
-            limit=body.limit,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    compiled = await _compile_request(db, parsed_id, body)
 
     # Execute on live DB
     try:

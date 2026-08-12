@@ -34,17 +34,32 @@ def extract_schema_summary(schema_dict: dict[str, Any]) -> tuple[dict[str, set[s
         columns = table.get("columns", [])
         names = {column.get("column_name") or column.get("name") for column in columns}
         valid[table_name] = {name for name in names if name}
-        lines.append(f"Entity `{table_name}`:")
+        business_name = table.get("business_name") or table_name
+        description = table.get("description") or ""
+        lines.append(f"Entity `{table_name}` ({business_name}): {description}")
         lines.extend(_format_columns(columns))
     return valid, "\n".join(lines)
 
 
 def _format_columns(columns: list[dict[str, Any]]) -> list[str]:
-    return [
-        f"- `{column.get('column_name') or column.get('name')}` ({column.get('data_type', 'TEXT')})"
-        for column in columns
-        if column.get("column_name") or column.get("name")
-    ]
+    lines: list[str] = []
+    for column in columns:
+        name = column.get("column_name") or column.get("name")
+        if not name:
+            continue
+        flags = [
+            label
+            for enabled, label in (
+                (column.get("is_primary_key"), "PK/grain"),
+                (column.get("is_foreign_key"), "FK"),
+                (column.get("is_nullable"), "nullable"),
+            )
+            if enabled
+        ]
+        business = column.get("business_name") or name
+        suffix = f"; {', '.join(flags)}" if flags else ""
+        lines.append(f"- `{name}` ({column.get('data_type', 'TEXT')}; {business}{suffix})")
+    return lines
 
 
 def build_metric_system_prompt(schema_text: str) -> str:
@@ -76,6 +91,8 @@ Quy tắc BẮT BUỘC:
 1. formula.function chỉ dùng: SUM, COUNT, COUNT_DISTINCT, AVG, MIN, MAX.
 2. formula.expression chỉ gồm cột của base_entity, số và các toán tử (+, -, *, /). Không viết SQL, subquery, alias.
 3. base_entity và các cột phải tồn tại chính xác trong Schema dưới đây.
+4. Ưu tiên base_entity có PK/grain rõ ràng; không giả định quan hệ hoặc ý nghĩa không có trong schema.
+5. Filter chỉ dùng cột của base_entity và giá trị được người dùng nêu rõ hoặc có ý nghĩa chắc chắn.
 
 Schema database:\n{schema_text}"""
 
