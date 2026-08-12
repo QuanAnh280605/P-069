@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from src.models.metric_definition import FilterOperator, MetricDefinition
 from src.models.raw_schema import RawSchema
 from src.models.schema_metadata import ParseDiagnostic, RawSchemaMetadata, SchemaDialect
 
@@ -112,31 +113,23 @@ class SemanticColumnUpdate(BaseModel):
 
 
 class MetricCreate(BaseModel):
-    """Tạo Business Metric mới (thủ công hoặc từ AI suggestion)."""
+    """Create a metric from a canonical definition, never from SQL."""
 
-    name: str = Field(..., min_length=1, max_length=200, description="Tên chỉ số kinh doanh")
-    description: str = Field(..., min_length=1, max_length=1000, description="Mô tả nghiệp vụ")
-    sql_template: str = Field(..., min_length=1, description="SQL template tham chiếu (SELECT only)")
-    source: Literal["ai", "manual"] = Field(default="manual", description="Nguồn gốc metric")
-    formula: str = Field(default="", description="Công thức metric (e.g. SUM(orders.total))")
-    aggregation_type: str | None = Field(default=None, description="Kiểu aggregation: SUM, COUNT, AVG, etc.")
+    definition: MetricDefinition
+    source: Literal["ai", "manual"] = "manual"
 
 
 class MetricUpdate(BaseModel):
-    """Cập nhật một Business Metric đã có."""
+    """Replace a metric definition and create a new pending version."""
 
-    name: str | None = Field(default=None, max_length=200)
-    description: str | None = Field(default=None, max_length=1000)
-    sql_template: str | None = Field(default=None)
+    definition: MetricDefinition
 
 
 class MetricResponse(BaseModel):
-    """Response trả về cho một Business Metric."""
+    """Return a persisted canonical metric definition."""
 
     metric_id: int
-    name: str
-    description: str
-    sql_template: str
+    definition: MetricDefinition
     source: Literal["ai", "manual"]
 
 
@@ -146,7 +139,7 @@ class MetricVersionResponse(BaseModel):
     id: int
     metric_id: int
     version: int
-    formula: str
+    definition: MetricDefinition | None = None
     changed_by: int | None = None
     change_reason: str = ""
     created_at: datetime
@@ -174,16 +167,10 @@ class CustomMetricGenerateRequest(BaseModel):
 
 
 class MetricSuggestionItem(BaseModel):
-    """Một đề xuất Business Metric do AI sinh (chưa lưu vào DB)."""
+    """An unsaved metric definition with a server-rendered YAML preview."""
 
-    name: str = Field(..., min_length=1, max_length=200, description="Tên chỉ số bằng tiếng Việt")
-    description: str = Field(..., min_length=1, max_length=1000, description="Mô tả chỉ số bằng tiếng Việt")
-    sql_template: str = Field(..., min_length=1, description="Đúng một câu lệnh SELECT duy nhất")
-    source: Literal["ai"] = Field(default="ai", description="Nguồn gợi ý")
-    target_table: str | None = Field(default=None, description="Tên bảng chính")
-    measure_type: str | None = Field(default=None, description="Hàm tổng hợp: SUM, COUNT, AVG, MIN, MAX...")
-    target_column: str | None = Field(default=None, description="Tên cột tính toán chính")
-    filter_condition: str | None = Field(default=None, description="Mô tả hoặc mệnh đề lọc WHERE")
+    definition: MetricDefinition
+    yaml_preview: str
 
 
 class CustomMetricGenerateResponse(BaseModel):
@@ -192,22 +179,14 @@ class CustomMetricGenerateResponse(BaseModel):
     suggestions: list[MetricSuggestionItem] = Field(default_factory=list)
 
 
-class GeneratedMetric(BaseModel):
-    """Structured output item từ LLM cho một metric."""
-
-    name: str = Field(..., description="Tên chỉ số nghiệp vụ bằng tiếng Việt")
-    description: str = Field(..., description="Mô tả chi tiết ý nghĩa nghiệp vụ bằng tiếng Việt")
-    sql_template: str = Field(..., description="Đúng một câu lệnh SELECT chuẩn SQL")
-    target_table: str | None = Field(default=None, description="Tên bảng chính trong SQL")
-    measure_type: str | None = Field(default=None, description="Phép tổng hợp SUM, COUNT, AVG...")
-    target_column: str | None = Field(default=None, description="Tên cột tính toán")
-    filter_condition: str | None = Field(default=None, description="Điều kiện lọc WHERE nếu có")
+class GeneratedMetric(MetricDefinition):
+    """Structured metric definition returned by the LLM."""
 
 
 class MetricSuggestions(BaseModel):
     """Structured output payload từ LLM chứa danh sách 1-3 metric."""
 
-    metrics: list[GeneratedMetric] = Field(
+    metrics: list[MetricDefinition] = Field(
         default_factory=list, description="Danh sách từ 1 đến 3 chỉ số nghiệp vụ liên quan"
     )
 
@@ -333,14 +312,20 @@ class LiveDbResponse(LiveDbSummaryResponse):
 # ---------------------------------------------------------------------------
 
 
+class SemanticQueryFilter(BaseModel):
+    """Runtime predicate referencing an approved semantic column."""
+
+    column_id: int
+    operator: FilterOperator
+    value: Any = None
+
+
 class SemanticQueryRequest(BaseModel):
     """Request payload for executing a semantic query (Flow 2)."""
 
     metric_ids: list[int] = Field(..., min_length=1, description="List of approved metric IDs")
     dimension_ids: list[int] = Field(default_factory=list, description="List of column IDs for GROUP BY dimensions")
-    filters: list[dict[str, Any]] | None = Field(
-        default=None, description="Filters (format: {column, operator, value})"
-    )
+    filters: list[SemanticQueryFilter] = Field(default_factory=list)
     limit: int = Field(default=100, ge=1, le=1000, description="Max rows to return (default 100, max 1000)")
 
 
@@ -348,6 +333,7 @@ class SemanticQueryResponse(BaseModel):
     """Response from a semantic query execution."""
 
     sql: str = Field(..., description="Compiled SQL query")
+    parameters: dict[str, Any] = Field(default_factory=dict)
     columns: list[str] = Field(default_factory=list, description="Column names in result")
     rows: list[list[Any]] = Field(default_factory=list, description="Result rows")
     row_count: int = Field(default=0, description="Number of rows returned")
@@ -396,9 +382,7 @@ class MetricListItem(BaseModel):
     """A metric with version, status, and approval info."""
 
     metric_id: int
-    name: str
-    description: str
-    sql_template: str
+    definition: MetricDefinition | None
     source: str
     version: int
     status: str
@@ -410,7 +394,7 @@ class MetricVersionItem(BaseModel):
     """One version entry in a metric's history."""
 
     version: int
-    formula: str
+    definition: MetricDefinition | None = None
     changed_by: int | None = None
     change_reason: str = ""
     created_at: datetime

@@ -8,8 +8,10 @@ calling enrich_and_save_canonical_schema().
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from src.agents.state import AgentState
+from src.models.metric_definition import MetricDefinition
 from src.models.raw_schema import RawSchema
 from src.models.schema_metadata import (
     ColumnMetadata,
@@ -22,7 +24,11 @@ from src.models.schema_metadata import (
     TableMetadata,
 )
 from src.services.database import get_db_session
-from src.services.semantic_service import enrich_and_save_canonical_schema
+from src.services.semantic_service import (
+    approve_metric,
+    create_metric,
+    enrich_and_save_canonical_schema,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +145,8 @@ async def save_node(state: AgentState) -> dict:
                 raw_schema=canonical,
                 dialect=dialect,
             )
+            await _save_approved_metrics(session, state, db_id, user_id)
+            await session.commit()
             break
 
         semantic_layer_id = db_id
@@ -152,3 +160,21 @@ async def save_node(state: AgentState) -> dict:
     except Exception as exc:
         logger.exception("save_node failed")
         return {"error": f"save_node: {exc}"}
+
+
+async def _save_approved_metrics(
+    session: Any,
+    state: AgentState,
+    db_id: int,
+    user_id: int,
+) -> None:
+    """Persist and approve reviewed metric definitions from graph state."""
+    for payload in state.get("suggested_metrics", []):
+        definition = MetricDefinition.model_validate(payload)
+        metric = await create_metric(
+            session,
+            db_id,
+            {"definition": definition.model_dump(mode="json"), "source": "ai"},
+            user_id,
+        )
+        await approve_metric(session, metric.id, user_id)

@@ -62,6 +62,7 @@ from src.services.live_db_service import (
 )
 from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
 from src.services.query_compiler import SemanticQueryCompiler
+from src.services.query_execution import execute_compiled_query
 from src.services.schema_ingestion import parse_sql_dump_preview
 from src.services.semantic_service import (
     approve_metric,
@@ -70,10 +71,24 @@ from src.services.semantic_service import (
     enrich_and_save_canonical_schema,
     get_metric_with_history,
 )
+from src.services.semantic_service import (
+    update_metric as update_metric_record,
+)
 from src.services.sql_dump_parser_models import SqlDumpParseError
 from src.services.sql_dump_scanner_models import SqlDumpScanError
 
 logger = logging.getLogger(__name__)
+
+
+async def _execute_sql_on_live_db(
+    conn_url: str,
+    dialect: str,
+    compiled: Any,
+) -> dict[str, Any]:
+    """Adapt the query execution module to the route response shape."""
+    result = await execute_compiled_query(conn_url, dialect, compiled)
+    return {"columns": result.columns, "rows": result.rows, "row_count": result.row_count}
+
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -254,7 +269,6 @@ async def connect_live_target_db(
         raise HTTPException(status_code=400, detail=f"Failed to connect and introspect target database: {exc}") from exc
 
 
-
 @router.get("/semantic/db/saved", response_model=list[LiveDbSummaryResponse])
 async def get_saved_live_target_dbs(
     current_user: UserModel = Depends(get_current_user),
@@ -405,7 +419,7 @@ async def approve_semantic_layer(
 
     metrics_stmt = select(SemanticMetricModel).where(
         SemanticMetricModel.db_id == db_id,
-        SemanticMetricModel.status == "draft",
+        SemanticMetricModel.status == "pending_approval",
     )
     metrics_result = await db.execute(metrics_stmt)
     draft_metrics = metrics_result.scalars().all()
@@ -549,10 +563,10 @@ async def _load_schema_context_for_db(db: AsyncSession, db_id: Any) -> dict[str,
                         ],
                     }
                 return schema_dict
-        except Exception:
-            pass
-    except (ValueError, TypeError):
-        pass
+        except Exception as exc:
+            logger.debug("Schema context fallback failed for db_id=%s: %s", db_id, exc)
+    except (ValueError, TypeError) as exc:
+        logger.debug("Invalid semantic database id %s: %s", db_id, exc)
 
     return DEMO_RETAIL_SCHEMA
 
@@ -616,12 +630,8 @@ async def create_metric_endpoint(
         raise HTTPException(status_code=404, detail=f"Semantic database {numeric_db_id} not found")
 
     metric_data: dict[str, Any] = {
-        "name": body.name,
-        "description": body.description,
-        "sql_template": body.sql_template,
+        "definition": body.definition.model_dump(mode="json"),
         "source": body.source,
-        "formula": body.formula,
-        "aggregation_type": body.aggregation_type,
     }
 
     try:
@@ -631,8 +641,8 @@ async def create_metric_endpoint(
             metric_data=metric_data,
             user_id=current_user.id,
         )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to create metric: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Update DB status to 'draft' after metric creation
     db_record.status = "draft"
@@ -640,9 +650,7 @@ async def create_metric_endpoint(
 
     return MetricResponse(
         metric_id=new_metric.id,
-        name=new_metric.name,
-        description=new_metric.description,
-        sql_template=new_metric.sql_template,
+        definition=new_metric.definition,
         source=new_metric.source or "manual",
     )
 
@@ -662,12 +670,10 @@ async def list_metrics(
         items.append(
             MetricListItem(
                 metric_id=m.id,
-                name=m.name,
-                description=m.description,
-                sql_template=m.sql_template,
+                definition=m.definition,
                 source=m.source or "manual",
                 version=m.version or 1,
-                status=m.status or "draft",
+                status=m.status or "needs_review",
                 approved_by=m.approved_by,
                 created_at=m.created_at,
             )
@@ -691,7 +697,7 @@ async def get_metric_history(
     versions = [
         MetricVersionItem(
             version=v.version,
-            formula=v.formula,
+            definition=v.definition,
             changed_by=v.changed_by,
             change_reason=v.change_reason or "",
             created_at=v.created_at,
@@ -711,40 +717,27 @@ async def update_metric(
     db_id: str,
     metric_id: int,
     body: MetricUpdate,
+    current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricResponse:
-    """Cập nhật công thức hoặc thông tin của một Business Metric."""
-    stmt = select(SemanticMetricModel).where(SemanticMetricModel.id == metric_id)
-    res = await db.execute(stmt)
-    metric = res.scalar_one_or_none()
-    if not metric:
-        raise HTTPException(status_code=404, detail=f"Metric with id {metric_id} not found")
-
-    if body.name is not None:
-        metric.name = body.name
-    if body.description is not None:
-        metric.description = body.description
-    if body.sql_template is not None:
-        metric.sql_template = body.sql_template
-
+    """Replace a metric definition and reset it to pending approval."""
     try:
         numeric_db_id = int(db_id)
-        db_stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == numeric_db_id)
-        db_res = await db.execute(db_stmt)
-        db_record = db_res.scalar_one_or_none()
-        if db_record:
-            db_record.status = "draft"
-    except ValueError:
-        pass
-
+        metric = await update_metric_record(
+            db,
+            metric_id,
+            {"definition": body.definition.model_dump(mode="json")},
+            current_user.id,
+        )
+        if metric.db_id != numeric_db_id:
+            raise ValueError("Metric does not belong to database")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await db.commit()
     await db.refresh(metric)
-
     return MetricResponse(
         metric_id=metric.id,
-        name=metric.name,
-        description=metric.description,
-        sql_template=metric.sql_template,
+        definition=metric.definition,
         source=metric.source,
     )
 
@@ -799,33 +792,11 @@ async def export_semantic_layer(
 # ---------------------------------------------------------------------------
 
 
-def _execute_sql_on_live_db(
-    conn_url: str,
-    sql: str,
-    statement_timeout_ms: int = 15000,
-) -> dict[str, Any]:
-    """Execute read-only SQL against a live database with timeout.
-
-    Returns dict with 'columns', 'rows', 'row_count'.
-    """
-    from sqlalchemy import create_engine, text
-
-    engine = create_engine(conn_url, pool_pre_ping=True)
-    try:
-        with engine.connect() as conn:
-            conn.execute(text(f"SET statement_timeout = {statement_timeout_ms}"))
-            result = conn.execute(text(sql))
-            columns = list(result.keys())
-            rows = [list(row) for row in result.fetchall()]
-            return {"columns": columns, "rows": rows, "row_count": len(rows)}
-    finally:
-        engine.dispose()
-
-
 @router.post("/semantic/{db_id}/query", response_model=SemanticQueryResponse)
 async def execute_semantic_query(
     db_id: str,
     body: SemanticQueryRequest,
+    current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> SemanticQueryResponse:
     """Execute a semantic query (Flow 2 — Live DB Only).
@@ -838,7 +809,10 @@ async def execute_semantic_query(
         raise HTTPException(status_code=400, detail="Invalid database id")
 
     # Fetch semantic database record
-    stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == parsed_id)
+    stmt = select(SemanticDatabaseModel).where(
+        SemanticDatabaseModel.id == parsed_id,
+        SemanticDatabaseModel.created_by == current_user.id,
+    )
     result = await db.execute(stmt)
     sem_db = result.scalar_one_or_none()
     if not sem_db:
@@ -861,6 +835,7 @@ async def execute_semantic_query(
             connection_id=parsed_id,
             metric_ids=body.metric_ids,
             dimension_ids=body.dimension_ids,
+            filters=body.filters,
             limit=body.limit,
         )
     except ValueError as exc:
@@ -869,9 +844,10 @@ async def execute_semantic_query(
     # Execute on live DB
     try:
         conn_url = decrypt_conn_url(live_db.conn_url_enc)
-        exec_result = _execute_sql_on_live_db(conn_url, compiled.sql)
+        exec_result = await _execute_sql_on_live_db(conn_url, live_db.dialect, compiled)
         return SemanticQueryResponse(
             sql=compiled.sql,
+            parameters=compiled.parameters,
             columns=exec_result["columns"],
             rows=exec_result["rows"],
             row_count=exec_result["row_count"],

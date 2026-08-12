@@ -45,7 +45,7 @@ class AgentState(TypedDict, total=False):
     # Flow 1 — MetricSuggest Node output
     suggested_metrics: list[dict[str, Any]]
     """Danh sách Business Metrics do LLM đề xuất.
-    Mỗi metric gồm: name, description, sql_template.
+    Mỗi metric là một MetricDefinition JSON, không chứa SQL.
     """
 
     # Flow 1 — HITL Interrupt (user review & edit)

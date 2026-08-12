@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth import create_access_token
 from src.models.db import (
-    CanonicalRelationshipModel,
     ImportedSchemaModel,
     LiveTargetDbModel,
     SemanticColumnModel,
@@ -96,6 +95,17 @@ async def _seed_live_db_with_semantic(db: AsyncSession) -> dict[str, Any]:
         status="approved",
         base_entity_id=tbl.id,
         created_by=1,
+        definition={
+            "metric": {
+                "name": "Total Revenue",
+                "formula": {"function": "SUM", "expression": "total_amount"},
+                "base_entity": "orders",
+                "filters": [],
+                "status": "approved",
+                "confidence": "high",
+                "excluded_notes": "",
+            }
+        },
     )
     db.add(metric)
     await db.flush()
@@ -161,6 +171,17 @@ async def _seed_imported_schema_only(db: AsyncSession) -> dict[str, Any]:
         status="approved",
         base_entity_id=tbl.id,
         created_by=1,
+        definition={
+            "metric": {
+                "name": "Product Count",
+                "formula": {"function": "COUNT", "expression": "*"},
+                "base_entity": "products",
+                "filters": [],
+                "status": "approved",
+                "confidence": "high",
+                "excluded_notes": "",
+            }
+        },
     )
     db.add(metric)
     await db.flush()

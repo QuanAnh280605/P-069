@@ -27,8 +27,10 @@ from src.models.db import (
     SemanticMetricModel,
     SemanticTableModel,
 )
+from src.models.metric_definition import MetricDefinition
 from src.models.schema_metadata import RawSchemaMetadata
 from src.services.llm import get_llm
+from src.services.metric_definitions import validate_metric_definition, with_metric_status
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +84,11 @@ async def enrich_and_save_canonical_schema(
       4. Extract foreign keys into canonical_relationships.
       5. Return summary dict with status='draft'.
     """
-    logger.info("[AI Semantic Agent] Starting canonical schema enrichment for connection_id=%d (%d tables)...", connection_id, len(raw_schema.tables))
+    logger.info(
+        "[AI Semantic Agent] Starting canonical schema enrichment for connection_id=%d (%d tables)...",
+        connection_id,
+        len(raw_schema.tables),
+    )
     enrichment = await _call_llm_enrichment(raw_schema, dialect)
     logger.info("[AI Semantic Agent] LLM enrichment returned data for %d tables", len(enrichment))
     table_id_map: dict[str, int] = {}
@@ -104,7 +110,13 @@ async def enrich_and_save_canonical_schema(
         )
         table_id_map[table_name] = table_id
         bname = table_enrichment.get("business_name", table_name)
-        logger.info("[AI Semantic Agent] Processed table '%s' (ID=%d, business_name='%s', columns=%d)", table_name, table_id, bname, len(table_meta.columns))
+        logger.info(
+            "[AI Semantic Agent] Processed table '%s' (ID=%d, business_name='%s', columns=%d)",
+            table_name,
+            table_id,
+            bname,
+            len(table_meta.columns),
+        )
 
         col_enrichments = {c["column_name"]: c for c in table_enrichment.get("columns", [])}
         for col_meta in table_meta.columns:
@@ -117,7 +129,11 @@ async def enrich_and_save_canonical_schema(
             )
 
     relationships = await _extract_and_save_relationships(db, connection_id, raw_schema, table_id_map)
-    logger.info("[AI Semantic Agent] Extracted %d foreign key relationships for connection_id=%d", len(relationships), connection_id)
+    logger.info(
+        "[AI Semantic Agent] Extracted %d foreign key relationships for connection_id=%d",
+        len(relationships),
+        connection_id,
+    )
 
     await db.commit()
     logger.info("[AI Semantic Agent] Canonical schema enrichment completed for connection_id=%d", connection_id)
@@ -132,7 +148,6 @@ async def enrich_and_save_canonical_schema(
     }
 
 
-
 async def create_metric(
     db: AsyncSession,
     connection_id: int,
@@ -140,17 +155,23 @@ async def create_metric(
     user_id: int,
 ) -> SemanticMetricModel:
     """Create a new metric with version=1, status='draft', and an initial metric_versions record."""
+    definition = MetricDefinition.model_validate(metric_data["definition"])
+    definition = with_metric_status(definition, "pending_approval")
+    table = await validate_metric_definition(db, connection_id, definition)
+    payload = definition.model_dump(mode="json")
     metric = SemanticMetricModel(
         db_id=connection_id,
         created_by=user_id,
-        name=metric_data["name"],
-        description=metric_data.get("description", ""),
-        sql_template=metric_data.get("sql_template", ""),
+        name=definition.metric.name,
+        description=definition.metric.excluded_notes,
+        sql_template="",
         source=metric_data.get("source", "manual"),
-        formula=metric_data.get("formula", ""),
-        aggregation_type=metric_data.get("aggregation_type"),
+        formula="",
+        aggregation_type=definition.metric.formula.function,
+        definition=payload,
+        base_entity_id=table.id,
         version=1,
-        status="draft",
+        status="pending_approval",
     )
     db.add(metric)
     await db.flush()
@@ -158,7 +179,8 @@ async def create_metric(
     version_record = MetricVersionModel(
         metric_id=metric.id,
         version=1,
-        formula=metric_data.get("formula", ""),
+        formula="",
+        definition=payload,
         changed_by=user_id,
     )
     db.add(version_record)
@@ -184,23 +206,24 @@ async def update_metric(
     if metric.created_by != user_id:
         raise ValueError(f"User {user_id} does not have ownership of metric {metric_id}")
 
-    if "name" in metric_data and metric_data["name"] is not None:
-        metric.name = metric_data["name"]
-    if "description" in metric_data and metric_data["description"] is not None:
-        metric.description = metric_data["description"]
-    if "formula" in metric_data and metric_data["formula"] is not None:
-        metric.formula = metric_data["formula"]
-    if "aggregation_type" in metric_data and metric_data["aggregation_type"] is not None:
-        metric.aggregation_type = metric_data["aggregation_type"]
-    if "sql_template" in metric_data and metric_data["sql_template"] is not None:
-        metric.sql_template = metric_data["sql_template"]
-
+    definition = MetricDefinition.model_validate(metric_data["definition"])
+    definition = with_metric_status(definition, "pending_approval")
+    table = await validate_metric_definition(db, metric.db_id, definition)
+    payload = definition.model_dump(mode="json")
+    metric.name = definition.metric.name
+    metric.description = definition.metric.excluded_notes
+    metric.definition = payload
+    metric.base_entity_id = table.id
+    metric.aggregation_type = definition.metric.formula.function
+    metric.status = "pending_approval"
+    metric.approved_by = None
     metric.version += 1
 
     version_record = MetricVersionModel(
         metric_id=metric.id,
         version=metric.version,
-        formula=metric.formula,
+        formula="",
+        definition=payload,
         changed_by=user_id,
     )
     db.add(version_record)
@@ -223,6 +246,10 @@ async def approve_metric(
     if metric is None:
         raise ValueError(f"Metric {metric_id} not found")
 
+    if metric.definition is None:
+        raise ValueError("Legacy metric definition requires review before approval")
+    definition = with_metric_status(MetricDefinition.model_validate(metric.definition), "approved")
+    metric.definition = definition.model_dump(mode="json")
     metric.status = "approved"
     metric.approved_by = user_id
     await db.flush()
@@ -266,7 +293,9 @@ async def _call_llm_enrichment(raw_schema: RawSchemaMetadata, dialect: str) -> d
         f"Schema ({dialect}):\n{json.dumps(tables_info, indent=2)}"
     )
 
-    logger.info("[AI Semantic Agent] Sending schema prompt (%d tables, dialect=%s) to LLM...", len(raw_schema.tables), dialect)
+    logger.info(
+        "[AI Semantic Agent] Sending schema prompt (%d tables, dialect=%s) to LLM...", len(raw_schema.tables), dialect
+    )
     llm = get_llm()
     response = await llm.ainvoke(prompt)
     content = str(response.content).strip()
@@ -278,12 +307,14 @@ async def _call_llm_enrichment(raw_schema: RawSchemaMetadata, dialect: str) -> d
 
     try:
         res_json = json.loads(content)
-        logger.info("[AI Semantic Agent] Successfully parsed LLM response JSON containing %d enriched table definitions", len(res_json))
+        logger.info(
+            "[AI Semantic Agent] Successfully parsed LLM response JSON containing %d enriched table definitions",
+            len(res_json),
+        )
         return res_json
     except json.JSONDecodeError:
         logger.warning("[AI Semantic Agent] LLM enrichment response was not valid JSON, returning empty enrichment")
         return {}
-
 
 
 async def _upsert_semantic_table(

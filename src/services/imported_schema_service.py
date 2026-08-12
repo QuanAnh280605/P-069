@@ -175,4 +175,3 @@ async def _run_enrichment_background(
             logger.info("Successfully completed AI semantic enrichment for connection_id=%d", connection_id)
     except Exception as exc:
         logger.warning("Background enrichment failed for connection_id=%d: %s", connection_id, exc, exc_info=True)
-
