@@ -1,6 +1,6 @@
 """Unit tests for Pydantic schemas — CanonicalRelationshipResponse, MetricVersionResponse, MetricWithHistoryResponse, GenerateResponse canonical fields."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.models.raw_schema import RawSchema
 from src.models.schemas import (
@@ -17,7 +17,7 @@ class TestCanonicalRelationshipResponse:
 
     def test_canonical_relationship_response_fields(self) -> None:
         """CanonicalRelationshipResponse has all required fields from the DB model."""
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         resp = CanonicalRelationshipResponse(
             id=1,
             connection_id=10,
@@ -52,7 +52,7 @@ class TestMetricVersionResponse:
 
     def test_metric_version_response_fields(self) -> None:
         """MetricVersionResponse has all required fields from MetricVersionModel."""
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         resp = MetricVersionResponse(
             id=1,
             metric_id=5,
@@ -72,7 +72,7 @@ class TestMetricVersionResponse:
 
     def test_metric_version_response_optional_changed_by(self) -> None:
         """changed_by can be None (system-generated version)."""
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         resp = MetricVersionResponse(
             id=1,
             metric_id=5,
@@ -90,7 +90,7 @@ class TestMetricWithHistoryResponse:
 
     def test_metric_with_history_extends_metric_response(self) -> None:
         """MetricWithHistoryResponse extends MetricResponse with version, status, approved_by, history."""
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         version = MetricVersionResponse(
             id=1,
             metric_id=5,
@@ -161,7 +161,12 @@ class TestGenerateResponseCanonicalFields:
     def test_generate_response_has_canonical_tables(self) -> None:
         """GenerateResponse should have canonical_tables field."""
         raw_schema: RawSchema = {
-            "source": {"type": "sql_dump", "db_engine": "postgresql", "connection_id": None, "extracted_at": "2026-08-05T00:00:00Z"},
+            "source": {
+                "type": "sql_dump",
+                "db_engine": "postgresql",
+                "connection_id": None,
+                "extracted_at": "2026-08-05T00:00:00Z",
+            },
             "tables": [],
             "relationships": [],
         }
@@ -178,11 +183,16 @@ class TestGenerateResponseCanonicalFields:
     def test_generate_response_has_canonical_relationships(self) -> None:
         """GenerateResponse should have canonical_relationships field."""
         raw_schema: RawSchema = {
-            "source": {"type": "sql_dump", "db_engine": "postgresql", "connection_id": None, "extracted_at": "2026-08-05T00:00:00Z"},
+            "source": {
+                "type": "sql_dump",
+                "db_engine": "postgresql",
+                "connection_id": None,
+                "extracted_at": "2026-08-05T00:00:00Z",
+            },
             "tables": [],
             "relationships": [],
         }
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         rel = CanonicalRelationshipResponse(
             id=1,
             connection_id=10,
@@ -205,7 +215,12 @@ class TestGenerateResponseCanonicalFields:
     def test_generate_response_canonical_fields_default_empty(self) -> None:
         """Canonical fields default to empty lists for backward compatibility."""
         raw_schema: RawSchema = {
-            "source": {"type": "sql_dump", "db_engine": "postgresql", "connection_id": None, "extracted_at": "2026-08-05T00:00:00Z"},
+            "source": {
+                "type": "sql_dump",
+                "db_engine": "postgresql",
+                "connection_id": None,
+                "extracted_at": "2026-08-05T00:00:00Z",
+            },
             "tables": [],
             "relationships": [],
         }
@@ -221,7 +236,12 @@ class TestGenerateResponseCanonicalFields:
     def test_existing_raw_schema_test_still_passes(self) -> None:
         """Backward compatibility: existing test_raw_schema test should still work."""
         raw_schema: RawSchema = {
-            "source": {"type": "sql_dump", "db_engine": "postgresql", "connection_id": None, "extracted_at": "2026-08-05T00:00:00Z"},
+            "source": {
+                "type": "sql_dump",
+                "db_engine": "postgresql",
+                "connection_id": None,
+                "extracted_at": "2026-08-05T00:00:00Z",
+            },
             "tables": [],
             "relationships": [],
         }
