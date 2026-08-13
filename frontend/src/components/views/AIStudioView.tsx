@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { createMetricApi, generateCustomMetricsApi, MetricSuggestion, SemanticLayerData } from '@/lib/api';
+import { createMetricApi, generateCustomMetricsApi, MetricSuggestion, SemanticLayerData, sendChatOrchestratorApi } from '@/lib/api';
 import { ChatMessage, StudioChatStream } from '@/components/studio/StudioChatStream';
 
 interface AIStudioViewProps {
@@ -19,18 +19,29 @@ export function AIStudioView({ layer, theme, onMetricsChanged, onEditMetricReque
   const semanticDbId = layer.semantic_db_id;
 
   useEffect(() => {
-    setMessages([{ id: 'welcome', sender: 'assistant', text: `Hãy mô tả chỉ số cần tạo cho ${layer.db_name}. AI sẽ trả về Metric Definition và YAML preview để bạn review trước khi lưu.`, timestamp: now() }]);
+    setMessages([{ id: 'welcome', sender: 'assistant', text: `Xin chào! Tôi có thể trả lời thắc mắc hoặc giúp bạn sinh chỉ số (Business Metrics) cho ${layer.db_name}.`, timestamp: now() }]);
   }, [layer.db_name, semanticDbId]);
 
-  const send = async (prompt: string, targetTables: string[]) => {
+  const send = async (prompt: string, _targetTables: string[]) => {
     setMessages((current) => [...current, { id: crypto.randomUUID(), sender: 'user', text: prompt, timestamp: now() }]);
     if (!semanticDbId) return appendError(setMessages, 'Semantic Layer đang được khởi tạo. Vui lòng tải lại sau khi enrichment hoàn tất.');
     setLoading(true);
     try {
-      const response = await generateCustomMetricsApi(String(semanticDbId), prompt, targetTables);
-      setMessages((current) => [...current, { id: crypto.randomUUID(), sender: 'assistant', text: `Đã tạo ${response.suggestions.length} Metric Definition để review:`, suggestions: response.suggestions, timestamp: now() }]);
+      let suggestions: MetricSuggestion[] = [];
+      try {
+        const response = await sendChatOrchestratorApi(String(semanticDbId), prompt);
+        if (response.intent === 'chitchat') {
+          setMessages((current) => [...current, { id: crypto.randomUUID(), sender: 'assistant', text: response.chat_response || 'Xin chào! Tôi có thể giúp gì cho bạn?', timestamp: now() }]);
+          return;
+        }
+        suggestions = response.suggestions || [];
+      } catch {
+        const res = await generateCustomMetricsApi(String(semanticDbId), prompt, _targetTables);
+        suggestions = res.suggestions || [];
+      }
+      setMessages((current) => [...current, { id: crypto.randomUUID(), sender: 'assistant', text: suggestions.length ? `Đã đề xuất ${suggestions.length} Metric Definition:` : 'Không sinh được metric phù hợp từ schema.', suggestions, timestamp: now() }]);
     } catch (error) {
-      appendError(setMessages, error instanceof Error ? error.message : 'Không thể sinh metric');
+      appendError(setMessages, error instanceof Error ? error.message : 'Không thể xử lý yêu cầu');
     } finally {
       setLoading(false);
     }

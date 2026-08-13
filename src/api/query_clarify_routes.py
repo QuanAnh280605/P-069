@@ -52,9 +52,7 @@ class WizardStepResponse(BaseModel):
 query_clarify_router = APIRouter(tags=["AI Query Assistant Wizard"])
 
 
-async def _verify_live_db(
-    db: AsyncSession, db_id: int, user_id: int
-) -> SemanticDatabaseModel:
+async def _verify_live_db(db: AsyncSession, db_id: int, user_id: int) -> SemanticDatabaseModel:
     """Verify that semantic database exists and is backed by a Live Target DB."""
     stmt = select(SemanticDatabaseModel).where(
         SemanticDatabaseModel.id == db_id,
@@ -67,9 +65,7 @@ async def _verify_live_db(
             detail="Database không tồn tại hoặc không thuộc quyền sở hữu.",
         )
 
-    live_stmt = select(LiveTargetDbModel).where(
-        LiveTargetDbModel.semantic_db_id == db_id
-    )
+    live_stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.semantic_db_id == db_id)
     live_db = (await db.execute(live_stmt)).scalar_one_or_none()
     if not live_db:
         raise HTTPException(
@@ -95,9 +91,7 @@ async def start_wizard(
 ) -> WizardStartResponse:
     """Start the Guided Wizard flow for a Live DB connection."""
     await _verify_live_db(db, db_id, current_user.id)
-    session_id, wizard_step, error = await start_wizard_session(
-        db, db_id, current_user.id
-    )
+    session_id, wizard_step, error = await start_wizard_session(db, db_id, current_user.id)
     if error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error)
 
@@ -123,9 +117,7 @@ async def advance_wizard(
 ) -> WizardStepResponse:
     """Submit selected radio option and advance wizard to next step or preview."""
     await _verify_live_db(db, db_id, current_user.id)
-    wizard_step, compiled, spec, error = await advance_wizard_session(
-        db, body.session_id, body.option_id
-    )
+    wizard_step, compiled, spec, error = await advance_wizard_session(db, body.session_id, body.option_id)
     if error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error)
 

@@ -26,17 +26,13 @@ def _cleanup_expired_sessions() -> None:
     """Purge wizard sessions older than the TTL limit (15 mins)."""
     now = datetime.now(UTC).timestamp()
     expired_ids = [
-        s_id
-        for s_id, s_data in _WIZARD_SESSIONS.items()
-        if now - s_data.get("timestamp", 0) > _SESSION_TTL_SECONDS
+        s_id for s_id, s_data in _WIZARD_SESSIONS.items() if now - s_data.get("timestamp", 0) > _SESSION_TTL_SECONDS
     ]
     for s_id in expired_ids:
         _WIZARD_SESSIONS.pop(s_id, None)
 
 
-async def _load_catalog_and_metrics(
-    db: AsyncSession, db_id: int
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+async def _load_catalog_and_metrics(db: AsyncSession, db_id: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Load tables, columns, and approved metrics from metadata store."""
     tables_stmt = select(SemanticTableModel).where(SemanticTableModel.db_id == db_id)
     tables_result = await db.execute(tables_stmt)
@@ -78,7 +74,9 @@ async def _load_catalog_and_metrics(
             "name": m.name,
             "description": m.description or "",
             "base_entity_id": m.base_entity_id,
-            "base_entity": m.definition.get("metric", {}).get("base_entity") if isinstance(m.definition, dict) else None,
+            "base_entity": m.definition.get("metric", {}).get("base_entity")
+            if isinstance(m.definition, dict)
+            else None,
         }
         for m in approved_metrics
     ]
@@ -86,9 +84,7 @@ async def _load_catalog_and_metrics(
     return {"tables": table_dicts}, metric_dicts
 
 
-async def start_wizard_session(
-    db: AsyncSession, db_id: int, user_id: int
-) -> tuple[str, WizardStepOutput, str | None]:
+async def start_wizard_session(db: AsyncSession, db_id: int, user_id: int) -> tuple[str, WizardStepOutput, str | None]:
     """Initialize a new Guided Wizard session for Step 1 (Metric selection)."""
     _cleanup_expired_sessions()
     catalog_context, approved_metrics = await _load_catalog_and_metrics(db, db_id)
@@ -131,9 +127,7 @@ async def advance_wizard_session(
     _cleanup_expired_sessions()
     session_data = _WIZARD_SESSIONS.get(session_id)
     if not session_data:
-        err_step = WizardStepOutput(
-            step=1, title="Phiên Hết Hạn", question="Phiên tư vấn đã hết hạn.", options=[]
-        )
+        err_step = WizardStepOutput(step=1, title="Phiên Hết Hạn", question="Phiên tư vấn đã hết hạn.", options=[])
         return err_step, None, None, "Phiên làm việc không tồn tại hoặc đã hết hạn (15 phút)."
 
     state: QueryClarifierState = session_data["state"]
