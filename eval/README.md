@@ -98,10 +98,61 @@ result.guardrails   # SuiteEvaluationResult
 
 ---
 
+## Chạy đánh giá (How to run)
+
+### Yêu cầu trước
+
+- **Python 3.11.**
+- Cài dependency: `pip install -r requirements-dev.txt` (đã bao gồm runtime deps cùng `ruff`, `pytest`, `pyyaml`, `sqlglot`).
+- `pytest.ini` đặt `pythonpath = .`, nên `pytest` tự thấy package `eval`/`src`. Khi chạy **script riêng** (không qua pytest), hãy chạy từ **thư mục gốc repo** để `import eval` hoạt động.
+- **Golden Dataset** phải nằm ở `eval/golden_dataset/<domain>/` — thuộc PR golden-data xếp chồng. Nếu chỉ có PR framework này thì `load_domain_dataset` sẽ báo thiếu dataset (điều này bình thường).
+
+### 1) Kiểm tra (verify) framework
+
+```bash
+pytest tests/test_evaluation/ -v   # 35 test case pure-logic, không cần Golden Dataset
+ruff check src/ tests/ eval/       # lint (eval/ cũng nằm trong phạm vi)
+```
+
+### 2) Chạy đánh giá trên một domain
+
+File [`eval/run_eval.py`](run_eval.py) đã wire sẵn luồng đầy đủ — **load dataset → dựng
+candidate outputs → `evaluate_domain_suite` → in PRF1 micro**. Chạy từ thư mục gốc repo:
+
+```bash
+python -m eval.run_eval --domain ecommerce
+```
+
+Mặc định runner dùng candidate outputs rỗng (placeholder), nên mọi case báo
+`not_available`. Để chấm một run thật, thay hàm `_placeholder_candidates()` trong file bằng
+candidate outputs do agent sinh ra (Stage 2–4), key khớp `case_id` của dataset:
+
+```python
+candidates = DomainCandidateOutputs(
+    enrichment={...},   # dict[str, CandidateEnrichmentOutput]
+    metrics={...},      # dict[str, CandidateMetricOutput]
+    compiler={...},     # dict[str, CandidateCompilerOutput]
+)
+```
+
+> `DomainCandidateOutputs` là model strict (`extra="forbid"`). Khi không cung cấp
+> `guardrail_adapter`, suite guardrail trả `status="not_available"` cho mọi case.
+
+### 3) Stage 1 — Discovery (live mode, tùy chọn)
+
+`evaluate_discovery_suite` chấm riêng độ chính xác introspect schema (Stage 1), độc lập
+với `evaluate_domain_suite`:
+
+```python
+from eval.evaluator.discovery_eval import CandidateDiscoveryOutput, evaluate_discovery_suite
+```
+
+---
+
 ## Test
 
-`tests/test_evaluation/` — sáu unit test pure-logic, **không phụ thuộc Golden Dataset**,
-nên framework có thể verify độc lập:
+Sáu module test pure-logic trong `tests/test_evaluation/` (35 test case), **không phụ thuộc
+Golden Dataset**, nên framework verify độc lập:
 
 | Test | Phủ |
 |------|-----|
@@ -112,7 +163,4 @@ nên framework có thể verify độc lập:
 | `test_sql_normalization` | So sánh cấu trúc, chuẩn hóa alias, ép read-only. |
 | `test_text_similarity` | Logic NFC/fuzzy/semantic tiếng Việt và ngưỡng chấp nhận. |
 
-```bash
-pytest tests/test_evaluation/ -v
-ruff check src/ tests/ eval/
-```
+Cách chạy xem mục [Chạy đánh giá](#chạy-đánh-giá-how-to-run) — Bước 1.
