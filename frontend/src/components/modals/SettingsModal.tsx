@@ -82,7 +82,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 space-y-2 font-mono">
               <div className="flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-400">API Endpoint:</span>
-                <span className="font-bold text-indigo-600 dark:text-indigo-400">http://localhost:8000</span>
+                <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                  {process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'}
+                </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-400">LLM Provider:</span>

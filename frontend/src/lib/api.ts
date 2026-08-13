@@ -256,8 +256,11 @@ export function deleteLayer(id: string): void {
   saveLocalLayers(filtered);
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || API_BASE;
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  'http://localhost:8000';
+const API_BASE = API_BASE_URL;
 
 function getAuthHeader(): Record<string, string> {
   const token =

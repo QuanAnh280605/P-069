@@ -9,10 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Cài Python deps trước (tận dụng layer cache)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir watchfiles
+# Cài Python dev dependencies (bao gồm pytest, ruff, watchfiles...)
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements-dev.txt
 
 # Code được mount qua volume — không cần COPY ở đây
 # (bind mount trong docker-compose.dev.yml ghi đè thư mục /app)
