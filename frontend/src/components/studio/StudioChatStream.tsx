@@ -395,7 +395,7 @@ function SuggestionCard({
   onRefine?: (item: MetricSuggestion) => void;
 }) {
   const metric = suggestion.definition.metric;
-  const [showYaml, setShowYaml] = useState(true);
+  const [showYaml, setShowYaml] = useState(false);
 
   // Extract columns used in expression & filters
   const usedColumns = useMemo(() => {

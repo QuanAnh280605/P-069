@@ -51,7 +51,7 @@ class TestCanonicalRelationshipResponse:
         """CanonicalRelationshipResponse can be constructed from an ORM-like object."""
         from types import SimpleNamespace
 
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         orm_obj = SimpleNamespace(
             id=1,
             connection_id=10,

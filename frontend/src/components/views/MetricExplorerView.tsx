@@ -29,6 +29,7 @@ import {
 import React, { useMemo, useState } from 'react';
 
 import { SqlCodeViewer } from '@/components/studio/SqlCodeViewer';
+import { AIQueryModal } from '@/components/explorer/AIQueryModal';
 import {
   CatalogColumn,
   CatalogTable,
@@ -43,6 +44,7 @@ import {
   SemanticQueryPreview,
   SemanticQueryRequest,
   SemanticQueryResult,
+  SemanticQuerySpec,
   TimeGrain,
 } from '@/lib/api';
 import { coerceFilterValue, metricName } from '@/lib/metrics';
@@ -91,6 +93,25 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme }: Props) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [viewTab, setViewTab] = useState<'table' | 'chart' | 'sql'>('table');
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+
+  const handleAiResolved = (spec: SemanticQuerySpec) => {
+    if (spec.metric_ids && spec.metric_ids.length > 0) {
+      setMetricIds(spec.metric_ids);
+    }
+    if (spec.dimensions) {
+      setDimensions(spec.dimensions);
+    }
+    if (spec.filters && spec.filters.length > 0) {
+      setFilters(
+        spec.filters.map((f: SemanticQueryFilter) => ({
+          column_id: f.column_id,
+          operator: f.operator,
+          raw: String(f.value ?? ''),
+        }))
+      );
+    }
+  };
 
   if (!catalog) return <State message="Đang tải semantic catalog..." />;
   if (!catalog.query_supported) {
@@ -170,6 +191,7 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme }: Props) {
         onRemoveDimension={(colId) => setDimensions(dimensions.filter((item) => item.column_id !== colId))}
         onRemoveFilter={(idx) => setFilters(filters.filter((_, i) => i !== idx))}
         onClearAll={handleClearAll}
+        onOpenAiModal={() => setIsAiModalOpen(true)}
       />
 
       {/* Main Grid: Left Controls Sidebar & Right Result Panel */}
@@ -262,6 +284,17 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme }: Props) {
           />
         </main>
       </div>
+
+      {/* Guided Wizard AI Query Modal */}
+      {dbId && (
+        <AIQueryModal
+          isOpen={isAiModalOpen}
+          dbId={dbId}
+          theme={theme}
+          onClose={() => setIsAiModalOpen(false)}
+          onResolved={handleAiResolved}
+        />
+      )}
     </div>
   );
 }
@@ -358,6 +391,7 @@ function QuerySummaryBanner({
   onRemoveDimension,
   onRemoveFilter,
   onClearAll,
+  onOpenAiModal,
 }: {
   selectedMetrics: MetricRecord[];
   selectedDimensions: DimensionSelection[];
@@ -367,6 +401,7 @@ function QuerySummaryBanner({
   onRemoveDimension: (colId: number) => void;
   onRemoveFilter: (idx: number) => void;
   onClearAll: () => void;
+  onOpenAiModal?: () => void;
 }) {
   const hasSelections = selectedMetrics.length > 0 || selectedDimensions.length > 0 || filters.length > 0;
 
@@ -377,16 +412,28 @@ function QuerySummaryBanner({
           <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
           <span>CÂU HỎI PHÂN TÍCH HIỆN TẠI</span>
         </div>
-        {hasSelections && (
-          <button
-            type="button"
-            onClick={onClearAll}
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400 cursor-pointer"
-          >
-            <RotateCcw className="h-3 w-3" />
-            Làm mới bộ chọn
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {onOpenAiModal && (
+            <button
+              type="button"
+              onClick={onOpenAiModal}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors shadow-xs cursor-pointer"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              ✨ AI Assistant
+            </button>
+          )}
+          {hasSelections && (
+            <button
+              type="button"
+              onClick={onClearAll}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400 cursor-pointer"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Làm mới bộ chọn
+            </button>
+          )}
+        </div>
       </div>
 
       {!hasSelections ? (

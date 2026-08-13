@@ -295,7 +295,7 @@ export class SemanticApiError extends Error {
   }
 }
 
-async function semanticRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function semanticRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -772,4 +772,57 @@ export function convertRawSchemaToLayer(
     tables,
     metrics: [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Guided Wizard AI Query Assistant API
+// ---------------------------------------------------------------------------
+
+export interface SemanticQuerySpec {
+  metric_ids: number[];
+  dimensions: DimensionSelection[];
+  filters: SemanticQueryFilter[];
+  limit: number;
+}
+
+export interface WizardOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface WizardStartResponse {
+  session_id: string;
+  step: number;
+  title: string;
+  question: string;
+  options: WizardOption[];
+  is_completed: boolean;
+}
+
+export interface WizardStepResponse {
+  step: number;
+  title: string;
+  question: string;
+  options: WizardOption[];
+  is_completed: boolean;
+  resolved_spec?: SemanticQuerySpec | null;
+  sql_preview?: string | null;
+}
+
+export async function startWizardApi(dbId: number): Promise<WizardStartResponse> {
+  return semanticRequest<WizardStartResponse>(`/api/v1/semantic/${dbId}/query/wizard/start`, {
+    method: 'POST',
+  });
+}
+
+export async function advanceWizardApi(
+  dbId: number,
+  sessionId: string,
+  optionId: string
+): Promise<WizardStepResponse> {
+  return semanticRequest<WizardStepResponse>(`/api/v1/semantic/${dbId}/query/wizard/step`, {
+    method: 'POST',
+    body: JSON.stringify({ session_id: sessionId, option_id: optionId }),
+  });
 }

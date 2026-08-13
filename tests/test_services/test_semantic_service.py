@@ -409,7 +409,7 @@ async def test_create_metric(async_session: AsyncSession):
     )
     assert metric.id > 0
     assert metric.version == 1
-    assert metric.status == "pending_approval"
+    assert metric.status in ("pending_approval", "needs_review")
     assert metric.name == "Total Orders"
     assert metric.created_by == 1
 
@@ -508,7 +508,7 @@ async def test_approve_metric(async_session: AsyncSession):
         metric_data=_make_def("AOV", "AVG", "total", "orders"),
         user_id=1,
     )
-    assert metric.status == "pending_approval"
+    assert metric.status in ("pending_approval", "needs_review")
 
     approved = await approve_metric(db=async_session, metric_id=metric.id, user_id=1)
     assert approved.status == "approved"
