@@ -493,3 +493,33 @@ class MetricHistoryResponse(BaseModel):
     metric_id: int
     metric_name: str
     versions: list[MetricVersionItem]
+
+
+# ---------------------------------------------------------------------------
+# Chat Orchestrator (Multi-Agent)
+# ---------------------------------------------------------------------------
+
+
+class ChatRequest(BaseModel):
+    """Request payload cho chatbot orchestrator endpoint."""
+
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="Câu hỏi hoặc tin nhắn ngôn ngữ tự nhiên từ người dùng",
+    )
+
+
+class ChatResponse(BaseModel):
+    """Response từ chatbot orchestrator sau khi phân loại intent."""
+
+    intent: str = Field(..., description="'chitchat' hoặc 'metric_query'")
+    chat_response: str | None = Field(
+        default=None,
+        description="Câu trả lời ngôn ngữ tự nhiên (khi intent = 'chitchat')",
+    )
+    suggestions: list[Any] | None = Field(
+        default=None,
+        description="Danh sách Business Metrics JSON (khi intent = 'metric_query')",
+    )

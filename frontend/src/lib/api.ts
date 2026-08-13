@@ -359,6 +359,37 @@ export async function generateCustomMetricsApi(
   return { suggestions: data.suggestions, isLiveLLM: true };
 }
 
+export interface ChatOrchestratorResponse {
+  intent: 'chitchat' | 'metric_query';
+  chat_response?: string | null;
+  suggestions?: MetricSuggestion[] | null;
+}
+
+export async function sendChatOrchestratorApi(
+  dbId: string,
+  message: string,
+): Promise<ChatOrchestratorResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/semantic/${dbId}/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify({ message }),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({ detail: 'Lỗi khi gọi API Chat Orchestrator' }));
+    const errorMsg =
+      typeof errData?.detail === 'string'
+        ? errData.detail
+        : JSON.stringify(errData?.detail || 'Không thể gửi tin nhắn đến Chat Orchestrator');
+    throw new Error(`[Chat Error ${res.status}]: ${errorMsg}`);
+  }
+
+  return await res.json();
+}
+
 /* Legacy SQL metric adapter removed in favor of canonical definitions.
 export async function createMetricApi(
   dbId: string,

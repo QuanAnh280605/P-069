@@ -59,3 +59,15 @@ class AgentState(TypedDict, total=False):
     # Shared — error handling
     error: str
     """Thông báo lỗi nếu có bất kỳ node nào thất bại."""
+
+    # Chat Orchestrator — Input
+    user_message: str
+    """Câu hỏi / tin nhắn ngôn ngữ tự nhiên từ người dùng gửi vào chatbot."""
+
+    # Chat Orchestrator — Router output
+    intent: str
+    """Kết quả phân loại intent: 'chitchat' hoặc 'metric_query'."""
+
+    # Chitchat Agent — Output
+    chat_response: str
+    """Câu trả lời ngôn ngữ tự nhiên khi intent = 'chitchat'."""

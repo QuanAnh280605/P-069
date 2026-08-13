@@ -24,6 +24,8 @@ from src.models.schema_metadata import DiagnosticCode, RawSchemaMetadata, Schema
 from src.models.schemas import (
     ApproveRequest,
     CanonicalRelationshipResponse,
+    ChatRequest,
+    ChatResponse,
     CustomMetricGenerateRequest,
     CustomMetricGenerateResponse,
     GenerateRequest,
@@ -387,14 +389,18 @@ async def _find_source_raw_schema(
 
     Returns (raw_schema, dialect) tuple.
     """
-    live_stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.semantic_db_id == semantic_db_id)
+    live_stmt = select(LiveTargetDbModel).where(
+        (LiveTargetDbModel.semantic_db_id == semantic_db_id) | (LiveTargetDbModel.id == semantic_db_id)
+    )
     live_result = await db.execute(live_stmt)
     live_db = live_result.scalar_one_or_none()
     if live_db:
         raw_schema = RawSchemaMetadata.model_validate(live_db.schema_metadata)
         return raw_schema, live_db.dialect
 
-    imported_stmt = select(ImportedSchemaModel).where(ImportedSchemaModel.semantic_db_id == semantic_db_id)
+    imported_stmt = select(ImportedSchemaModel).where(
+        (ImportedSchemaModel.semantic_db_id == semantic_db_id) | (ImportedSchemaModel.id == semantic_db_id)
+    )
     imported_result = await db.execute(imported_stmt)
     imported = imported_result.scalar_one_or_none()
     if imported:
@@ -1051,3 +1057,49 @@ async def execute_semantic_query(
 async def agent_status() -> dict:
     """Check agent readiness."""
     return {"status": "ready", "pipeline": "Flow 1 — Generate & Manage Semantic Layer"}
+
+
+# ---------------------------------------------------------------------------
+# 9. AI Chat Orchestrator (Multi-Agent)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/semantic/{db_id}/chat", response_model=ChatResponse)
+async def chat_orchestrator(
+    db_id: str,
+    body: ChatRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> ChatResponse:
+    """Multi-agent chatbot: route chitchat to natural-language reply or metric generation.
+
+    - 'chitchat' intent  → friendly Vietnamese natural-language response
+    - 'metric_query' intent → Business Metric suggestions from schema
+    """
+    from src.agents.chat_graph import chat_agent
+
+    schema_context = await _load_schema_context_for_db(db, db_id)
+
+    initial_state: dict = {
+        "user_message": body.message,
+        "enriched_schema": schema_context,
+    }
+
+    try:
+        final_state = await chat_agent.ainvoke(initial_state)
+    except Exception as exc:
+        logger.error("Chat orchestrator failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Chat agent encountered an error. Please try again.",
+        ) from exc
+
+    intent = final_state.get("intent", "chitchat")
+
+    if intent == "metric_query":
+        raw_metrics = final_state.get("suggested_metrics") or []
+        return ChatResponse(intent=intent, suggestions=raw_metrics)
+
+    return ChatResponse(
+        intent=intent,
+        chat_response=final_state.get("chat_response", ""),
+    )
