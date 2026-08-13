@@ -75,7 +75,7 @@ def _make_raw_schema(
                 primary_key=True,
             ),
             ColumnMetadata(
-                column_name=Identifier.from_raw("user_id", dialect),
+                column_name=Identifier.from_raw("id", dialect),
                 ordinal_position=2,
                 raw_data_type="INTEGER",
                 data_type="INTEGER",
@@ -83,8 +83,24 @@ def _make_raw_schema(
                 primary_key=False,
             ),
             ColumnMetadata(
-                column_name=Identifier.from_raw("created_at", dialect),
+                column_name=Identifier.from_raw("user_id", dialect),
                 ordinal_position=3,
+                raw_data_type="INTEGER",
+                data_type="INTEGER",
+                nullable=False,
+                primary_key=False,
+            ),
+            ColumnMetadata(
+                column_name=Identifier.from_raw("total", dialect),
+                ordinal_position=4,
+                raw_data_type="NUMERIC",
+                data_type="NUMERIC",
+                nullable=True,
+                primary_key=False,
+            ),
+            ColumnMetadata(
+                column_name=Identifier.from_raw("created_at", dialect),
+                ordinal_position=5,
                 raw_data_type="TIMESTAMP",
                 data_type="TIMESTAMP",
                 nullable=True,
@@ -138,7 +154,9 @@ def _llm_enrichment_response() -> str:
                 "description": "Bảng lưu trữ thông tin đơn hàng",
                 "columns": [
                     {"column_name": "order_id", "business_name": "Mã đơn hàng", "description": "Khóa chính"},
+                    {"column_name": "id", "business_name": "ID", "description": "Định danh"},
                     {"column_name": "user_id", "business_name": "Mã người đặt", "description": "FK tới users"},
+                    {"column_name": "total", "business_name": "Tổng tiền", "description": "Tổng tiền đơn hàng"},
                     {"column_name": "created_at", "business_name": "Ngày tạo", "description": "Thời gian tạo đơn"},
                 ],
             },
@@ -367,10 +385,10 @@ async def test_enrich_upserts_tables_on_second_run(async_session: AsyncSession):
 
 
 async def _seed_tables(db: AsyncSession, db_id: int) -> None:
-    table = SemanticTableModel(db_id=db_id, table_name="orders", business_name="Đơn hàng")
+    table = SemanticTableModel(db_id=db_id, table_name="orders", business_name="Đơn hàng", primary_key_column="id")
     db.add(table)
     await db.flush()
-    db.add(SemanticColumnModel(table_id=table.id, column_name="id", data_type="INTEGER", business_name="ID"))
+    db.add(SemanticColumnModel(table_id=table.id, column_name="id", data_type="INTEGER", business_name="ID", is_primary_key=True))
     db.add(SemanticColumnModel(table_id=table.id, column_name="total", data_type="NUMERIC", business_name="Tổng"))
     db.add(SemanticColumnModel(table_id=table.id, column_name="a", data_type="NUMERIC", business_name="A"))
     await db.flush()
