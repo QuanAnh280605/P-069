@@ -25,9 +25,13 @@ import {
   getImportedSchema,
   getLiveTargetDb,
   getSemanticCatalogApi,
+  ImportedSchemaRecord,
+  ImportedSchemaSummary,
   listImportedSchemas,
   listLiveTargetDbs,
   listMetricsApi,
+  LiveDbRecord,
+  LiveDbSummary,
   MetricDefinition,
   MetricRecord,
   MetricSuggestion,
@@ -137,10 +141,24 @@ export default function DashboardPage() {
 }
 
 async function loadConnections(token: string): Promise<SemanticLayerData[]> {
-  const [live, imported] = await Promise.all([listLiveTargetDbs(token), listImportedSchemas(token)]);
-  const liveFull = await Promise.all(live.map((item) => getLiveTargetDb(item.id, token)));
-  const dumpFull = await Promise.all(imported.map((item) => getImportedSchema(item.id, token)));
-  return [...liveFull.map((item) => convertRawSchemaToLayer(item.id, item.display_name, item.dialect, item.raw_schema, undefined, item.updated_at, item.semantic_db_id, 'live')), ...dumpFull.map((item) => convertRawSchemaToLayer(item.id, item.display_name, item.dialect, item.raw_schema, undefined, item.updated_at, item.semantic_db_id, 'sql_dump'))];
+  const [live, imported] = await Promise.all([
+    listLiveTargetDbs(token).catch(() => [] as LiveDbSummary[]),
+    listImportedSchemas(token).catch(() => [] as ImportedSchemaSummary[]),
+  ]);
+  const liveResults = await Promise.allSettled(live.map((item) => getLiveTargetDb(item.id, token)));
+  const liveFull = liveResults
+    .filter((r): r is PromiseFulfilledResult<LiveDbRecord> => r.status === 'fulfilled')
+    .map((r) => r.value);
+
+  const dumpResults = await Promise.allSettled(imported.map((item) => getImportedSchema(item.id, token)));
+  const dumpFull = dumpResults
+    .filter((r): r is PromiseFulfilledResult<ImportedSchemaRecord> => r.status === 'fulfilled')
+    .map((r) => r.value);
+
+  return [
+    ...liveFull.map((item) => convertRawSchemaToLayer(item.id, item.display_name, item.dialect, item.raw_schema, undefined, item.updated_at, item.semantic_db_id, 'live')),
+    ...dumpFull.map((item) => convertRawSchemaToLayer(item.id, item.display_name, item.dialect, item.raw_schema, undefined, item.updated_at, item.semantic_db_id, 'sql_dump')),
+  ];
 }
 
 function Sidebar({ layers, selectedId, onSelect, onConnect, onDelete, onSettings, onTheme, dark, userName, onLogout }: { layers: SemanticLayerData[]; selectedId: string | null; onSelect: (id: string) => void; onConnect: () => void; onDelete: (layer: SemanticLayerData) => void; onSettings: () => void; onTheme: () => void; dark: boolean; userName?: string; onLogout: () => void }) {

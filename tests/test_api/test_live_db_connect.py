@@ -7,7 +7,7 @@ import tempfile
 import pytest
 
 from src.api.auth import create_access_token
-from src.models.db import UserModel
+from src.models.db import LiveTargetDbModel, UserModel
 
 CONNECT_ENDPOINT = "/api/v1/semantic/db/connect"
 SAVED_DB_ENDPOINT = "/api/v1/semantic/db/saved"
@@ -107,3 +107,38 @@ async def test_live_db_connect_auto_detect_and_mismatch(client, temp_sqlite_db: 
     res_mismatch = await client.post(CONNECT_ENDPOINT, json=mismatch_payload, headers=_token_headers())
     assert res_mismatch.status_code == 400
     assert "does not match selected dialect" in res_mismatch.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_saved_dbs_empty_list_returns_200(client):
+    """GET /semantic/db/saved returns 200 and empty list when user has no databases."""
+    res = await client.get(SAVED_DB_ENDPOINT, headers=_token_headers())
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+@pytest.mark.asyncio
+async def test_saved_dbs_handles_empty_or_corrupted_metadata(client, async_session):
+    """GET /semantic/db/saved returns 200 without 500 error even if metadata is empty dict or string."""
+    live_db = LiveTargetDbModel(
+        created_by=1,
+        display_name="Corrupted Meta DB",
+        dialect="sqlite",
+        conn_url_enc="dummy-enc",
+        schema_metadata={},
+    )
+    async_session.add(live_db)
+    await async_session.commit()
+
+    res = await client.get(SAVED_DB_ENDPOINT, headers=_token_headers())
+    assert res.status_code == 200
+    items = res.json()
+    assert len(items) >= 1
+    target = next((item for item in items if item["display_name"] == "Corrupted Meta DB"), None)
+    assert target is not None
+    assert target["table_count"] == 0
+
+    # Test single item detail handles empty metadata safely too
+    detail_res = await client.get(f"{SAVED_DB_ENDPOINT}/{live_db.id}", headers=_token_headers())
+    assert detail_res.status_code == 200
+    assert detail_res.json()["table_count"] == 0

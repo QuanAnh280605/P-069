@@ -274,7 +274,7 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
                 </label>
                 <select
                   value={dbType}
-                  onChange={(e) => setDbType(e.target.value as any)}
+                  onChange={(e) => setDbType(e.target.value as 'auto' | 'postgresql' | 'mysql' | 'sqlite')}
                   className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
                   <option value="auto" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">Auto Detect</option>
@@ -374,7 +374,7 @@ export const ConnectDbModal: React.FC<ConnectDbModalProps> = ({ isOpen, onClose,
                 </label>
                 <select
                   value={dumpDialect}
-                  onChange={(e) => setDumpDialect(e.target.value as any)}
+                  onChange={(e) => setDumpDialect(e.target.value as '' | 'postgresql' | 'mysql')}
                   className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
                   <option value="" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">Auto Detect</option>

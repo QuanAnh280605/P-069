@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from src.models.metric_definition import FilterOperator, MetricDefinition
 from src.models.raw_schema import RawSchema
@@ -53,6 +53,8 @@ class TokenResponse(BaseModel):
 
 class UserProfileResponse(BaseModel):
     """Thông tin hồ sơ người dùng trả về."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     email: str
@@ -254,6 +256,8 @@ class ImportedSchemaCreateRequest(BaseModel):
 class ImportedSchemaSummaryResponse(BaseModel):
     """List item for one persisted SQL dump schema."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     semantic_db_id: int | None = None
     display_name: str
@@ -293,6 +297,8 @@ class LiveDbConnectRequest(BaseModel):
 
 class LiveDbSummaryResponse(BaseModel):
     """Summary representation of a persisted live target database connection."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     semantic_db_id: int | None = None
@@ -349,6 +355,8 @@ class SemanticQueryResponse(BaseModel):
 class CanonicalRelationshipResponse(BaseModel):
     """Response for a canonical relationship between two semantic tables."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     connection_id: int
     from_entity_id: int
@@ -361,6 +369,8 @@ class CanonicalRelationshipResponse(BaseModel):
 class SemanticCatalogColumn(BaseModel):
     """Expose a selectable canonical column to semantic query clients."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     column_id: int
     column_name: str
     business_name: str
@@ -372,6 +382,8 @@ class SemanticCatalogColumn(BaseModel):
 class SemanticCatalogTable(BaseModel):
     """Expose one canonical entity and its queryable columns."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     table_id: int
     table_name: str
     business_name: str
@@ -380,6 +392,8 @@ class SemanticCatalogTable(BaseModel):
 
 class SemanticCatalogResponse(BaseModel):
     """Describe metadata required by the deterministic query builder."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     db_id: int
     source_type: Literal["live", "sql_dump"]
@@ -413,9 +427,11 @@ class SemanticApproveV2Response(BaseModel):
 class MetricListItem(BaseModel):
     """A metric with version, status, and approval info."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     metric_id: int
     name: str
-    definition: MetricDefinition | None
+    definition: MetricDefinition | None = None
     source: str
     version: int
     status: str
@@ -426,6 +442,8 @@ class MetricListItem(BaseModel):
 class MetricVersionItem(BaseModel):
     """One version entry in a metric's history."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     version: int
     definition: MetricDefinition | None = None
     changed_by: int | None = None
@@ -435,6 +453,8 @@ class MetricVersionItem(BaseModel):
 
 class MetricHistoryResponse(BaseModel):
     """Response containing a metric's version history."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     metric_id: int
     metric_name: str
