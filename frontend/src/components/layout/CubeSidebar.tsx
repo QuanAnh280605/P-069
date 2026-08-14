@@ -34,7 +34,7 @@ export const CubeSidebar: React.FC<CubeSidebarProps> = ({
   dbName,
   dbType = 'postgresql',
   metricCount,
-  tableCount,
+  tableCount: _tableCount,
   user,
   onLogout,
 }) => {

@@ -8,6 +8,7 @@ Provides:
 """
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -275,6 +276,70 @@ async def list_live_target_dbs(db: AsyncSession, user_id: int) -> list[LiveDbSum
     return [_model_to_summary(record) for record in records]
 
 
+def _safe_raw_schema(schema_metadata: Any, model_dialect: str) -> RawSchemaMetadata:
+    """Safely parse schema metadata or construct a valid fallback RawSchemaMetadata."""
+    dialect_str = (model_dialect or "sqlite").lower()
+    if dialect_str in ("postgres", "postgresql"):
+        dialect = SchemaDialect.POSTGRESQL
+    elif dialect_str in ("mysql", "mariadb"):
+        dialect = SchemaDialect.MYSQL
+    else:
+        dialect = SchemaDialect.SQLITE
+
+    default_schema = default_schema_identifier(dialect)
+    fallback = RawSchemaMetadata(
+        dialect=dialect,
+        schemas=(SchemaMetadata(schema_name=default_schema),),
+        tables=(),
+    )
+
+    if not schema_metadata:
+        return fallback
+
+    if isinstance(schema_metadata, str):
+        try:
+            schema_metadata = json.loads(schema_metadata)
+        except Exception:
+            return fallback
+
+    if isinstance(schema_metadata, dict):
+        try:
+            return RawSchemaMetadata.model_validate(schema_metadata)
+        except Exception:
+            logger.debug("Failed to validate schema_metadata against RawSchemaMetadata, returning empty fallback")
+            return fallback
+
+    return fallback
+
+
+def _model_to_summary(model: LiveTargetDbModel) -> LiveDbSummaryResponse:
+    """Convert model to LiveDbSummaryResponse."""
+    raw_schema = _safe_raw_schema(model.schema_metadata, model.dialect)
+    return LiveDbSummaryResponse(
+        id=model.id,
+        semantic_db_id=model.semantic_db_id,
+        display_name=model.display_name,
+        dialect=raw_schema.dialect,
+        table_count=len(raw_schema.tables),
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+
+
+def _model_to_response(model: LiveTargetDbModel, raw_schema: RawSchemaMetadata) -> LiveDbResponse:
+    """Convert model and raw schema to LiveDbResponse."""
+    return LiveDbResponse(
+        id=model.id,
+        semantic_db_id=model.semantic_db_id,
+        display_name=model.display_name,
+        dialect=raw_schema.dialect,
+        table_count=len(raw_schema.tables),
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+        raw_schema=raw_schema,
+    )
+
+
 async def get_live_target_db(db: AsyncSession, user_id: int, db_id: int) -> LiveDbResponse | None:
     """Retrieve one user-owned live target database by ID."""
     stmt = select(LiveTargetDbModel).where(
@@ -285,7 +350,7 @@ async def get_live_target_db(db: AsyncSession, user_id: int, db_id: int) -> Live
     record = result.scalar_one_or_none()
     if not record:
         return None
-    raw_schema = RawSchemaMetadata.model_validate(record.schema_metadata)
+    raw_schema = _safe_raw_schema(record.schema_metadata, record.dialect)
     return _model_to_response(record, raw_schema)
 
 
@@ -343,31 +408,3 @@ async def _run_enrichment_background(
             logger.info("Successfully completed AI semantic enrichment for connection_id=%d", connection_id)
     except Exception as exc:
         logger.warning("Background enrichment failed for connection_id=%d: %s", connection_id, exc, exc_info=True)
-
-
-def _model_to_summary(model: LiveTargetDbModel) -> LiveDbSummaryResponse:
-    """Convert model to LiveDbSummaryResponse."""
-    raw_schema = RawSchemaMetadata.model_validate(model.schema_metadata)
-    return LiveDbSummaryResponse(
-        id=model.id,
-        semantic_db_id=model.semantic_db_id,
-        display_name=model.display_name,
-        dialect=SchemaDialect(model.dialect),
-        table_count=len(raw_schema.tables),
-        created_at=model.created_at,
-        updated_at=model.updated_at,
-    )
-
-
-def _model_to_response(model: LiveTargetDbModel, raw_schema: RawSchemaMetadata) -> LiveDbResponse:
-    """Convert model and raw schema to LiveDbResponse."""
-    return LiveDbResponse(
-        id=model.id,
-        semantic_db_id=model.semantic_db_id,
-        display_name=model.display_name,
-        dialect=SchemaDialect(model.dialect),
-        table_count=len(raw_schema.tables),
-        created_at=model.created_at,
-        updated_at=model.updated_at,
-        raw_schema=raw_schema,
-    )
