@@ -7,10 +7,10 @@ test:
 	pytest tests/ -v
 
 lint:
-	ruff check src/ tests/
+	ruff check src/ tests/ eval/
 
 format:
-	ruff format src/ tests/
+	ruff format src/ tests/ eval/
 
 typecheck:
 	mypy src/
