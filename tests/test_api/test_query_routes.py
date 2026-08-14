@@ -630,4 +630,3 @@ async def test_catalog_returns_relationships_for_live_db(
     assert len(payload["relationships"]) == 1
     assert payload["relationships"][0]["relationship_type"] == "many_to_one"
     assert payload["relationships"][0]["join_condition"] == "orders.order_id = orders.order_id"
-

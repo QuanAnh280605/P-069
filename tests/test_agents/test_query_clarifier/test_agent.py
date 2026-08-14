@@ -60,8 +60,20 @@ async def test_wizard_step_node_dimension_chips():
                     "table_name": "orders",
                     "business_name": "Đơn hàng",
                     "columns": [
-                        {"column_id": 101, "column_name": "order_date", "business_name": "Ngày đặt", "data_type": "TIMESTAMP", "is_time_dimension": True},
-                        {"column_id": 102, "column_name": "region", "business_name": "Vùng miền", "data_type": "VARCHAR", "is_time_dimension": False},
+                        {
+                            "column_id": 101,
+                            "column_name": "order_date",
+                            "business_name": "Ngày đặt",
+                            "data_type": "TIMESTAMP",
+                            "is_time_dimension": True,
+                        },
+                        {
+                            "column_id": 102,
+                            "column_name": "region",
+                            "business_name": "Vùng miền",
+                            "data_type": "VARCHAR",
+                            "is_time_dimension": False,
+                        },
                     ],
                 }
             ]

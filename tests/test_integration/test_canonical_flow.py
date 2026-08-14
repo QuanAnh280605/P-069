@@ -1279,7 +1279,9 @@ async def test_approve_skips_other_users_metrics(client: Any, async_session: Asy
     async_session.add(tbl)
     await async_session.flush()
 
-    col1 = SemanticColumnModel(table_id=tbl.id, column_name="id", data_type="INTEGER", business_name="ID", is_primary_key=True)
+    col1 = SemanticColumnModel(
+        table_id=tbl.id, column_name="id", data_type="INTEGER", business_name="ID", is_primary_key=True
+    )
     col2 = SemanticColumnModel(table_id=tbl.id, column_name="x", data_type="NUMERIC", business_name="X")
     async_session.add_all([col1, col2])
     await async_session.flush()

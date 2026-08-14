@@ -388,7 +388,11 @@ async def _seed_tables(db: AsyncSession, db_id: int) -> None:
     table = SemanticTableModel(db_id=db_id, table_name="orders", business_name="Đơn hàng", primary_key_column="id")
     db.add(table)
     await db.flush()
-    db.add(SemanticColumnModel(table_id=table.id, column_name="id", data_type="INTEGER", business_name="ID", is_primary_key=True))
+    db.add(
+        SemanticColumnModel(
+            table_id=table.id, column_name="id", data_type="INTEGER", business_name="ID", is_primary_key=True
+        )
+    )
     db.add(SemanticColumnModel(table_id=table.id, column_name="total", data_type="NUMERIC", business_name="Tổng"))
     db.add(SemanticColumnModel(table_id=table.id, column_name="a", data_type="NUMERIC", business_name="A"))
     await db.flush()

@@ -1,5 +1,5 @@
 import YAML from 'yaml';
-import { FilterOperator, MetricDefinition, MetricFilter, MetricStatus } from '@/lib/api';
+import { FilterOperator, MetricDefinition, MetricFilter, MetricRecord, MetricStatus } from '@/lib/api';
 
 export function createMetricDefinition(baseEntity: string = ''): MetricDefinition {
   return {
@@ -27,8 +27,18 @@ export function withPendingStatus(definition: MetricDefinition): MetricDefinitio
   };
 }
 
-export function metricName(definition: MetricDefinition | null | undefined): string {
-  return definition?.metric?.name || 'Chưa đặt tên';
+export function metricName(item: MetricRecord | MetricDefinition | null | undefined): string {
+  if (!item) return 'Chưa đặt tên';
+  if ('name' in item && typeof item.name === 'string' && item.name) {
+    return item.name;
+  }
+  if ('metric' in item && item.metric?.name) {
+    return item.metric.name;
+  }
+  if ('definition' in item && item.definition?.metric?.name) {
+    return item.definition.metric.name;
+  }
+  return 'Chưa đặt tên';
 }
 
 export function statusLabel(status?: MetricStatus | string): string {
@@ -46,12 +56,21 @@ export function statusLabel(status?: MetricStatus | string): string {
   }
 }
 
-export function coerceFilterValue(operator: FilterOperator, rawValue: string): unknown {
+export function coerceFilterValue(operator: FilterOperator | string, rawValue: string): unknown {
   if (operator === 'is_null' || operator === 'is_not_null') {
     return null;
   }
   if (operator === 'in' || operator === 'not_in') {
-    return rawValue.split(',').map((item) => item.trim()).filter(Boolean);
+    return rawValue
+      .split(',')
+      .map((item) => {
+        const t = item.trim();
+        if (t !== '' && !isNaN(Number(t))) return Number(t);
+        if (t.toLowerCase() === 'true') return true;
+        if (t.toLowerCase() === 'false') return false;
+        return t;
+      })
+      .filter(Boolean);
   }
   const trimmed = rawValue.trim();
   if (trimmed === '') return null;
@@ -63,10 +82,16 @@ export function coerceFilterValue(operator: FilterOperator, rawValue: string): u
   return trimmed;
 }
 
-export function renderMetricYaml(definition: MetricDefinition): string {
+export function renderMetricYaml(definition?: MetricDefinition | null): string {
+  if (!definition) return '';
+  const clone = JSON.parse(JSON.stringify(definition));
+  if (clone.metric && Array.isArray(clone.metric.filters) && clone.metric.filters.length === 0) {
+    delete clone.metric.filters;
+  }
   try {
-    return YAML.stringify(definition);
+    return YAML.stringify(clone);
   } catch {
-    return JSON.stringify(definition, null, 2);
+    return JSON.stringify(clone, null, 2);
   }
 }
+

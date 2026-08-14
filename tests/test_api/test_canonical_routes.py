@@ -298,8 +298,12 @@ async def test_approve_semantic_layer_success(client: AsyncClient, async_session
         status="draft",
     )
     tbl = SemanticTableModel(id=911, db_id=211, table_name="orders", business_name="Đơn hàng", primary_key_column="id")
-    col1 = SemanticColumnModel(id=9011, table_id=911, column_name="total_amount", data_type="NUMERIC", business_name="Tổng tiền")
-    col2 = SemanticColumnModel(id=9012, table_id=911, column_name="id", data_type="INTEGER", business_name="ID", is_primary_key=True)
+    col1 = SemanticColumnModel(
+        id=9011, table_id=911, column_name="total_amount", data_type="NUMERIC", business_name="Tổng tiền"
+    )
+    col2 = SemanticColumnModel(
+        id=9012, table_id=911, column_name="id", data_type="INTEGER", business_name="ID", is_primary_key=True
+    )
     metric1 = SemanticMetricModel(
         db_id=211,
         name="Total Orders",
@@ -368,8 +372,12 @@ async def test_approve_skips_other_users_metrics(client: AsyncClient, async_sess
         status="draft",
     )
     tbl2 = SemanticTableModel(id=912, db_id=212, table_name="orders", business_name="Đơn hàng", primary_key_column="id")
-    col21 = SemanticColumnModel(id=9021, table_id=912, column_name="total_amount", data_type="NUMERIC", business_name="Tổng tiền")
-    col22 = SemanticColumnModel(id=9022, table_id=912, column_name="id", data_type="INTEGER", business_name="ID", is_primary_key=True)
+    col21 = SemanticColumnModel(
+        id=9021, table_id=912, column_name="total_amount", data_type="NUMERIC", business_name="Tổng tiền"
+    )
+    col22 = SemanticColumnModel(
+        id=9022, table_id=912, column_name="id", data_type="INTEGER", business_name="ID", is_primary_key=True
+    )
     my_metric = SemanticMetricModel(
         db_id=212,
         name="My Metric",

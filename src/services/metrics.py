@@ -31,13 +31,23 @@ def extract_schema_summary(schema_dict: dict[str, Any]) -> tuple[dict[str, set[s
     """Build a valid-column index and readable schema prompt."""
     valid: dict[str, set[str]] = {}
     lines: list[str] = []
-    for table_name, table in schema_dict.items():
+    tables_data = schema_dict.get("tables", schema_dict)
+    if isinstance(tables_data, list):
+        items = [(t.get("table_name") or t.get("name", ""), t) for t in tables_data if isinstance(t, dict)]
+    elif isinstance(tables_data, dict):
+        items = list(tables_data.items())
+    else:
+        items = []
+    for table_name, table in items:
+        if not isinstance(table, dict):
+            continue
+        t_name = table.get("table_name") or table.get("name") or table_name or "unknown"
         columns = table.get("columns", [])
-        names = {column.get("column_name") or column.get("name") for column in columns}
-        valid[table_name] = {name for name in names if name}
-        business_name = table.get("business_name") or table_name
+        names = {col.get("column_name") or col.get("name") for col in columns if isinstance(col, dict)}
+        valid[t_name] = {name for name in names if name}
+        business_name = table.get("business_name") or t_name
         description = table.get("description") or ""
-        lines.append(f"Entity `{table_name}` ({business_name}): {description}")
+        lines.append(f"Entity `{t_name}` ({business_name}): {description}")
         lines.extend(_format_columns(columns))
     return valid, "\n".join(lines)
 

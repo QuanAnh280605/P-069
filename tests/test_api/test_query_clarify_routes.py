@@ -200,7 +200,11 @@ async def test_wizard_full_flow(client: Any, async_session: AsyncSession):
 
     dim_option_id = step_data["options"][0]["id"]
     mock_compiled = CompiledQuery(sql="SELECT SUM(amount) FROM sales", parameters={}, metadata={})
-    with patch("src.services.query_clarifier_service.SemanticQueryCompiler.compile", new_callable=AsyncMock, return_value=mock_compiled):
+    with patch(
+        "src.services.query_clarifier_service.SemanticQueryCompiler.compile",
+        new_callable=AsyncMock,
+        return_value=mock_compiled,
+    ):
         resolve_resp = await client.post(
             f"/api/v1/semantic/{db_id}/query/wizard/step",
             json={"session_id": session_id, "option_id": dim_option_id},
