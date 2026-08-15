@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { StudioChatStream } from '@/components/studio/StudioChatStream';
@@ -48,6 +48,8 @@ describe('StudioChatStream', () => {
 
     // YAML preview check
     expect(screen.getAllByText(/YAML preview/i).length).toBeGreaterThanOrEqual(1);
+    const toggleYamlBtn = screen.getByRole('button', { name: /Hiển thị mã YAML/i });
+    fireEvent.click(toggleYamlBtn);
     expect(screen.getByText(/name: Doanh thu/)).toBeInTheDocument();
     expect(screen.queryByText(/SQL Compiled/)).not.toBeInTheDocument();
   });

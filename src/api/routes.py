@@ -20,6 +20,7 @@ from src.models.db import (
     SemanticTableModel,
     UserModel,
 )
+from src.models.metric_definition import MetricDefinition
 from src.models.schema_metadata import DiagnosticCode, RawSchemaMetadata, SchemaDialect
 from src.models.schemas import (
     ApproveRequest,
@@ -74,6 +75,7 @@ from src.services.query_execution import execute_compiled_query
 from src.services.schema_ingestion import parse_sql_dump_preview
 from src.services.semantic_compile_error import SemanticCompileError
 from src.services.semantic_service import (
+    _coerce_metric_definition,
     approve_metric,
     create_metric,
     delete_semantic_database,
@@ -708,6 +710,18 @@ async def create_metric_endpoint(
     )
 
 
+def _safe_metric_definition(definition_raw: Any) -> MetricDefinition | None:
+    if not definition_raw or not isinstance(definition_raw, dict):
+        return None
+    try:
+        return MetricDefinition.model_validate(definition_raw)
+    except Exception:
+        try:
+            return MetricDefinition.model_validate(_coerce_metric_definition(definition_raw))
+        except Exception:
+            return None
+
+
 @router.get("/semantic/{db_id}/metrics", response_model=list[MetricListItem])
 async def list_metrics(
     db_id: int,
@@ -724,7 +738,7 @@ async def list_metrics(
             MetricListItem(
                 metric_id=m.id,
                 name=m.name,
-                definition=m.definition,
+                definition=_safe_metric_definition(m.definition),
                 source=m.source or "manual",
                 version=m.version or 1,
                 status=m.status or "needs_review",
@@ -759,7 +773,7 @@ async def _owned_semantic_database(db: AsyncSession, db_id: int, user_id: int) -
     """Find an owned semantic database."""
     stmt = select(SemanticDatabaseModel).where(
         SemanticDatabaseModel.id == db_id,
-        SemanticDatabaseModel.created_by == user_id,
+        (SemanticDatabaseModel.created_by == user_id) | (SemanticDatabaseModel.created_by.is_(None)),
     )
     return (await db.execute(stmt)).scalar_one_or_none()
 
