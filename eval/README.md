@@ -75,10 +75,10 @@ dataset = await load_domain_dataset(Path("eval/golden_dataset"), "ecommerce")
 deps = EvaluationDependencies(config=EvaluationConfig())
 result = await evaluate_domain_suite(dataset, candidates, deps)
 
-result.enrichment   # SuiteEvaluationResult
-result.metrics      # SuiteEvaluationResult
-result.compiler     # SuiteEvaluationResult
-result.guardrails   # SuiteEvaluationResult
+result.enrichment  # SuiteEvaluationResult
+result.metrics  # SuiteEvaluationResult
+result.compiler  # SuiteEvaluationResult
+result.guardrails  # SuiteEvaluationResult
 ```
 
 ---
@@ -129,9 +129,9 @@ candidate outputs do agent sinh ra (Stage 2–4), key khớp `case_id` của dat
 
 ```python
 candidates = DomainCandidateOutputs(
-    enrichment={...},   # dict[str, CandidateEnrichmentOutput]
-    metrics={...},      # dict[str, CandidateMetricOutput]
-    compiler={...},     # dict[str, CandidateCompilerOutput]
+    enrichment={...},  # dict[str, CandidateEnrichmentOutput]
+    metrics={...},  # dict[str, CandidateMetricOutput]
+    compiler={...},  # dict[str, CandidateCompilerOutput]
 )
 ```
 
@@ -164,3 +164,27 @@ Golden Dataset**, nên framework verify độc lập:
 | `test_text_similarity` | Logic NFC/fuzzy/semantic tiếng Việt và ngưỡng chấp nhận. |
 
 Cách chạy xem mục [Chạy đánh giá](#chạy-đánh-giá-how-to-run) — Bước 1.
+
+---
+
+## Hybrid evaluator (flag-gated)
+
+Run the Ragas-style hybrid engine (deterministic metrics + optional AI judge)
+against the golden dataset, with the legacy evaluator still the default:
+
+```bash
+python -m eval.run_eval --domain ecommerce --engine hybrid            # smoke, no judge
+python -m eval.run_eval --domain ecommerce --engine hybrid --judge    # + AI judge lane
+```
+
+Reports go to `--report-dir` (default `eval/reports/hybrid`) as `report.json`
+(full contract), `report.csv` (one row per sample), and `report.md` (summary).
+Status follows the spec gates: PASS ≥ 90, WARN 80–90, FAIL on a critical-gate
+failure or < 80, INCOMPLETE when coverage < 95% or evidence gates block the
+score. Without `--judge`, judge metrics are reported as `not_applicable` and
+excluded from coverage and suite weights. `--run-type` selects
+smoke/benchmark/release evidence rules: judge metrics that are entirely
+`not_applicable` are always exempt from the required-metric check, while
+deterministic metrics are exempt only in `smoke` runs — `benchmark` and
+`release` require deterministic evidence for the score to be valid. The legacy
+engine remains the default (`--engine legacy`).
