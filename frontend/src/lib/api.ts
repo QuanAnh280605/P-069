@@ -22,20 +22,25 @@ export type FilterOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' |
 
 export interface MetricFilter {
   field: string;
+  column_id?: number | null;
   operator: FilterOperator;
   value: unknown;
 }
 
 export interface MetricDefinition {
+  schema_version?: 1 | 2;
   metric: {
     name: string;
     formula: { function: MetricFunction; expression: string };
     base_entity: string;
+    base_entity_id?: number | null;
+    grain?: { column_ids: number[] };
     filters: MetricFilter[];
     status: MetricStatus;
     confidence?: MetricConfidence | null;
     excluded_notes: string;
   };
+  diagnostics?: Array<{ code: string; message: string }>;
 }
 
 export interface MetricRecord {
@@ -113,9 +118,23 @@ export interface SemanticQueryFilter {
 
 export interface SemanticQueryRequest {
   metric_ids: number[];
-  dimension_ids: number[];
+  dimensions: DimensionSelection[];
   filters: SemanticQueryFilter[];
   limit: number;
+}
+
+export type TimeGrain = 'day' | 'week' | 'month' | 'quarter' | 'year';
+
+export interface DimensionSelection {
+  column_id: number;
+  time_grain?: TimeGrain | null;
+}
+
+export interface SemanticQueryPreview {
+  sql: string;
+  parameters: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  diagnostics: Array<{ code: string; message: string }>;
 }
 
 export interface SemanticQueryResult {
@@ -276,7 +295,7 @@ export class SemanticApiError extends Error {
   }
 }
 
-async function semanticRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function semanticRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -338,6 +357,37 @@ export async function generateCustomMetricsApi(
     throw new Error('LLM không tìm thấy hoặc không sinh được chỉ số phù hợp với schema');
   }
   return { suggestions: data.suggestions, isLiveLLM: true };
+}
+
+export interface ChatOrchestratorResponse {
+  intent: 'chitchat' | 'metric_query';
+  chat_response?: string | null;
+  suggestions?: MetricSuggestion[] | null;
+}
+
+export async function sendChatOrchestratorApi(
+  dbId: string,
+  message: string,
+): Promise<ChatOrchestratorResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/semantic/${dbId}/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify({ message }),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({ detail: 'Lỗi khi gọi API Chat Orchestrator' }));
+    const errorMsg =
+      typeof errData?.detail === 'string'
+        ? errData.detail
+        : JSON.stringify(errData?.detail || 'Không thể gửi tin nhắn đến Chat Orchestrator');
+    throw new Error(`[Chat Error ${res.status}]: ${errorMsg}`);
+  }
+
+  return await res.json();
 }
 
 /* Legacy SQL metric adapter removed in favor of canonical definitions.
@@ -468,6 +518,16 @@ export async function executeSemanticQueryApi(
   request: SemanticQueryRequest,
 ): Promise<SemanticQueryResult> {
   return semanticRequest<SemanticQueryResult>(`/api/v1/semantic/${dbId}/query`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function compileSemanticQueryApi(
+  dbId: string,
+  request: SemanticQueryRequest,
+): Promise<SemanticQueryPreview> {
+  return semanticRequest<SemanticQueryPreview>('/api/v1/semantic/' + dbId + '/query/compile', {
     method: 'POST',
     body: JSON.stringify(request),
   });
@@ -762,4 +822,57 @@ export function convertRawSchemaToLayer(
     tables,
     metrics: [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Guided Wizard AI Query Assistant API
+// ---------------------------------------------------------------------------
+
+export interface SemanticQuerySpec {
+  metric_ids: number[];
+  dimensions: DimensionSelection[];
+  filters: SemanticQueryFilter[];
+  limit: number;
+}
+
+export interface WizardOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface WizardStartResponse {
+  session_id: string;
+  step: number;
+  title: string;
+  question: string;
+  options: WizardOption[];
+  is_completed: boolean;
+}
+
+export interface WizardStepResponse {
+  step: number;
+  title: string;
+  question: string;
+  options: WizardOption[];
+  is_completed: boolean;
+  resolved_spec?: SemanticQuerySpec | null;
+  sql_preview?: string | null;
+}
+
+export async function startWizardApi(dbId: number): Promise<WizardStartResponse> {
+  return semanticRequest<WizardStartResponse>(`/api/v1/semantic/${dbId}/query/wizard/start`, {
+    method: 'POST',
+  });
+}
+
+export async function advanceWizardApi(
+  dbId: number,
+  sessionId: string,
+  optionId: string
+): Promise<WizardStepResponse> {
+  return semanticRequest<WizardStepResponse>(`/api/v1/semantic/${dbId}/query/wizard/step`, {
+    method: 'POST',
+    body: JSON.stringify({ session_id: sessionId, option_id: optionId }),
+  });
 }

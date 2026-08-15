@@ -24,6 +24,7 @@ from src.services.query_compiler import CompiledQuery
 CATALOG_ENDPOINT = "/api/v1/semantic/{db_id}/catalog"
 
 QUERY_ENDPOINT = "/api/v1/semantic/{db_id}/query"
+COMPILE_ENDPOINT = "/api/v1/semantic/{db_id}/query/compile"
 
 
 def _token_headers(user: UserModel | None = None) -> dict[str, str]:
@@ -72,6 +73,13 @@ async def _seed_live_db_with_semantic(db: AsyncSession) -> dict[str, Any]:
     db.add(tbl)
     await db.flush()
 
+    col_order_id = SemanticColumnModel(
+        table_id=tbl.id,
+        column_name="order_id",
+        data_type="INTEGER",
+        business_name="Ma don hang",
+        is_primary_key=True,
+    )
     col_total = SemanticColumnModel(
         table_id=tbl.id,
         column_name="total_amount",
@@ -85,7 +93,7 @@ async def _seed_live_db_with_semantic(db: AsyncSession) -> dict[str, Any]:
         business_name="Ngay tao",
         is_time_dimension=True,
     )
-    db.add_all([col_total, col_created])
+    db.add_all([col_order_id, col_total, col_created])
     await db.flush()
 
     metric = SemanticMetricModel(
@@ -99,15 +107,22 @@ async def _seed_live_db_with_semantic(db: AsyncSession) -> dict[str, Any]:
         base_entity_id=tbl.id,
         created_by=1,
         definition={
+            "schema_version": 2,
             "metric": {
                 "name": "Total Revenue",
-                "formula": {"function": "SUM", "expression": "total_amount"},
+                "formula": {
+                    "function": "SUM",
+                    "expression": "total_amount",
+                    "expression_ast": {"kind": "column", "column_id": col_total.id},
+                },
                 "base_entity": "orders",
+                "base_entity_id": tbl.id,
+                "grain": {"column_ids": [col_order_id.id]},
                 "filters": [],
                 "status": "approved",
                 "confidence": "high",
                 "excluded_notes": "",
-            }
+            },
         },
     )
     db.add(metric)
@@ -118,6 +133,8 @@ async def _seed_live_db_with_semantic(db: AsyncSession) -> dict[str, Any]:
         "sem_db_id": sem_db.id,
         "live_db_id": live_db.id,
         "metric_id": metric.id,
+        "table_id": tbl.id,
+        "col_order_id": col_order_id.id,
         "col_created_id": col_created.id,
         "col_total_id": col_total.id,
     }
@@ -200,6 +217,34 @@ async def _seed_imported_schema_only(db: AsyncSession) -> dict[str, Any]:
 # ===================================================================
 # Success case
 # ===================================================================
+
+
+@pytest.mark.asyncio
+async def test_compile_preview_does_not_access_target_database(
+    client: Any,
+    async_session: AsyncSession,
+) -> None:
+    data = await _seed_live_db_with_semantic(async_session)
+    payload = {
+        "metric_ids": [data["metric_id"]],
+        "dimensions": [{"column_id": data["col_created_id"], "time_grain": "month"}],
+        "limit": 100,
+    }
+    with (
+        patch("src.api.routes.decrypt_conn_url") as decrypt,
+        patch("src.api.routes._execute_sql_on_live_db") as execute,
+    ):
+        response = await client.post(
+            COMPILE_ENDPOINT.format(db_id=data["sem_db_id"]),
+            json=payload,
+            headers=_token_headers(),
+        )
+
+    assert response.status_code == 200
+    assert "strftime" in response.json()["sql"]
+    assert response.json()["metadata"]["base_entity"] == "orders"
+    decrypt.assert_not_called()
+    execute.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -521,6 +566,7 @@ async def test_catalog_returns_canonical_ids_for_live_db(
     assert payload["tables"][0]["table_name"] == "orders"
     assert {item["column_id"] for item in payload["tables"][0]["columns"]} == {
         data["col_created_id"],
+        data["col_order_id"],
         data["col_total_id"],
     }
 
@@ -559,18 +605,21 @@ async def test_catalog_rejects_other_users_database(
 
 
 @pytest.mark.asyncio
-async def test_catalog_returns_relationships(
+async def test_catalog_returns_relationships_for_live_db(
     client: Any,
     async_session: AsyncSession,
 ) -> None:
-    """GET catalog returns canonical relationships without 500 ValidationError."""
+    """GET catalog returns serialized canonical relationships."""
     data = await _seed_live_db_with_semantic(async_session)
     rel = CanonicalRelationshipModel(
         connection_id=data["sem_db_id"],
-        from_entity_id=1,
-        to_entity_id=1,
+        from_entity_id=data["table_id"],
+        to_entity_id=data["table_id"],
         relationship_type="many_to_one",
         join_condition="orders.order_id = orders.order_id",
+        relationship_key="orders:self_fk",
+        column_pairs=[{"from_column_id": data["col_order_id"], "to_column_id": data["col_order_id"]}],
+        validation_status="valid",
     )
     async_session.add(rel)
     await async_session.commit()
@@ -579,4 +628,5 @@ async def test_catalog_returns_relationships(
     assert response.status_code == 200
     payload = response.json()
     assert len(payload["relationships"]) == 1
+    assert payload["relationships"][0]["relationship_type"] == "many_to_one"
     assert payload["relationships"][0]["join_condition"] == "orders.order_id = orders.order_id"

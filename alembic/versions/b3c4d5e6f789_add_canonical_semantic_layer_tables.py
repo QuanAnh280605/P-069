@@ -35,7 +35,10 @@ def upgrade() -> None:
     )
 
     # --- Expand semantic_columns ---
-    op.add_column("semantic_columns", sa.Column("is_time_dimension", sa.Boolean(), nullable=False, server_default=sa.text("false")))
+    op.add_column(
+        "semantic_columns",
+        sa.Column("is_time_dimension", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    )
     op.add_column("semantic_columns", sa.Column("allowed_values", sa.JSON(), nullable=True))
 
     # --- Expand semantic_metrics ---
@@ -81,9 +84,7 @@ def upgrade() -> None:
             sa.ForeignKeyConstraint(["from_entity_id"], ["semantic_tables.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["to_entity_id"], ["semantic_tables.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint(
-                "connection_id", "from_entity_id", "to_entity_id", name="uq_canonical_rel"
-            ),
+            sa.UniqueConstraint("connection_id", "from_entity_id", "to_entity_id", name="uq_canonical_rel"),
         )
 
     # --- Create metric_versions ---

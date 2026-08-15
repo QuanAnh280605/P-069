@@ -9,6 +9,9 @@ python-dotenv>=1.0.0
 # AI / LangChain / Monitoring
 langchain>=0.3.0
 langchain-openai>=0.3.0
+# Only needed when LLM_PROTOCOL=anthropic (native Anthropic Messages API).
+# Every OpenAI-compatible provider (openai/gemini/groq/mimo/vllm/...) uses langchain-openai.
+langchain-anthropic>=0.3.0
 langgraph>=0.2.0
 langsmith>=0.2.0
 

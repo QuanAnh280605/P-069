@@ -13,10 +13,26 @@ async def _seed(db: AsyncSession) -> int:
     )
     db.add(database)
     await db.flush()
-    table = SemanticTableModel(db_id=database.id, table_name="orders", business_name="Đơn hàng")
+    table = SemanticTableModel(
+        db_id=database.id,
+        table_name="orders",
+        business_name="Đơn hàng",
+        primary_key_column="id",
+    )
     db.add(table)
     await db.flush()
-    db.add(SemanticColumnModel(table_id=table.id, column_name="total", data_type="NUMERIC", business_name="Tổng"))
+    db.add_all(
+        [
+            SemanticColumnModel(
+                table_id=table.id,
+                column_name="id",
+                data_type="INTEGER",
+                business_name="ID",
+                is_primary_key=True,
+            ),
+            SemanticColumnModel(table_id=table.id, column_name="total", data_type="NUMERIC", business_name="Tổng"),
+        ]
+    )
     await db.commit()
     return database.id
 
@@ -40,6 +56,7 @@ async def test_create_update_approve_and_history(async_session: AsyncSession) ->
     db_id = await _seed(async_session)
     metric = await create_metric(async_session, db_id, {"definition": _definition(), "source": "ai"}, 1)
     assert metric.status == "pending_approval"
+    assert metric.definition["schema_version"] == 2
     assert metric.sql_template == ""
     updated = await update_metric(async_session, metric.id, {"definition": _definition("Doanh thu thuần")}, 1)
     assert updated.version == 2
