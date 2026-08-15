@@ -104,4 +104,4 @@ async def ainvoke_json(llm: Any, prompt: Any, *, retries: int = 1) -> Any:
                 "LLM returned non-JSON output (attempt %d) — retrying with stricter instruction", attempt + 1
             )
             current = _with_retry_instruction(prompt)
-    raise json.JSONDecodeError("no JSON in LLM response", "", 0)  # pragma: no cover
+    return None
