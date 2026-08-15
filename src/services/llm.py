@@ -1,6 +1,5 @@
 import logging
 import os
-import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
@@ -12,7 +11,6 @@ from langchain_openai import ChatOpenAI
 from src.config import Settings, get_settings, reload_settings
 
 logger = logging.getLogger(__name__)
-_reload_lock = threading.Lock()
 
 # Tắt LangSmith tracing nếu không có API key hợp lệ hoặc LANGCHAIN_TRACING_V2=false
 _langchain_key = os.environ.get("LANGCHAIN_API_KEY", "").strip()
@@ -233,15 +231,12 @@ def _env_file_changed() -> bool:
 def _settings_with_hot_reload() -> Settings:
     """Re-read .env when it changes on disk — development only."""
     settings = get_settings()
-    if settings.app_env != "development":
+    if settings.app_env != "development" or not _env_file_changed():
         return settings
-    with _reload_lock:
-        if not _env_file_changed():
-            return get_settings()
-        logger.info("Detected .env change — reloading LLM settings")
-        reload_settings()
-        _client_cache.clear()
-        return get_settings()
+    logger.info("Detected .env change — reloading LLM settings")
+    reload_settings()
+    _client_cache.clear()
+    return get_settings()
 
 
 def get_llm(role: str | None = None) -> BaseChatModel:

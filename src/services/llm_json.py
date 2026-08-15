@@ -43,9 +43,7 @@ def extract_json(text: str) -> Any:
         pass
 
     # 1. Try raw_decode from whichever delimiter '{' or '[' appears earliest
-    candidates = sorted(
-        [idx for c in ("{", "[") if (idx := cleaned.find(c)) != -1]
-    )
+    candidates = sorted([idx for c in ("{", "[") if (idx := cleaned.find(c)) != -1])
     for start_idx in candidates:
         try:
             obj, _ = json.JSONDecoder().raw_decode(cleaned[start_idx:])
@@ -103,5 +101,5 @@ async def ainvoke_json(llm: Any, prompt: Any, *, retries: int = 1) -> Any:
             logger.warning(
                 "LLM returned non-JSON output (attempt %d) — retrying with stricter instruction", attempt + 1
             )
-            current = _with_retry_instruction(prompt)
-    return None
+            current = _with_retry_instruction(current)
+    raise json.JSONDecodeError("no JSON in LLM response", "", 0)  # pragma: no cover
