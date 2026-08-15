@@ -12,7 +12,9 @@ The current evaluator is a deterministic, domain-specific scorer for schema disc
 semantic enrichment, business metric generation, query compilation, and SQL guardrails.
 Its existing reports demonstrate framework flow with recorded candidates derived from a
 mock Golden Dataset. Those reports are smoke-test evidence, not an independent product
-quality benchmark.
+quality benchmark. The production Agent pipeline now emits usable outputs for enrichment,
+metric suggestion, query compilation, and execution, so real Agent output must become the
+primary candidate source for benchmark and release runs.
 
 The next framework must adopt a Ragas-style evaluation model:
 
@@ -32,6 +34,8 @@ The next framework must adopt a Ragas-style evaluation model:
 - Separate smoke fixtures from independently reviewed benchmark datasets.
 - Make runs reproducible through dataset, rubric, prompt, model, and code provenance.
 - Reuse tested evaluator logic instead of rewriting SQL and scoring safety primitives.
+- Capture candidates directly from real Agent entrypoints without exposing Golden Dataset
+  references to candidate generation.
 
 ## 3. Non-goals
 
@@ -58,10 +62,14 @@ quality gates, or final reporting. This keeps the framework Ragas-compatible wit
 forcing security-critical or complex typed outputs into an LLM-centric abstraction.
 
 ```text
-Golden Dataset + Candidate Output
-                |
-                v
-        EvaluationSample[]
+Golden Input ----> AgentCandidateProvider ----> Captured Candidate
+     |                                            |
+     +------------------ case_id -----------------+
+                          |
+Golden Reference ---------+   (scoring phase only)
+                          |
+                          v
+                  EvaluationSample[]
                 |
        +--------+---------+
        |                  |
@@ -101,7 +109,7 @@ Deterministic Metrics  AI Judge Metrics
 | Enrichment entity and dimension scoring | `EntityF1`, `DimensionF1` |
 | Business-name comparison | `BusinessNameSimilarity` |
 | Metric identity and fields | `MetricIdentityAccuracy`, field-specific metrics |
-| Canonical Query Model comparison | `CanonicalQueryAccuracy` |
+| Compiler request and selected-field validation | `RequestValidationAccuracy`, `SelectionPreservationAccuracy` |
 | SQL structural comparison | `SqlAstEquivalence` |
 | Guarded execution comparison | `SqlExecutionAccuracy` |
 | Guardrail case comparisons | Four independent guardrail metrics |
@@ -125,17 +133,19 @@ Deterministic Metrics  AI Judge Metrics
   "sample_id": "ecommerce_query_001",
   "task": "query_compilation",
   "input": {
-    "request": "Doanh thu thuần theo tháng",
-    "schema_context": {}
+    "metric_names": ["net_revenue"],
+    "dimension_names": ["order_month"],
+    "filters": [],
+    "limit": 100
   },
   "reference": {
-    "canonical_query": {},
     "sql": "SELECT ...",
     "expected_result": []
   },
   "response": {
-    "canonical_query": {},
-    "sql": "SELECT ..."
+    "sql": "SELECT ...",
+    "parameters": {},
+    "metadata": {}
   },
   "metadata": {
     "tags": ["net_revenue", "medium"],
@@ -146,6 +156,9 @@ Deterministic Metrics  AI Judge Metrics
 
 Task-specific Pydantic models validate `input`, `reference`, and `response`. The common
 envelope enables a Ragas-style sample table without weakening typed domain contracts.
+
+The candidate-generation process receives only `sample_id`, `task`, `input`, and permitted
+metadata. The runner joins `reference` only after candidate capture has completed.
 
 ### 6.2 Metric interface
 
@@ -189,6 +202,76 @@ class EvaluationMetric(Protocol):
 Allowed statuses are `passed`, `failed`, `error`, and `not_applicable`. A missing required
 metric makes the run incomplete; it is not silently removed from scoring.
 
+### 6.4 Direct Agent candidate acquisition
+
+`AgentCandidateProvider` is the primary provider for benchmark and release runs:
+
+```python
+class CandidateProvider(Protocol):
+    async def generate(
+        self,
+        value: EvaluationInput,
+        context: CandidateRunContext,
+    ) -> CapturedCandidate:
+        ...
+```
+
+`EvaluationInput` deliberately has no `reference` field. Candidate generation and scoring
+are separate phases and may run in separate processes:
+
+```text
+Phase A — generation
+  load public benchmark inputs
+  -> invoke real Agent entrypoints
+  -> validate and persist immutable candidate artifacts
+  -> close candidate generation
+
+Phase B — scoring
+  load candidate artifacts by case_id
+  -> load private Golden references
+  -> construct EvaluationSamples
+  -> run deterministic and AI Judge metrics
+```
+
+The provider delegates by task:
+
+| Task | Real Agent entrypoint | Captured candidate |
+|---|---|---|
+| Discovery | `src.agents.graph.agent` through `introspect_node` | `AgentState.raw_schema` |
+| Enrichment | The same graph through `enrich_node` | `AgentState.enriched_schema` |
+| Metric suggestion | `on_demand_metric_suggest_node` for schema-wide generation; `generate_metrics_from_prompt` for prompt-specific cases | `suggested_metrics` or typed metric suggestions |
+| Compiler | `SemanticQueryCompiler.compile` using selected metric/dimension inputs and an isolated metadata store populated from captured Agent semantic output | compiled SQL, parameters, and compiler metadata |
+| Query execution | `execute_compiled_query` against the benchmark's isolated live SQLite target | columns, rows, and row count |
+| Guardrails | The real read-only validator/compiler boundary used by Flow 2 | acceptance, transformed SQL/limit/timeout, or error code |
+
+The Flow 1 graph is invoked only through the point required by the case. Evaluation capture
+stops before the HITL save node unless persistence is part of the scenario. Compiler cases
+use an isolated metadata store and never write to the target database.
+
+Adapters translate captured application output into evaluator candidate models; they must
+not repair, enrich, or default a semantically invalid Agent result. Mapping failures become
+explicit candidate errors.
+
+Every captured candidate records:
+
+- `candidate_source = "agent_live"` or `"agent_recorded"`.
+- Source commit and Agent/prompt/model versions.
+- Task entrypoint and configuration.
+- Generation timestamp, latency, token usage, and error metadata.
+- A content hash used for immutable replay and judge caching.
+
+Recorded mode remains supported, but it replays previously captured **real Agent output**.
+Golden-derived recorded candidates are allowed only under `run_type="smoke"` and cannot
+produce a valid benchmark or release score.
+
+Two evaluation profiles are supported:
+
+- `pipeline`: primary end-to-end profile. Each downstream stage consumes the actual output
+  of the preceding Agent stage, so upstream errors propagate honestly.
+- `component`: diagnostic profile. A stage receives reviewed upstream fixtures but still
+  generates its own candidate; this isolates the quality of that stage. Component scores
+  cannot replace the pipeline release gate.
+
 ## 7. Metric Catalog
 
 ### 7.1 Discovery
@@ -220,13 +303,16 @@ All Discovery metrics are deterministic.
 
 ### 7.4 Query compiler
 
-- `canonical_query_accuracy`
+- `request_validation_accuracy`
+- `selection_preservation_accuracy`
 - `sql_ast_equivalence`
 - `sql_execution_accuracy`
 - `result_schema_accuracy`
-- `negative_intent_accuracy`
-- `intent_alignment` — AI Judge, used only when deterministic intent comparison cannot
-  express an accepted semantic variation
+- `invalid_selection_rejection`
+
+The product's Flow 2 starts from explicit Metric and Dimension selections and compiles them
+deterministically. It does not perform free-form natural-language-to-CQM generation, so the
+Compiler suite has no CQM or AI Judge metric.
 
 ### 7.5 Guardrails
 
@@ -277,8 +363,8 @@ Default semantic rubric:
 | Absence of unsupported assumptions | 20% |
 | Clarity | 15% |
 
-AI Judge contributes no more than 30% of Enrichment, 25% of Business Metrics, and 10% of
-Compiler scores. It contributes 0% to Discovery and Guardrails.
+AI Judge contributes no more than 30% of Enrichment and 25% of Business Metrics. It
+contributes 0% to Discovery, Compiler, and Guardrails.
 
 ## 9. Scoring and Quality Gates
 
@@ -326,8 +412,8 @@ A high AI Judge score or high overall score never overrides a critical failure.
 | Run type | Purpose | Can support a quality claim? |
 |---|---|---|
 | `smoke` | Validate framework flow with synthetic or self-derived candidates | No |
-| `benchmark` | Measure quality against an independent reviewed dataset | Yes |
-| `release` | Benchmark plus all mandatory quality gates | Yes |
+| `benchmark` | Score direct or replayed real Agent candidates against an independent reviewed dataset | Yes |
+| `release` | Run the direct Agent pipeline and enforce all mandatory quality gates | Yes |
 
 Benchmark data must be separated from framework unit-test fixtures. Every run records:
 
@@ -337,6 +423,11 @@ Benchmark data must be separated from framework unit-test fixtures. Every run re
 - Source commit and environment.
 - Candidate model and prompt versions when applicable.
 - Judge model, prompt, and rubric versions.
+- Candidate source and evaluation profile (`pipeline` or `component`).
+
+A release run requires `candidate_source="agent_live"` and `profile="pipeline"`. A replayed
+real Agent candidate may support reproducible benchmark analysis, but not the final release
+decision.
 
 ## 11. Aggregation and Reporting
 
@@ -377,8 +468,11 @@ Top-level output:
 ## 12. Execution Flow
 
 ```text
-Load and validate dataset
-  -> obtain live or recorded candidate outputs
+Load and validate public benchmark inputs
+  -> invoke AgentCandidateProvider without references
+  -> capture immutable real Agent outputs
+  -> load private Golden references
+  -> join inputs, references, and candidates by case_id
   -> construct typed EvaluationSamples
   -> select metrics by task
   -> run deterministic metrics
@@ -391,8 +485,10 @@ Load and validate dataset
   -> write JSON, CSV, and Markdown reports
 ```
 
-Recorded output can be reevaluated without calling the product, target database, or LLM
-again. Live generation and scoring remain separate stages.
+Recorded real Agent output can be reevaluated without calling the product, target database,
+or LLM again. Live Agent generation and scoring remain separate stages. A report explicitly
+identifies direct, replayed, or Golden-derived candidates so these evidence levels cannot be
+confused.
 
 ## 13. Error Handling and Safety
 
@@ -441,38 +537,47 @@ silently pass a release gate.
 - Retain current self-derived candidates as smoke fixtures.
 - Build and approve an independent benchmark dataset.
 - Add negative, boundary, and adversarial cases plus leakage controls.
+- Split public generation inputs from private scoring references.
 
-### Phase 3 — Ragas-style metric engine
+### Phase 3 — Direct Agent capture
+
+- Implement `AgentCandidateProvider` and task-specific Agent drivers.
+- Invoke the Flow 1 graph, metric-generation service, compiler, execution service, and real
+  guardrail boundary through application entrypoints.
+- Capture immutable candidate bundles with provenance before loading references.
+- Support primary `pipeline` and diagnostic `component` profiles.
+
+### Phase 4 — Ragas-style metric engine
 
 - Implement metric protocol, registry, task routing, execution context, and error isolation.
 - Support deterministic and AI Judge executor types.
 
-### Phase 4 — Deterministic migration
+### Phase 5 — Deterministic migration
 
 - Wrap existing scoring, enrichment, metric, compiler, execution, and guardrail logic.
 - Verify score compatibility with the current evaluator.
 
-### Phase 5 — Ragas and AI Judge integration
+### Phase 6 — Ragas and AI Judge integration
 
 - Add and pin the Ragas dependency.
 - Implement the `get_llm()` adapter, structured judge metrics, cache, timeout, and retry.
 - Add business-semantic, formula-semantic, and intent-alignment metrics.
 
-### Phase 6 — Aggregation and gates
+### Phase 7 — Aggregation and gates
 
 - Implement weighted suite/overall scores, coverage, error rate, run status, critical gates,
   and baseline regression checks.
 
-### Phase 7 — Reporting
+### Phase 8 — Reporting
 
 - Implement versioned JSON, flat CSV, and team-facing Markdown reports.
 
-### Phase 8 — Verification and calibration
+### Phase 9 — Verification and calibration
 
 - Complete unit, contract, integration, compatibility, adversarial, and calibration tests.
 - Run the old and new evaluators in parallel and explain every material difference.
 
-### Phase 9 — Adoption
+### Phase 10 — Adoption
 
 - Establish an approved baseline.
 - Add benchmark and release profiles to CI.
@@ -481,6 +586,11 @@ silently pass a release gate.
 ## 16. Acceptance Criteria
 
 - A sample can be scored by deterministic and AI Judge metrics in one run.
+- A benchmark/release candidate is obtained from real Agent output and never cloned from a
+  Golden reference.
+- Candidate generation can execute with no access to the private reference payload.
+- Discovery, enrichment, metric, compiler, execution, and guardrail outputs are captured
+  through explicit application adapters.
 - All metric implementations return the unified `MetricResult` contract.
 - Reports include overall score, score validity, coverage, suite scores, metric summaries,
   gates, per-sample results, and provenance.
@@ -490,16 +600,18 @@ silently pass a release gate.
 - No production test calls a real LLM unintentionally; unit and integration tests mock it.
 - AI Judge has documented calibration evidence before it becomes a release gate.
 - Smoke results cannot be presented as benchmark or release results.
+- Release reports require direct Agent candidates and the end-to-end pipeline profile.
 
 ## 17. Recommended Implementation Order
 
 1. Contracts and metric catalog.
 2. Independent benchmark dataset.
-3. Metric engine and deterministic adapters.
-4. Aggregation, gates, and reporting.
-5. Ragas/AI Judge integration.
-6. Judge calibration.
-7. Parallel migration and CI adoption.
+3. Direct Agent candidate capture with reference isolation.
+4. Metric engine and deterministic adapters.
+5. Aggregation, gates, and reporting.
+6. Ragas/AI Judge integration.
+7. Judge calibration.
+8. Parallel migration and CI adoption.
 
 This order makes deterministic benchmark evidence trustworthy before adding the cost and
 variability of AI Judge evaluation.
