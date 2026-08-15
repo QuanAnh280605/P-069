@@ -30,6 +30,7 @@ from src.models.db import (
 from src.models.metric_definition import MetricDefinition
 from src.models.schema_metadata import RawSchemaMetadata
 from src.services.llm import get_llm
+from src.services.llm_json import ainvoke_json
 from src.services.metric_definitions import validate_metric_definition, with_metric_status
 
 logger = logging.getLogger(__name__)
@@ -338,25 +339,22 @@ async def _call_llm_enrichment(raw_schema: RawSchemaMetadata, dialect: str) -> d
     logger.info(
         "[AI Semantic Agent] Sending schema prompt (%d tables, dialect=%s) to LLM...", len(raw_schema.tables), dialect
     )
-    llm = get_llm()
-    response = await llm.ainvoke(prompt)
-    content = str(response.content).strip()
-    logger.info("[AI Semantic Agent] Received LLM response (%d chars)", len(content))
-
-    if content.startswith("```"):
-        lines = content.split("\n")
-        content = "\n".join(lines[1:-1])
-
+    llm = get_llm(role="enrich")
     try:
-        res_json = json.loads(content)
-        logger.info(
-            "[AI Semantic Agent] Successfully parsed LLM response JSON containing %d enriched table definitions",
-            len(res_json),
-        )
-        return res_json
+        res_json = await ainvoke_json(llm, prompt)
     except json.JSONDecodeError:
         logger.warning("[AI Semantic Agent] LLM enrichment response was not valid JSON, returning empty enrichment")
         return {}
+
+    if not isinstance(res_json, dict):
+        logger.warning("[AI Semantic Agent] LLM enrichment JSON was not an object, returning empty enrichment")
+        return {}
+
+    logger.info(
+        "[AI Semantic Agent] Successfully parsed LLM response JSON containing %d enriched table definitions",
+        len(res_json),
+    )
+    return res_json
 
 
 async def _upsert_semantic_table(

@@ -173,8 +173,25 @@ Nội dung `.env` chính:
 APP_ENV=development
 LOG_LEVEL=INFO
 
-# OpenAI API Key (bắt buộc cho LLM Nodes)
+# LLM: preset có sẵn (openai | gemini | groq | mimo | anthropic)
+# Alias: google -> gemini, claude -> anthropic
+LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-proj-xxxx...
+MODEL_NAME=gpt-4o-mini
+
+# LLM: hoặc trỏ tới BẤT KỲ endpoint OpenAI-compatible (vLLM, Ollama, proxy nội bộ,
+# DeepSeek, OpenRouter...) — không cần sửa code, 3 biến này thắng mọi preset ở trên
+# LLM_PROVIDER=custom
+# LLM_API_BASE=http://localhost:8000/v1
+# LLM_API_KEY=sk-local
+# LLM_MODEL=qwen2.5-32b-instruct
+
+# LLM: model riêng cho từng bước (để trống = dùng model chung ở trên)
+# LLM_MODEL_ENRICH=llama-3.1-8b-instant     # sinh tên nghiệp vụ cho schema
+# LLM_MODEL_METRIC=llama-3.3-70b-versatile  # đề xuất business metric
+
+# LLM: chỉ set khi endpoint KHÔNG phải OpenAI-compatible (hỗ trợ: openai | anthropic)
+# LLM_PROTOCOL=anthropic
 
 # Secret Key mã hóa Fernet cho Target DB Connection URL
 ENCRYPTION_KEY=your_fernet_base64_key_here
@@ -182,6 +199,19 @@ ENCRYPTION_KEY=your_fernet_base64_key_here
 # Metadata Store DB Connection (PostgreSQL with asyncpg driver)
 DATABASE_URL=postgresql+asyncpg://dev:devpassword@localhost:5432/semantic_layer_dev
 ```
+
+Thứ tự ưu tiên khi resolve LLM (lấy giá trị khác rỗng đầu tiên): `LLM_API_BASE` →
+`<PROVIDER>_API_BASE` → default trong code; `LLM_API_KEY` → `<PROVIDER>_API_KEY` →
+`OPENAI_API_KEY`; `LLM_MODEL_<ROLE>` → `LLM_MODEL` → `MODEL_NAME` → default theo
+provider. Provider lạ mà thiếu `LLM_API_BASE`, hoặc thiếu API key với endpoint remote,
+sẽ báo lỗi rõ ràng ngay lúc khởi tạo client (không âm thầm gọi `api.openai.com`);
+endpoint `localhost` được miễn API key. Xem [`.env.example`](./.env.example) cho danh
+sách biến đầy đủ.
+
+Đổi provider/model chỉ cần sửa `.env`: khi `APP_ENV=development`, `get_llm()` tự phát
+hiện `.env` thay đổi (theo mtime) và tạo lại client — không cần restart server. Ở môi
+trường khác, gọi `reload_llm_config()` từ `src/services/llm.py` hoặc restart. Client
+được cache theo config nên nhiều node dùng cùng model sẽ dùng chung một instance.
 
 *(Mẹo: Bạn có thể sinh Fernet Key nhanh bằng Python: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`)*
 
