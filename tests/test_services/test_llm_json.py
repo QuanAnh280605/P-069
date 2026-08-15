@@ -55,6 +55,11 @@ def test_extract_json_supports_array_payload() -> None:
     assert extract_json('Kết quả: [{"id": 1}, {"id": 2}]') == [{"id": 1}, {"id": 2}]
 
 
+def test_extract_json_handles_trailing_text_without_brackets() -> None:
+    raw = '{"name": "Doanh thu", "value": 100} và thêm các thông tin giải thích ở cuối không có ngoặc'
+    assert extract_json(raw) == {"name": "Doanh thu", "value": 100}
+
+
 def test_extract_json_raises_on_non_json() -> None:
     with pytest.raises(json.JSONDecodeError):
         extract_json("Xin lỗi, tôi không thể trả lời.")

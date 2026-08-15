@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 import sqlglot
@@ -109,48 +108,8 @@ Schema database:\n{schema_text}"""
 
 
 def _extract_json_from_text(text: str) -> Any:
-    """Extract JSON object or array from LLM response text robustly."""
-    cleaned = text.strip()
-
-    # 1. Check markdown fenced code block: ```json ... ```
-    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned, re.IGNORECASE)
-    if match:
-        code_content = match.group(1).strip()
-        try:
-            return json.loads(code_content)
-        except json.JSONDecodeError:
-            cleaned = code_content
-
-    # 2. Try direct json.loads
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-
-    # 3. Try raw_decode from first '{' or '['
-    for start_char in ("{", "["):
-        start_idx = cleaned.find(start_char)
-        if start_idx != -1:
-            try:
-                decoder = json.JSONDecoder()
-                obj, _ = decoder.raw_decode(cleaned[start_idx:])
-                return obj
-            except json.JSONDecodeError:
-                pass
-
-    # 4. Slicing fallback
-    start_obj, end_obj = cleaned.find("{"), cleaned.rfind("}")
-    if start_obj != -1 and end_obj > start_obj:
-        try:
-            return json.loads(cleaned[start_obj : end_obj + 1])
-        except json.JSONDecodeError:
-            pass
-
-    start_arr, end_arr = cleaned.find("["), cleaned.rfind("]")
-    if start_arr != -1 and end_arr > start_arr:
-        return json.loads(cleaned[start_arr : end_arr + 1])
-
-    raise ValueError(f"No valid JSON found in LLM output: {text[:150]}")
+    """Extract JSON object or array from LLM response text."""
+    return extract_json(text)
 
 
 def _parse_metric_payload(payload: Any) -> list[MetricDefinition]:

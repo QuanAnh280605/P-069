@@ -31,7 +31,7 @@ def strip_code_fence(text: str) -> str:
 
 
 def extract_json(text: str) -> Any:
-    """Parse JSON from LLM text, tolerating code fences and surrounding prose.
+    """Parse JSON from LLM text, tolerating code fences, surrounding prose, and trailing text.
 
     Raises:
         json.JSONDecodeError: when no JSON object or array can be recovered.
@@ -40,16 +40,29 @@ def extract_json(text: str) -> Any:
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        # Try both shapes: an array of objects starts with "[" but also contains "{".
-        for opener, closer in (("{", "}"), ("[", "]")):
-            start, end = cleaned.find(opener), cleaned.rfind(closer)
-            if start == -1 or end <= start:
-                continue
+        pass
+
+    # 1. Try raw_decode from whichever delimiter '{' or '[' appears earliest
+    candidates = sorted(
+        [idx for c in ("{", "[") if (idx := cleaned.find(c)) != -1]
+    )
+    for start_idx in candidates:
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(cleaned[start_idx:])
+            return obj
+        except json.JSONDecodeError:
+            pass
+
+    # 2. Try slicing between first and last delimiters (handles messy preamble and postamble)
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start, end = cleaned.find(opener), cleaned.rfind(closer)
+        if start != -1 and end > start:
             try:
                 return json.loads(cleaned[start : end + 1])
             except json.JSONDecodeError:
-                continue
-        raise
+                pass
+
+    raise json.JSONDecodeError("no JSON in LLM response", cleaned, 0)
 
 
 def response_text(response: Any) -> str:

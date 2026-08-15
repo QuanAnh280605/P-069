@@ -30,6 +30,8 @@ from src.models.db import (
 from src.models.metric_definition import MetricDefinition
 from src.models.schema_metadata import RawSchemaMetadata
 from src.services.llm import get_llm
+from src.services.llm_json import ainvoke_json
+from src.services.metric_definition_resolver import MetricDefinitionResolver
 from src.services.metric_definitions import validate_metric_definition, with_metric_status
 from src.services.query_compiler import SemanticQueryCompiler
 
