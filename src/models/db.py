@@ -12,6 +12,7 @@ Includes tables:
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -269,11 +270,17 @@ class SemanticMetricModel(Base):
     )
 
 
+def _relationship_key_default(context: Any) -> str:
+    """Build a deterministic relationship identity for direct ORM callers."""
+    parameters = context.get_current_parameters()
+    return ":".join(str(parameters.get(name, "")) for name in ("from_entity_id", "join_condition", "to_entity_id"))
+
+
 class CanonicalRelationshipModel(Base):
     """Represents a canonical relationship between two semantic tables."""
 
     __tablename__ = "canonical_relationships"
-    __table_args__ = (UniqueConstraint("connection_id", "from_entity_id", "to_entity_id", name="uq_canonical_rel"),)
+    __table_args__ = (UniqueConstraint("connection_id", "relationship_key", name="uq_canonical_rel_key"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     connection_id: Mapped[int] = mapped_column(
@@ -287,6 +294,10 @@ class CanonicalRelationshipModel(Base):
     )
     relationship_type: Mapped[str] = mapped_column(String(50), nullable=False)
     join_condition: Mapped[str] = mapped_column(Text, nullable=False)
+    relationship_key: Mapped[str] = mapped_column(String(500), nullable=False, default=_relationship_key_default)
+    constraint_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    column_pairs: Mapped[list[dict[str, int]]] = mapped_column(JSON, nullable=False, default=list)
+    validation_status: Mapped[str] = mapped_column(String(20), nullable=False, default="valid")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     database: Mapped["SemanticDatabaseModel"] = relationship("SemanticDatabaseModel", back_populates="relationships")

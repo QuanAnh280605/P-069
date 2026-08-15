@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from src.models.metric_definition import FilterOperator, MetricDefinition
 from src.models.raw_schema import RawSchema
@@ -131,8 +131,11 @@ class MetricResponse(BaseModel):
     """Return a persisted canonical metric definition."""
 
     metric_id: int
-    definition: MetricDefinition
+    definition: MetricDefinition | None = None
     source: Literal["ai", "manual"]
+    name: str = ""
+    description: str = ""
+    sql_template: str = ""
 
 
 class MetricVersionResponse(BaseModel):
@@ -142,6 +145,7 @@ class MetricVersionResponse(BaseModel):
     metric_id: int
     version: int
     definition: MetricDefinition | None = None
+    formula: str = ""
     changed_by: int | None = None
     change_reason: str = ""
     created_at: datetime
@@ -328,13 +332,46 @@ class SemanticQueryFilter(BaseModel):
     value: Any = None
 
 
+TimeGrain = Literal["day", "week", "month", "quarter", "year"]
+
+
+class DimensionSelection(BaseModel):
+    column_id: int
+    time_grain: TimeGrain | None = None
+
+
+class SemanticQuerySpec(BaseModel):
+    metric_ids: list[int] = Field(..., min_length=1)
+    dimensions: list[DimensionSelection] = Field(default_factory=list)
+    filters: list[SemanticQueryFilter] = Field(default_factory=list)
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
 class SemanticQueryRequest(BaseModel):
     """Request payload for executing a semantic query (Flow 2)."""
 
     metric_ids: list[int] = Field(..., min_length=1, description="List of approved metric IDs")
-    dimension_ids: list[int] = Field(default_factory=list, description="List of column IDs for GROUP BY dimensions")
+    dimensions: list[DimensionSelection] = Field(default_factory=list)
+    dimension_ids: list[int] = Field(default_factory=list, description="Deprecated raw dimension IDs")
     filters: list[SemanticQueryFilter] = Field(default_factory=list)
     limit: int = Field(default=100, ge=1, le=1000, description="Max rows to return (default 100, max 1000)")
+
+    @model_validator(mode="after")
+    def reject_mixed_dimension_contracts(self) -> SemanticQueryRequest:
+        """Reject ambiguous requests using both dimension representations."""
+        if self.dimensions and self.dimension_ids:
+            raise ValueError("Use either dimensions or dimension_ids, not both")
+        return self
+
+    def to_spec(self) -> SemanticQuerySpec:
+        """Convert the compatibility request into canonical compiler input."""
+        dimensions = self.dimensions or [DimensionSelection(column_id=item) for item in self.dimension_ids]
+        return SemanticQuerySpec(
+            metric_ids=self.metric_ids,
+            dimensions=dimensions,
+            filters=self.filters,
+            limit=self.limit,
+        )
 
 
 class SemanticQueryResponse(BaseModel):
@@ -345,6 +382,15 @@ class SemanticQueryResponse(BaseModel):
     columns: list[str] = Field(default_factory=list, description="Column names in result")
     rows: list[list[Any]] = Field(default_factory=list, description="Result rows")
     row_count: int = Field(default=0, description="Number of rows returned")
+
+
+class SemanticQueryCompileResponse(BaseModel):
+    """Return a deterministic query preview without executing target data."""
+
+    sql: str
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    diagnostics: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -459,3 +505,33 @@ class MetricHistoryResponse(BaseModel):
     metric_id: int
     metric_name: str
     versions: list[MetricVersionItem]
+
+
+# ---------------------------------------------------------------------------
+# Chat Orchestrator (Multi-Agent)
+# ---------------------------------------------------------------------------
+
+
+class ChatRequest(BaseModel):
+    """Request payload cho chatbot orchestrator endpoint."""
+
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="Câu hỏi hoặc tin nhắn ngôn ngữ tự nhiên từ người dùng",
+    )
+
+
+class ChatResponse(BaseModel):
+    """Response từ chatbot orchestrator sau khi phân loại intent."""
+
+    intent: str = Field(..., description="'chitchat' hoặc 'metric_query'")
+    chat_response: str | None = Field(
+        default=None,
+        description="Câu trả lời ngôn ngữ tự nhiên (khi intent = 'chitchat')",
+    )
+    suggestions: list[Any] | None = Field(
+        default=None,
+        description="Danh sách Business Metrics JSON (khi intent = 'metric_query')",
+    )

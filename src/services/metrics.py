@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import sqlglot
@@ -30,21 +31,46 @@ def extract_schema_summary(schema_dict: dict[str, Any]) -> tuple[dict[str, set[s
     """Build a valid-column index and readable schema prompt."""
     valid: dict[str, set[str]] = {}
     lines: list[str] = []
-    for table_name, table in schema_dict.items():
+    tables_data = schema_dict.get("tables", schema_dict)
+    if isinstance(tables_data, list):
+        items = [(t.get("table_name") or t.get("name", ""), t) for t in tables_data if isinstance(t, dict)]
+    elif isinstance(tables_data, dict):
+        items = list(tables_data.items())
+    else:
+        items = []
+    for table_name, table in items:
+        if not isinstance(table, dict):
+            continue
+        t_name = table.get("table_name") or table.get("name") or table_name or "unknown"
         columns = table.get("columns", [])
-        names = {column.get("column_name") or column.get("name") for column in columns}
-        valid[table_name] = {name for name in names if name}
-        lines.append(f"Entity `{table_name}`:")
+        names = {col.get("column_name") or col.get("name") for col in columns if isinstance(col, dict)}
+        valid[t_name] = {name for name in names if name}
+        business_name = table.get("business_name") or t_name
+        description = table.get("description") or ""
+        lines.append(f"Entity `{t_name}` ({business_name}): {description}")
         lines.extend(_format_columns(columns))
     return valid, "\n".join(lines)
 
 
 def _format_columns(columns: list[dict[str, Any]]) -> list[str]:
-    return [
-        f"- `{column.get('column_name') or column.get('name')}` ({column.get('data_type', 'TEXT')})"
-        for column in columns
-        if column.get("column_name") or column.get("name")
-    ]
+    lines: list[str] = []
+    for column in columns:
+        name = column.get("column_name") or column.get("name")
+        if not name:
+            continue
+        flags = [
+            label
+            for enabled, label in (
+                (column.get("is_primary_key"), "PK/grain"),
+                (column.get("is_foreign_key"), "FK"),
+                (column.get("is_nullable"), "nullable"),
+            )
+            if enabled
+        ]
+        business = column.get("business_name") or name
+        suffix = f"; {', '.join(flags)}" if flags else ""
+        lines.append(f"- `{name}` ({column.get('data_type', 'TEXT')}; {business}{suffix})")
+    return lines
 
 
 def build_metric_system_prompt(schema_text: str) -> str:
@@ -76,16 +102,55 @@ Quy tắc BẮT BUỘC:
 1. formula.function chỉ dùng: SUM, COUNT, COUNT_DISTINCT, AVG, MIN, MAX.
 2. formula.expression chỉ gồm cột của base_entity, số và các toán tử (+, -, *, /). Không viết SQL, subquery, alias.
 3. base_entity và các cột phải tồn tại chính xác trong Schema dưới đây.
+4. Ưu tiên base_entity có PK/grain rõ ràng; không giả định quan hệ hoặc ý nghĩa không có trong schema.
+5. Filter chỉ dùng cột của base_entity và giá trị được người dùng nêu rõ hoặc có ý nghĩa chắc chắn.
 
 Schema database:\n{schema_text}"""
 
 
 def _extract_json_from_text(text: str) -> Any:
-    """Extract JSON object or array from LLM response text.
+    """Extract JSON object or array from LLM response text robustly."""
+    cleaned = text.strip()
 
-    Thin wrapper kept for existing callers — logic lives in services.llm_json.
-    """
-    return extract_json(text)
+    # 1. Check markdown fenced code block: ```json ... ```
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned, re.IGNORECASE)
+    if match:
+        code_content = match.group(1).strip()
+        try:
+            return json.loads(code_content)
+        except json.JSONDecodeError:
+            cleaned = code_content
+
+    # 2. Try direct json.loads
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # 3. Try raw_decode from first '{' or '['
+    for start_char in ("{", "["):
+        start_idx = cleaned.find(start_char)
+        if start_idx != -1:
+            try:
+                decoder = json.JSONDecoder()
+                obj, _ = decoder.raw_decode(cleaned[start_idx:])
+                return obj
+            except json.JSONDecodeError:
+                pass
+
+    # 4. Slicing fallback
+    start_obj, end_obj = cleaned.find("{"), cleaned.rfind("}")
+    if start_obj != -1 and end_obj > start_obj:
+        try:
+            return json.loads(cleaned[start_obj : end_obj + 1])
+        except json.JSONDecodeError:
+            pass
+
+    start_arr, end_arr = cleaned.find("["), cleaned.rfind("]")
+    if start_arr != -1 and end_arr > start_arr:
+        return json.loads(cleaned[start_arr : end_arr + 1])
+
+    raise ValueError(f"No valid JSON found in LLM output: {text[:150]}")
 
 
 def _parse_metric_payload(payload: Any) -> list[MetricDefinition]:
