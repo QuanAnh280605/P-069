@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from typing import Any
 
 import sqlglot
@@ -13,6 +11,7 @@ from sqlglot import exp
 from src.models.metric_definition import MetricDefinition
 from src.models.schemas import MetricSuggestionItem, MetricSuggestions
 from src.services.llm import get_llm
+from src.services.llm_json import ainvoke_json, extract_json
 
 logger = logging.getLogger(__name__)
 
@@ -109,48 +108,8 @@ Schema database:\n{schema_text}"""
 
 
 def _extract_json_from_text(text: str) -> Any:
-    """Extract JSON object or array from LLM response text robustly."""
-    cleaned = text.strip()
-
-    # 1. Check markdown fenced code block: ```json ... ```
-    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned, re.IGNORECASE)
-    if match:
-        code_content = match.group(1).strip()
-        try:
-            return json.loads(code_content)
-        except json.JSONDecodeError:
-            cleaned = code_content
-
-    # 2. Try direct json.loads
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-
-    # 3. Try raw_decode from first '{' or '['
-    for start_char in ("{", "["):
-        start_idx = cleaned.find(start_char)
-        if start_idx != -1:
-            try:
-                decoder = json.JSONDecoder()
-                obj, _ = decoder.raw_decode(cleaned[start_idx:])
-                return obj
-            except json.JSONDecodeError:
-                pass
-
-    # 4. Slicing fallback
-    start_obj, end_obj = cleaned.find("{"), cleaned.rfind("}")
-    if start_obj != -1 and end_obj > start_obj:
-        try:
-            return json.loads(cleaned[start_obj : end_obj + 1])
-        except json.JSONDecodeError:
-            pass
-
-    start_arr, end_arr = cleaned.find("["), cleaned.rfind("]")
-    if start_arr != -1 and end_arr > start_arr:
-        return json.loads(cleaned[start_arr : end_arr + 1])
-
-    raise ValueError(f"No valid JSON found in LLM output: {text[:150]}")
+    """Extract JSON object or array from LLM response text."""
+    return extract_json(text)
 
 
 def _parse_metric_payload(payload: Any) -> list[MetricDefinition]:
@@ -182,7 +141,7 @@ async def _invoke_llm(prompt: str, schema_text: str) -> list[MetricDefinition]:
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": prompt},
     ]
-    raw_llm = get_llm()
+    raw_llm = get_llm(role="metric")
     try:
         structured = raw_llm.with_structured_output(MetricSuggestions)
         response = await structured.ainvoke(messages)
@@ -193,9 +152,7 @@ async def _invoke_llm(prompt: str, schema_text: str) -> list[MetricDefinition]:
         logger.info("Structured output fallback triggered: %s", exc)
 
     try:
-        resp = await raw_llm.ainvoke(messages)
-        raw_text = resp.content if hasattr(resp, "content") else str(resp)
-        parsed = _extract_json_from_text(raw_text)
+        parsed = await ainvoke_json(raw_llm, messages)
         return _parse_metric_payload(parsed)
     except Exception as exc:
         logger.error("LLM metric extraction failed: %s", exc)

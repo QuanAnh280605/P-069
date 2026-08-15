@@ -9,8 +9,8 @@ from src.agents.state import AgentState
 from src.models.metric_definition import MetricDefinition
 from src.models.schemas import MetricSuggestionItem, MetricSuggestions
 from src.services.llm import get_llm
+from src.services.llm_json import ainvoke_json
 from src.services.metrics import (
-    _extract_json_from_text,
     _parse_metric_payload,
     build_metric_system_prompt,
     extract_schema_summary,
@@ -47,7 +47,7 @@ async def on_demand_metric_suggest_node(state: AgentState) -> dict[str, Any]:
 
 async def _generate_definitions_with_fallback(prompt: Any) -> list[MetricDefinition]:
     """Try structured output first, then fallback to text parsing."""
-    raw_llm = get_llm()
+    raw_llm = get_llm(role="metric")
     try:
         structured = raw_llm.with_structured_output(MetricSuggestions)
         response = await structured.ainvoke(prompt)
@@ -57,7 +57,5 @@ async def _generate_definitions_with_fallback(prompt: Any) -> list[MetricDefinit
     except Exception as exc:
         logger.info("Structured output fallback in node: %s", exc)
 
-    resp = await raw_llm.ainvoke(prompt)
-    raw_text = resp.content if hasattr(resp, "content") else str(resp)
-    parsed = _extract_json_from_text(raw_text)
+    parsed = await ainvoke_json(raw_llm, prompt)
     return _parse_metric_payload(parsed)
