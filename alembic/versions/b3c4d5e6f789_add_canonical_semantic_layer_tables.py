@@ -22,14 +22,9 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Upgrade schema."""
     # --- Expand semantic_tables ---
-    if not _column_exists("semantic_tables", "row_count_approx"):
-        op.add_column("semantic_tables", sa.Column("row_count_approx", sa.BigInteger(), nullable=True))
-    if not _column_exists("semantic_tables", "physical_schema"):
-        op.add_column("semantic_tables", sa.Column("physical_schema", sa.String(length=200), nullable=True))
-    if not _column_exists("semantic_tables", "primary_key_column"):
-        op.add_column("semantic_tables", sa.Column("primary_key_column", sa.String(length=200), nullable=True))
-    if not _column_exists("semantic_tables", "created_by"):
-        op.add_column("semantic_tables", sa.Column("created_by", sa.Integer(), nullable=True))
+    op.add_column("semantic_tables", sa.Column("physical_schema", sa.String(length=200), nullable=True))
+    op.add_column("semantic_tables", sa.Column("primary_key_column", sa.String(length=200), nullable=True))
+    op.add_column("semantic_tables", sa.Column("created_by", sa.Integer(), nullable=True))
     op.create_foreign_key(
         "fk_semantic_tables_created_by_users",
         "semantic_tables",
@@ -40,7 +35,10 @@ def upgrade() -> None:
     )
 
     # --- Expand semantic_columns ---
-    op.add_column("semantic_columns", sa.Column("is_time_dimension", sa.Boolean(), nullable=False, server_default=sa.text("false")))
+    op.add_column(
+        "semantic_columns",
+        sa.Column("is_time_dimension", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    )
     op.add_column("semantic_columns", sa.Column("allowed_values", sa.JSON(), nullable=True))
 
     # --- Expand semantic_metrics ---
@@ -86,9 +84,7 @@ def upgrade() -> None:
             sa.ForeignKeyConstraint(["from_entity_id"], ["semantic_tables.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["to_entity_id"], ["semantic_tables.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint(
-                "connection_id", "from_entity_id", "to_entity_id", name="uq_canonical_rel"
-            ),
+            sa.UniqueConstraint("connection_id", "from_entity_id", "to_entity_id", name="uq_canonical_rel"),
         )
 
     # --- Create metric_versions ---
@@ -148,10 +144,3 @@ def downgrade() -> None:
 
 def _table_exists(table_name: str) -> bool:
     return sa.inspect(op.get_bind()).has_table(table_name)
-
-
-def _column_exists(table_name: str, column_name: str) -> bool:
-    bind = op.get_bind()
-    insp = sa.inspect(bind)
-    cols = [c["name"] for c in insp.get_columns(table_name)]
-    return column_name in cols
