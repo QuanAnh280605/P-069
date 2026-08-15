@@ -16,6 +16,7 @@ MetricFunction = Literal["SUM", "COUNT", "COUNT_DISTINCT", "AVG", "MIN", "MAX"]
 MetricStatus = Literal["pending_approval", "approved", "needs_review"]
 MetricConfidence = Literal["low", "medium", "high"]
 FilterOperator = Literal["eq", "neq", "gt", "gte", "lt", "lte", "in", "not_in", "is_null", "is_not_null"]
+ExpressionKind = Literal["column", "literal", "add", "sub", "mul", "div", "neg"]
 
 _ALLOWED_EXPRESSION_NODES = (
     exp.Column,
@@ -30,17 +31,48 @@ _ALLOWED_EXPRESSION_NODES = (
 )
 
 
+class MetricDiagnostic(BaseModel):
+    """Describe why a canonical metric requires review."""
+
+    code: str
+    message: str
+
+
+class MetricExpressionNode(BaseModel):
+    """Represent one typed node in a resolved arithmetic expression."""
+
+    kind: ExpressionKind
+    column_id: int | None = None
+    value: float | None = None
+    children: list[MetricExpressionNode] = Field(default_factory=list)
+
+
+class MetricGrain(BaseModel):
+    """Identify the canonical columns that uniquely define the base grain."""
+
+    column_ids: list[int] = Field(default_factory=list)
+
+
 class MetricFormula(BaseModel):
     """Describe a deterministic aggregation over a base-entity expression."""
 
     function: MetricFunction
     expression: str = Field(..., min_length=1, max_length=1000)
+    expression_ast: MetricExpressionNode | None = None
 
     @field_validator("function", mode="before")
     @classmethod
     def normalize_function(cls, value: Any) -> Any:
         if isinstance(value, str):
             return value.strip().upper()
+        return value
+
+    @field_validator("expression", mode="before")
+    @classmethod
+    def normalize_expression(cls, value: Any) -> Any:
+        """Trim an expression while preserving invalid qualifications for validation."""
+        if isinstance(value, str):
+            return value.strip()
         return value
 
     @field_validator("expression")
@@ -75,6 +107,7 @@ class MetricFilter(BaseModel):
     """Represent a fixed predicate without embedding SQL."""
 
     field: str = Field(..., min_length=1, max_length=200, pattern=r"^[A-Za-z_][A-Za-z0-9_$]*$")
+    column_id: int | None = None
     operator: FilterOperator
     value: Any = None
 
@@ -123,6 +156,8 @@ class MetricSpec(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     formula: MetricFormula
     base_entity: str = Field(..., min_length=1, max_length=200)
+    base_entity_id: int | None = None
+    grain: MetricGrain = Field(default_factory=MetricGrain)
     filters: list[MetricFilter] = Field(default_factory=list)
     status: MetricStatus = "pending_approval"
     confidence: MetricConfidence | None = None
@@ -143,7 +178,14 @@ class MetricSpec(BaseModel):
                 op = _OP_MAP.get(raw_op)
                 val = item.get("value")
                 if fld and op:
-                    valid_filters.append({"field": str(fld).strip(), "operator": op, "value": val})
+                    valid_filters.append(
+                        {
+                            "field": str(fld).strip(),
+                            "column_id": item.get("column_id"),
+                            "operator": op,
+                            "value": val,
+                        }
+                    )
         return valid_filters
 
     @field_validator("status", mode="before")
@@ -164,7 +206,9 @@ class MetricSpec(BaseModel):
 class MetricDefinition(BaseModel):
     """Top-level wrapper used by JSON persistence and YAML preview."""
 
+    schema_version: Literal[1, 2] = 1
     metric: MetricSpec
+    diagnostics: list[MetricDiagnostic] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod

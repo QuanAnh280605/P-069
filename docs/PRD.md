@@ -69,7 +69,7 @@
 - **Tôi muốn** thêm, sửa, xóa Business Metric thủ công không phụ thuộc vào AI,  
 - **Để** tôi có thể định nghĩa chỉ số phức tạp mà AI chưa đề xuất đúng.
 - **Tiêu chí chấp nhận:**
-  - API `POST /api/v1/semantic/{db_id}/metric` tạo metric mới với `name`, `description`, `sql_template`.
+  - API `POST /api/v1/semantic/{db_id}/metric` tạo metric từ canonical definition, không nhận SQL tự do.
   - API `PUT /api/v1/semantic/{db_id}/metric/{metric_id}` cho phép chỉnh sửa.
   - API `DELETE /api/v1/semantic/{db_id}/metric/{metric_id}` xóa metric.
   - UI hiển thị danh sách metric với chức năng thêm/sửa/xóa inline.
@@ -81,7 +81,7 @@
 - **Tiêu chí chấp nhận:**
   - `GET /api/v1/semantic/{db_id}/export?format=json` trả về file download dạng JSON.
   - `GET /api/v1/semantic/{db_id}/export?format=yaml` trả về file download dạng YAML.
-  - File export bao gồm đầy đủ: thông tin DB, danh sách bảng, cột với business_name & description, danh sách metrics với sql_template.
+  - File export bao gồm đầy đủ thông tin DB, bảng/cột và canonical metric definitions đã duyệt.
 
 ### Story 5: Bảo mật Connection URL
 - **Là một** Database Administrator (Dave),  
@@ -108,7 +108,8 @@
 - **Để** thu được báo cáo chính xác 100% dựa trên công thức chuẩn mà không cần viết SQL thủ công.
 - **Tiêu chí chấp nhận:**
   - API `POST /api/v1/semantic/query` nhận payload gồm list metric IDs, dimension column names, và optional filters.
-  - `SemanticQueryCompiler` ghép `sql_template` + các phép JOIN bảng tự động để sinh câu SQL.
+  - `SemanticQueryCompiler` biên dịch MetricDefinition v2 cùng canonical join metadata; fixed filters được áp dụng độc lập cho từng metric.
+  - Compile-preview cho phép xem SQL/diagnostics mà không kết nối hoặc thực thi trên Target DB.
   - `SQLGuardrailNode` kiểm tra câu lệnh: Ép duy nhất `SELECT`, tự động inject `LIMIT 100`, cài `statement_timeout = 15s`.
   - Thực thi Read-Only trên Live DB và trả về dạng bảng dữ liệu JSON.
   - Nếu nguồn là **SQL Dump**, API trả về lỗi HTTP 400 rõ ràng: *"Tính năng Query chỉ áp dụng cho Database kết nối qua Connection String"*.

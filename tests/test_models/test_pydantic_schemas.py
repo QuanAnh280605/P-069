@@ -47,6 +47,29 @@ class TestCanonicalRelationshipResponse:
                 # missing connection_id, from_entity_id, to_entity_id, etc.
             )
 
+    def test_canonical_relationship_response_from_attributes(self) -> None:
+        """CanonicalRelationshipResponse can be constructed from an ORM-like object."""
+        from types import SimpleNamespace
+
+        now = datetime.now(tz=UTC)
+        orm_obj = SimpleNamespace(
+            id=1,
+            connection_id=10,
+            from_entity_id=2,
+            to_entity_id=3,
+            relationship_type="many_to_one",
+            join_condition="orders.customer_id = customers.id",
+            created_at=now,
+        )
+        resp = CanonicalRelationshipResponse.model_validate(orm_obj)
+        assert resp.id == 1
+        assert resp.connection_id == 10
+        assert resp.from_entity_id == 2
+        assert resp.to_entity_id == 3
+        assert resp.relationship_type == "many_to_one"
+        assert resp.join_condition == "orders.customer_id = customers.id"
+        assert resp.created_at == now
+
 
 def _sample_definition(name: str = "Order Count") -> MetricDefinition:
     return MetricDefinition.model_validate(

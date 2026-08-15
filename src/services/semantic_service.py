@@ -30,7 +30,9 @@ from src.models.db import (
 from src.models.metric_definition import MetricDefinition
 from src.models.schema_metadata import RawSchemaMetadata
 from src.services.llm import get_llm
+from src.services.metric_definition_resolver import MetricDefinitionResolver
 from src.services.metric_definitions import validate_metric_definition, with_metric_status
+from src.services.query_compiler import SemanticQueryCompiler
 
 logger = logging.getLogger(__name__)
 
@@ -194,10 +196,11 @@ async def create_metric(
     metric_data: dict[str, Any],
     user_id: int,
 ) -> SemanticMetricModel:
-    """Create a new metric with version=1, status='pending_approval', and an initial metric_versions record."""
-    raw_def = _coerce_metric_definition(metric_data)
-    definition = MetricDefinition.model_validate(raw_def)
-    definition = with_metric_status(definition, "pending_approval")
+    """Create a new metric with version=1, status='draft', and an initial metric_versions record."""
+    draft = MetricDefinition.model_validate(metric_data["definition"])
+    definition = await MetricDefinitionResolver(db).resolve(connection_id, draft)
+    status = "needs_review" if definition.diagnostics else "pending_approval"
+    definition = with_metric_status(definition, status)
     table = await validate_metric_definition(db, connection_id, definition)
     payload = definition.model_dump(mode="json")
     metric = SemanticMetricModel(
@@ -212,7 +215,7 @@ async def create_metric(
         definition=payload,
         base_entity_id=table.id,
         version=1,
-        status="pending_approval",
+        status=status,
     )
     db.add(metric)
     await db.flush()
@@ -247,9 +250,10 @@ async def update_metric(
     if metric.created_by != user_id:
         raise ValueError(f"User {user_id} does not have ownership of metric {metric_id}")
 
-    raw_def = _coerce_metric_definition(metric_data)
-    definition = MetricDefinition.model_validate(raw_def)
-    definition = with_metric_status(definition, "pending_approval")
+    draft = MetricDefinition.model_validate(metric_data["definition"])
+    definition = await MetricDefinitionResolver(db).resolve(metric.db_id, draft)
+    status = "needs_review" if definition.diagnostics else "pending_approval"
+    definition = with_metric_status(definition, status)
     table = await validate_metric_definition(db, metric.db_id, definition)
     payload = definition.model_dump(mode="json")
     metric.name = definition.metric.name
@@ -257,7 +261,7 @@ async def update_metric(
     metric.definition = payload
     metric.base_entity_id = table.id
     metric.aggregation_type = definition.metric.formula.function
-    metric.status = "pending_approval"
+    metric.status = status
     metric.approved_by = None
     metric.version += 1
 
@@ -290,11 +294,20 @@ async def approve_metric(
 
     if metric.definition is None:
         raise ValueError("Legacy metric definition requires review before approval")
-    definition = with_metric_status(MetricDefinition.model_validate(metric.definition), "approved")
+    definition = await MetricDefinitionResolver(db).resolve(
+        metric.db_id, MetricDefinition.model_validate(metric.definition)
+    )
+    if definition.diagnostics:
+        metric.status = "needs_review"
+        metric.approved_by = None
+        metric.definition = definition.model_dump(mode="json")
+        raise ValueError("Metric requires review before approval")
+    definition = with_metric_status(definition, "approved")
     metric.definition = definition.model_dump(mode="json")
     metric.status = "approved"
     metric.approved_by = user_id
     await db.flush()
+    await SemanticQueryCompiler(db).compile(metric.db_id, metric_ids=[metric.id], dimension_ids=[])
 
     return metric
 
@@ -458,11 +471,24 @@ async def _extract_and_save_relationships(
             if to_entity_id is None:
                 continue
 
-            fk_col = fk.constrained_columns[0].raw_name
-            ref_col = fk.referred_columns[0].raw_name
-            join_cond = f"{from_table_name}.{fk_col} = {to_table_name}.{ref_col}"
-
-            await _upsert_relationship(db, connection_id, from_entity_id, to_entity_id, join_cond)
+            column_pairs = await _relationship_column_pairs(db, from_entity_id, to_entity_id, fk)
+            conditions = [
+                f"{from_table_name}.{source.raw_name} = {to_table_name}.{target.raw_name}"
+                for source, target in zip(fk.constrained_columns, fk.referred_columns, strict=True)
+            ]
+            join_cond = " AND ".join(conditions)
+            constraint_name = fk.constraint_name.raw_name if fk.constraint_name else None
+            relationship_key = constraint_name or f"{from_table_name}:{join_cond}:{to_table_name}"
+            await _upsert_relationship(
+                db,
+                connection_id,
+                from_entity_id,
+                to_entity_id,
+                join_cond,
+                relationship_key,
+                constraint_name,
+                column_pairs,
+            )
 
             relationships.append(
                 {
@@ -482,17 +508,21 @@ async def _upsert_relationship(
     from_entity_id: int,
     to_entity_id: int,
     join_condition: str,
+    relationship_key: str,
+    constraint_name: str | None,
+    column_pairs: list[dict[str, int]],
 ) -> None:
     """Upsert a canonical relationship record."""
     stmt = select(CanonicalRelationshipModel).where(
         CanonicalRelationshipModel.connection_id == connection_id,
-        CanonicalRelationshipModel.from_entity_id == from_entity_id,
-        CanonicalRelationshipModel.to_entity_id == to_entity_id,
+        CanonicalRelationshipModel.relationship_key == relationship_key,
     )
     existing = (await db.execute(stmt)).scalar_one_or_none()
 
     if existing:
         existing.join_condition = join_condition
+        existing.column_pairs = column_pairs
+        existing.validation_status = "valid"
         return
 
     record = CanonicalRelationshipModel(
@@ -501,8 +531,38 @@ async def _upsert_relationship(
         to_entity_id=to_entity_id,
         relationship_type="many_to_one",
         join_condition=join_condition,
+        relationship_key=relationship_key,
+        constraint_name=constraint_name,
+        column_pairs=column_pairs,
+        validation_status="valid",
     )
     db.add(record)
+
+
+async def _relationship_column_pairs(
+    db: AsyncSession,
+    from_table_id: int,
+    to_table_id: int,
+    foreign_key: Any,
+) -> list[dict[str, int]]:
+    from_columns = await _column_ids_by_name(db, from_table_id)
+    to_columns = await _column_ids_by_name(db, to_table_id)
+    return [
+        {
+            "from_column_id": from_columns[source.raw_name],
+            "to_column_id": to_columns[target.raw_name],
+        }
+        for source, target in zip(
+            foreign_key.constrained_columns,
+            foreign_key.referred_columns,
+            strict=True,
+        )
+    ]
+
+
+async def _column_ids_by_name(db: AsyncSession, table_id: int) -> dict[str, int]:
+    stmt = select(SemanticColumnModel).where(SemanticColumnModel.table_id == table_id)
+    return {column.column_name: column.id for column in (await db.execute(stmt)).scalars().all()}
 
 
 async def delete_semantic_database(

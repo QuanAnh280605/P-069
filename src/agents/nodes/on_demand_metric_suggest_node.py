@@ -7,12 +7,13 @@ from typing import Any
 
 from src.agents.state import AgentState
 from src.models.metric_definition import MetricDefinition
-from src.models.schemas import MetricSuggestions
+from src.models.schemas import MetricSuggestionItem, MetricSuggestions
 from src.services.llm import get_llm
 from src.services.metrics import (
     _extract_json_from_text,
     _parse_metric_payload,
     build_metric_system_prompt,
+    extract_schema_summary,
 )
 
 logger = logging.getLogger(__name__)
@@ -24,16 +25,27 @@ async def on_demand_metric_suggest_node(state: AgentState) -> dict[str, Any]:
     if not schema:
         return {"error": "on_demand_metric_suggest_node: enriched_schema is empty"}
     try:
-        schema_text = _format_schema_for_prompt(schema)
+        _, schema_text = extract_schema_summary(schema)
         sys_prompt = build_metric_system_prompt(schema_text)
-        definitions = await _generate_definitions_with_fallback(sys_prompt)
-        return {"suggested_metrics": [item.model_dump(mode="json") for item in definitions]}
+        user_msg = state.get("user_message", "").strip()
+        messages = [
+            ("system", sys_prompt),
+            ("user", user_msg if user_msg else "Hãy đề xuất 3 metric quan trọng nhất từ schema trên."),
+        ]
+        definitions = await _generate_definitions_with_fallback(messages)
+
+        # Format the response as MetricSuggestionItem to match the frontend expectations
+        results = [
+            MetricSuggestionItem(definition=item, yaml_preview=item.to_yaml()).model_dump(mode="json")
+            for item in definitions
+        ]
+        return {"suggested_metrics": results}
     except Exception as exc:
         logger.warning("Metric definition generation failed: %s", exc)
         return {"error": f"on_demand_metric_suggest_node: {exc}"}
 
 
-async def _generate_definitions_with_fallback(prompt: str) -> list[MetricDefinition]:
+async def _generate_definitions_with_fallback(prompt: Any) -> list[MetricDefinition]:
     """Try structured output first, then fallback to text parsing."""
     raw_llm = get_llm()
     try:
@@ -49,23 +61,3 @@ async def _generate_definitions_with_fallback(prompt: str) -> list[MetricDefinit
     raw_text = resp.content if hasattr(resp, "content") else str(resp)
     parsed = _extract_json_from_text(raw_text)
     return _parse_metric_payload(parsed)
-
-
-def _format_schema_for_prompt(schema: dict[str, Any]) -> str:
-    """Format enriched tables and columns for structured generation."""
-    lines: list[str] = []
-    for table in schema.get("tables", []):
-        table_name = _resolve_name(table, "table_name")
-        lines.append(f"Entity `{table_name}`:")
-        for column in table.get("columns", []):
-            name = _resolve_name(column, "column_name")
-            lines.append(f"- `{name}` ({column.get('data_type', 'TEXT')})")
-    return "\n".join(lines)
-
-
-def _resolve_name(value: dict[str, Any], key: str) -> str:
-    """Resolve flat or Identifier-shaped names."""
-    name = value.get(key) or value.get("name", "unknown")
-    if isinstance(name, dict):
-        return str(name.get("raw_name") or name.get("normalized_name", "unknown"))
-    return str(name)

@@ -25,6 +25,8 @@ from src.models.schema_metadata import DiagnosticCode, RawSchemaMetadata, Schema
 from src.models.schemas import (
     ApproveRequest,
     CanonicalRelationshipResponse,
+    ChatRequest,
+    ChatResponse,
     CustomMetricGenerateRequest,
     CustomMetricGenerateResponse,
     GenerateRequest,
@@ -46,6 +48,7 @@ from src.models.schemas import (
     SemanticCatalogTable,
     SemanticColumnUpdate,
     SemanticGenerateV2Response,
+    SemanticQueryCompileResponse,
     SemanticQueryRequest,
     SemanticQueryResponse,
     SemanticTableUpdate,
@@ -70,6 +73,7 @@ from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
 from src.services.query_compiler import SemanticQueryCompiler
 from src.services.query_execution import execute_compiled_query
 from src.services.schema_ingestion import parse_sql_dump_preview
+from src.services.semantic_compile_error import SemanticCompileError
 from src.services.semantic_service import (
     _coerce_metric_definition,
     approve_metric,
@@ -387,14 +391,18 @@ async def _find_source_raw_schema(
 
     Returns (raw_schema, dialect) tuple.
     """
-    live_stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.semantic_db_id == semantic_db_id)
+    live_stmt = select(LiveTargetDbModel).where(
+        (LiveTargetDbModel.semantic_db_id == semantic_db_id) | (LiveTargetDbModel.id == semantic_db_id)
+    )
     live_result = await db.execute(live_stmt)
     live_db = live_result.scalar_one_or_none()
     if live_db:
         raw_schema = RawSchemaMetadata.model_validate(live_db.schema_metadata)
         return raw_schema, live_db.dialect
 
-    imported_stmt = select(ImportedSchemaModel).where(ImportedSchemaModel.semantic_db_id == semantic_db_id)
+    imported_stmt = select(ImportedSchemaModel).where(
+        (ImportedSchemaModel.semantic_db_id == semantic_db_id) | (ImportedSchemaModel.id == semantic_db_id)
+    )
     imported_result = await db.execute(imported_stmt)
     imported = imported_result.scalar_one_or_none()
     if imported:
@@ -576,6 +584,10 @@ async def _load_schema_context_for_db(db: AsyncSession, db_id: Any) -> dict[str,
                             "business_name": col.business_name or col.column_name,
                             "is_primary_key": col.is_primary_key,
                             "is_foreign_key": col.is_foreign_key,
+                            "is_nullable": col.is_nullable,
+                            "fk_target_table": col.fk_target_table,
+                            "fk_target_column": col.fk_target_column,
+                            "description": col.description or "",
                         }
                         for col in tbl.columns
                     ],
@@ -599,6 +611,7 @@ async def _load_schema_context_for_db(db: AsyncSession, db_id: Any) -> dict[str,
                                 "business_name": col.column_name.raw_name,
                                 "is_primary_key": col.primary_key,
                                 "is_foreign_key": False,
+                                "is_nullable": col.nullable,
                             }
                             for col in tbl.columns
                         ],
@@ -798,22 +811,28 @@ def _catalog_table(table: SemanticTableModel) -> SemanticCatalogTable:
     )
 
 
+def _catalog_relationship(rel: CanonicalRelationshipModel) -> CanonicalRelationshipResponse:
+    """Map a canonical relationship model to its public catalog representation."""
+    return CanonicalRelationshipResponse(
+        id=rel.id,
+        connection_id=rel.connection_id,
+        from_entity_id=rel.from_entity_id,
+        to_entity_id=rel.to_entity_id,
+        relationship_type=rel.relationship_type,
+        join_condition=rel.join_condition,
+        created_at=rel.created_at,
+    )
+
+
 async def _catalog_relationships(db: AsyncSession, db_id: int) -> list[CanonicalRelationshipResponse]:
     """Load canonical relationships for a semantic database."""
-    stmt = select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.connection_id == db_id)
+    stmt = (
+        select(CanonicalRelationshipModel)
+        .where(CanonicalRelationshipModel.connection_id == db_id)
+        .order_by(CanonicalRelationshipModel.id)
+    )
     records = (await db.execute(stmt)).scalars().all()
-    return [
-        CanonicalRelationshipResponse(
-            id=r.id,
-            connection_id=r.connection_id,
-            from_entity_id=r.from_entity_id,
-            to_entity_id=r.to_entity_id,
-            relationship_type=r.relationship_type,
-            join_condition=r.join_condition,
-            created_at=r.created_at,
-        )
-        for r in records
-    ]
+    return [_catalog_relationship(rel) for rel in records]
 
 
 async def _catalog_source_type(db: AsyncSession, db_id: int) -> str:
@@ -935,6 +954,58 @@ async def export_semantic_layer(
 # ---------------------------------------------------------------------------
 
 
+async def _query_target(
+    db: AsyncSession,
+    db_id: int,
+    user_id: int,
+) -> tuple[SemanticDatabaseModel, LiveTargetDbModel]:
+    stmt = select(SemanticDatabaseModel).where(
+        SemanticDatabaseModel.id == db_id,
+        SemanticDatabaseModel.created_by == user_id,
+    )
+    semantic_db = (await db.execute(stmt)).scalar_one_or_none()
+    if semantic_db is None:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+    live_stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.semantic_db_id == db_id)
+    live_db = (await db.execute(live_stmt)).scalar_one_or_none()
+    if live_db is None:
+        raise HTTPException(status_code=400, detail="Query only supported for Live DB connections")
+    return semantic_db, live_db
+
+
+async def _compile_request(
+    db: AsyncSession,
+    db_id: int,
+    body: SemanticQueryRequest,
+) -> Any:
+    try:
+        return await SemanticQueryCompiler(db).compile(db_id, body.to_spec())
+    except SemanticCompileError as exc:
+        raise HTTPException(status_code=400, detail=exc.to_detail()) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/semantic/{db_id}/query/compile",
+    response_model=SemanticQueryCompileResponse,
+)
+async def compile_semantic_query(
+    db_id: int,
+    body: SemanticQueryRequest,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> SemanticQueryCompileResponse:
+    """Compile a semantic query preview without connecting to the target database."""
+    await _query_target(db, db_id, current_user.id)
+    compiled = await _compile_request(db, db_id, body)
+    return SemanticQueryCompileResponse(
+        sql=compiled.sql,
+        parameters=compiled.parameters,
+        metadata=compiled.metadata,
+    )
+
+
 @router.post("/semantic/{db_id}/query", response_model=SemanticQueryResponse)
 async def execute_semantic_query(
     db_id: str,
@@ -971,18 +1042,7 @@ async def execute_semantic_query(
             detail="Query only supported for Live DB connections",
         )
 
-    # Compile semantic query
-    compiler = SemanticQueryCompiler(db)
-    try:
-        compiled = await compiler.compile(
-            connection_id=parsed_id,
-            metric_ids=body.metric_ids,
-            dimension_ids=body.dimension_ids,
-            filters=body.filters,
-            limit=body.limit,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    compiled = await _compile_request(db, parsed_id, body)
 
     # Execute on live DB
     try:
@@ -1011,3 +1071,49 @@ async def execute_semantic_query(
 async def agent_status() -> dict:
     """Check agent readiness."""
     return {"status": "ready", "pipeline": "Flow 1 — Generate & Manage Semantic Layer"}
+
+
+# ---------------------------------------------------------------------------
+# 9. AI Chat Orchestrator (Multi-Agent)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/semantic/{db_id}/chat", response_model=ChatResponse)
+async def chat_orchestrator(
+    db_id: str,
+    body: ChatRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> ChatResponse:
+    """Multi-agent chatbot: route chitchat to natural-language reply or metric generation.
+
+    - 'chitchat' intent  → friendly Vietnamese natural-language response
+    - 'metric_query' intent → Business Metric suggestions from schema
+    """
+    from src.agents.chat_graph import chat_agent
+
+    schema_context = await _load_schema_context_for_db(db, db_id)
+
+    initial_state: dict = {
+        "user_message": body.message,
+        "enriched_schema": schema_context,
+    }
+
+    try:
+        final_state = await chat_agent.ainvoke(initial_state)
+    except Exception as exc:
+        logger.error("Chat orchestrator failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Chat agent encountered an error. Please try again.",
+        ) from exc
+
+    intent = final_state.get("intent", "chitchat")
+
+    if intent == "metric_query":
+        raw_metrics = final_state.get("suggested_metrics") or []
+        return ChatResponse(intent=intent, suggestions=raw_metrics)
+
+    return ChatResponse(
+        intent=intent,
+        chat_response=final_state.get("chat_response", ""),
+    )
