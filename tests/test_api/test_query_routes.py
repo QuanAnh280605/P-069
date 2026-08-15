@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth import create_access_token
 from src.models.db import (
+    CanonicalRelationshipModel,
     ImportedSchemaModel,
     LiveTargetDbModel,
     SemanticColumnModel,
@@ -555,3 +556,27 @@ async def test_catalog_rejects_other_users_database(
     )
     response = await client.get(CATALOG_ENDPOINT.format(db_id=data["sem_db_id"]), headers=_token_headers(other))
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_catalog_returns_relationships(
+    client: Any,
+    async_session: AsyncSession,
+) -> None:
+    """GET catalog returns canonical relationships without 500 ValidationError."""
+    data = await _seed_live_db_with_semantic(async_session)
+    rel = CanonicalRelationshipModel(
+        connection_id=data["sem_db_id"],
+        from_entity_id=1,
+        to_entity_id=1,
+        relationship_type="many_to_one",
+        join_condition="orders.order_id = orders.order_id",
+    )
+    async_session.add(rel)
+    await async_session.commit()
+
+    response = await client.get(CATALOG_ENDPOINT.format(db_id=data["sem_db_id"]), headers=_token_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["relationships"]) == 1
+    assert payload["relationships"][0]["join_condition"] == "orders.order_id = orders.order_id"

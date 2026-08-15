@@ -11,6 +11,7 @@ from src.models.db import ImportedSchemaModel, SemanticDatabaseModel
 from src.models.schema_metadata import RawSchemaMetadata
 from src.models.schemas import ImportedSchemaResponse, ImportedSchemaSummaryResponse
 from src.services.database import get_db_session
+from src.services.live_db_service import _safe_raw_schema
 from src.services.semantic_service import enrich_and_save_canonical_schema, ensure_semantic_database
 
 logger = logging.getLogger(__name__)
@@ -137,7 +138,7 @@ async def _owned_record(
 
 
 def _summary_response(record: ImportedSchemaModel) -> ImportedSchemaSummaryResponse:
-    raw_schema = RawSchemaMetadata.model_validate(record.schema_metadata)
+    raw_schema = _safe_raw_schema(record.schema_metadata, record.dialect)
     return ImportedSchemaSummaryResponse(
         id=record.id,
         semantic_db_id=record.semantic_db_id,
@@ -151,7 +152,7 @@ def _summary_response(record: ImportedSchemaModel) -> ImportedSchemaSummaryRespo
 
 def _full_response(record: ImportedSchemaModel) -> ImportedSchemaResponse:
     summary = _summary_response(record)
-    raw_schema = RawSchemaMetadata.model_validate(record.schema_metadata)
+    raw_schema = _safe_raw_schema(record.schema_metadata, record.dialect)
     return ImportedSchemaResponse(**summary.model_dump(), raw_schema=raw_schema)
 
 

@@ -693,50 +693,69 @@ export async function deleteDatabaseApi(id: string, token: string): Promise<void
   }
 }
 
+interface RawColumnItem {
+  column_name?: string | { raw_name?: string; normalized_name?: string };
+  data_type?: string;
+  raw_data_type?: string;
+}
+
+interface RawTableItem {
+  table_name?: string | { raw_name?: string; normalized_name?: string };
+  columns?: RawColumnItem[];
+}
+
+interface RawSchemaContainer {
+  tables?: RawTableItem[];
+}
+
 export function convertRawSchemaToLayer(
   id: string | number,
   dbName: string,
   dialect: string,
-  rawSchema: any,
+  rawSchema: RawSchemaContainer | null | undefined,
   connUrl?: string,
   updatedAt?: string,
   semanticDbId?: number | null,
   sourceType: 'live' | 'sql_dump' = 'live',
 ): SemanticLayerData {
-  const tables: SemanticTable[] = (rawSchema?.tables || []).map((tbl: any) => {
+  const tables: SemanticTable[] = (rawSchema?.tables || []).map((tbl: RawTableItem) => {
     const rawTableName =
       typeof tbl.table_name === 'object' && tbl.table_name !== null
         ? tbl.table_name.raw_name || tbl.table_name.normalized_name
         : String(tbl.table_name || 'table');
 
-    const columns: SemanticColumn[] = (tbl.columns || []).map((col: any) => {
+    const columns: SemanticColumn[] = (tbl.columns || []).map((col: RawColumnItem) => {
       const rawColName =
         typeof col.column_name === 'object' && col.column_name !== null
           ? col.column_name.raw_name || col.column_name.normalized_name
           : String(col.column_name || 'column');
       const dataType = col.data_type || col.raw_data_type || 'VARCHAR';
       return {
-        column_name: rawColName,
+        column_name: rawColName || 'column',
         data_type: dataType,
-        business_name: rawColName,
+        business_name: rawColName || 'column',
         description: '',
       };
     });
 
     return {
-      table_name: rawTableName,
-      business_name: rawTableName,
+      table_name: rawTableName || 'table',
+      business_name: rawTableName || 'table',
       description: '',
       columns,
     };
   });
+
+  const normalizedDialect = (
+    dialect === 'mysql' || dialect === 'sqlite' || dialect === 'postgresql' ? dialect : 'postgresql'
+  ) as 'postgresql' | 'mysql' | 'sqlite';
 
   return {
     id: String(id),
     semantic_db_id: semanticDbId,
     source_type: sourceType,
     db_name: dbName,
-    db_type: (dialect as any) || 'postgresql',
+    db_type: normalizedDialect,
     conn_url: connUrl,
     status: 'Draft',
     updated_at: updatedAt || new Date().toISOString().replace('T', ' ').slice(0, 16),

@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { SemanticLayerData } from '@/lib/api';
 import {
   Layers,
-  Database,
   Key,
   Link2,
   Table as TableIcon,

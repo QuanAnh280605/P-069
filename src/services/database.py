@@ -7,6 +7,7 @@ Provides:
 
 import logging
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
@@ -14,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_global_engine: AsyncEngine | None = None
+_global_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def _get_fernet(key: str | None = None) -> Fernet:
@@ -45,7 +49,11 @@ def decrypt_conn_url(enc_url: str, key: str | None = None) -> str:
 
 
 def get_async_engine(db_url: str | None = None) -> AsyncEngine:
-    """Create and return a SQLAlchemy AsyncEngine instance."""
+    """Create and return a cached SQLAlchemy AsyncEngine instance."""
+    global _global_engine, _global_session_factory
+    if db_url is None and _global_engine is not None:
+        return _global_engine
+
     url = db_url or get_settings().database_url
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
@@ -54,12 +62,23 @@ def get_async_engine(db_url: str | None = None) -> AsyncEngine:
         url = f"postgresql+asyncpg://{parts[1]}"
     elif url.startswith("sqlite://") and not url.startswith("sqlite+aiosqlite://"):
         url = url.replace("sqlite://", "sqlite+aiosqlite://", 1)
-    return create_async_engine(url, echo=False, future=True)
+
+    engine_kwargs: dict[str, Any] = {"echo": False, "future": True}
+    if not url.startswith("sqlite"):
+        engine_kwargs.update({"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20})
+
+    engine = create_async_engine(url, **engine_kwargs)
+    if db_url is None:
+        _global_engine = engine
+        _global_session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    return engine
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async database session for FastAPI dependencies or background jobs."""
-    active_engine = get_async_engine()
-    session_factory = async_sessionmaker(active_engine, expire_on_commit=False, class_=AsyncSession)
-    async with session_factory() as session:
+    global _global_session_factory
+    if _global_session_factory is None:
+        get_async_engine()
+    assert _global_session_factory is not None
+    async with _global_session_factory() as session:
         yield session
