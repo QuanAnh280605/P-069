@@ -12,6 +12,7 @@ from typing import Any
 
 from src.agents.state import AgentState
 from src.services.llm import get_llm
+from src.services.llm_json import ainvoke_json, extract_json
 
 logger = logging.getLogger(__name__)
 
@@ -51,25 +52,18 @@ def _build_enrich_prompt(raw_schema: dict[str, Any]) -> str:
     )
 
 
-def _parse_enrich_response(raw_response: str, raw_schema: dict[str, Any]) -> dict[str, Any]:
-    """Parse JSON LLM output and merge with raw schema structure."""
-    text = raw_response.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-
+def _try_parse_enrich(raw_response: str) -> dict[str, Any] | None:
+    """Return the parsed enrichment payload, or None when it is unusable."""
     try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict) and "tables" in parsed:
-            return parsed
+        parsed = extract_json(raw_response)
     except json.JSONDecodeError:
         logger.warning("enrich_node: Failed to parse JSON response from LLM")
+        return None
+    return parsed if isinstance(parsed, dict) and "tables" in parsed else None
 
-    # Fallback structure if JSON parse fails
+
+def _fallback_enrichment(raw_schema: dict[str, Any]) -> dict[str, Any]:
+    """Build a mechanical Title Case enrichment when the LLM output is unusable."""
     fallback_tables = []
     for tbl in raw_schema.get("tables", []):
         t_name = tbl.get("table_name", "")
@@ -92,6 +86,23 @@ def _parse_enrich_response(raw_response: str, raw_schema: dict[str, Any]) -> dic
     return {"tables": fallback_tables}
 
 
+def _parse_enrich_response(raw_response: str, raw_schema: dict[str, Any]) -> dict[str, Any]:
+    """Parse JSON LLM output, falling back to the mechanical structure."""
+    return _try_parse_enrich(raw_response) or _fallback_enrichment(raw_schema)
+
+
+async def _enrich_with_retry(llm: Any, prompt: str, raw_schema: dict[str, Any]) -> dict[str, Any]:
+    """Ask the LLM for enrichment, retrying once when the answer is not JSON."""
+    try:
+        parsed = await ainvoke_json(llm, prompt)
+    except json.JSONDecodeError:
+        return _fallback_enrichment(raw_schema)
+    if isinstance(parsed, dict) and "tables" in parsed:
+        return parsed
+    logger.warning("enrich_node: LLM JSON is missing the 'tables' key — using fallback")
+    return _fallback_enrichment(raw_schema)
+
+
 async def enrich_node(state: AgentState) -> dict[str, Any]:
     """Call LLM to generate Vietnamese business names for each table/column.
 
@@ -104,11 +115,8 @@ async def enrich_node(state: AgentState) -> dict[str, Any]:
 
     try:
         prompt = _build_enrich_prompt(raw_schema)
-        llm = get_llm()
-        response = await llm.ainvoke(prompt)
-        raw_text = response.content if hasattr(response, "content") else str(response)
-
-        enriched = _parse_enrich_response(raw_text, raw_schema)
+        llm = get_llm(role="enrich")
+        enriched = await _enrich_with_retry(llm, prompt, raw_schema)
         logger.info("enrich_node: successfully enriched %d tables", len(enriched.get("tables", [])))
         return {"enriched_schema": enriched}
     except Exception as exc:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import text
@@ -36,7 +37,8 @@ async def execute_compiled_query(
                 transaction = await connection.begin()
                 try:
                     await _set_read_only(connection, dialect, timeout_seconds)
-                    result = await connection.execute(text(compiled.sql), compiled.parameters)
+                    params = _normalize_parameters(compiled.parameters)
+                    result = await connection.execute(text(compiled.sql), params)
                     rows = [list(row) for row in result.fetchall()]
                     await transaction.rollback()
                     return QueryResult(list(result.keys()), rows, len(rows))
@@ -45,6 +47,31 @@ async def execute_compiled_query(
                     raise
     finally:
         await engine.dispose()
+
+
+def _normalize_value(value: Any) -> Any:
+    """Coerce ISO date/datetime strings to date/datetime objects for strict DB drivers."""
+    if not isinstance(value, str):
+        return value
+    val = value.strip()
+    if len(val) == 10 and val[4] == "-" and val[7] == "-":
+        try:
+            return date.fromisoformat(val)
+        except ValueError:
+            return value
+    if len(val) >= 19 and val[4] == "-" and val[7] == "-" and (val[10] in ("T", " ")):
+        try:
+            return datetime.fromisoformat(val.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+    return value
+
+
+def _normalize_parameters(params: dict[str, Any] | None) -> dict[str, Any]:
+    """Ensure parameter values are appropriately typed before execution."""
+    if not params:
+        return {}
+    return {k: _normalize_value(v) for k, v in params.items()}
 
 
 def _async_url(conn_url: str, dialect: str) -> str:

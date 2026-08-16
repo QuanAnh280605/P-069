@@ -9,6 +9,23 @@ interface SqlCodeViewerProps {
   theme?: 'light' | 'dark';
 }
 
+function formatSql(rawSql: string): string[] {
+  if (!rawSql) return [];
+  const trimmed = rawSql.trim();
+  if (trimmed.includes('\n')) {
+    return trimmed.split('\n');
+  }
+  const formatted = trimmed
+    .replace(/\s+(FROM)\s+/gi, '\nFROM ')
+    .replace(/\s+(WHERE)\s+/gi, '\nWHERE\n  ')
+    .replace(/\s+(GROUP BY)\s+/gi, '\nGROUP BY\n  ')
+    .replace(/\s+(ORDER BY)\s+/gi, '\nORDER BY\n  ')
+    .replace(/\s+(HAVING)\s+/gi, '\nHAVING\n  ')
+    .replace(/\s+(LIMIT)\s+/gi, '\nLIMIT ')
+    .replace(/\s+((?:LEFT\s+|RIGHT\s+|INNER\s+|OUTER\s+|CROSS\s+)?JOIN)\s+/gi, '\n$1 ');
+  return formatted.split('\n');
+}
+
 export const SqlCodeViewer: React.FC<SqlCodeViewerProps> = ({
   sql,
   title = 'SQL Template (Read-only)',
@@ -26,7 +43,7 @@ export const SqlCodeViewer: React.FC<SqlCodeViewerProps> = ({
     }
   };
 
-  const lines = sql.trim().split('\n');
+  const lines = formatSql(sql);
 
   // Syntax highlight for SQL keywords
   const highlightSyntax = (line: string) => {
