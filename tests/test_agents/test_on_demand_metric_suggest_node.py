@@ -52,7 +52,22 @@ async def test_node_returns_definition_without_sql() -> None:
 
 
 def test_schema_prompt_contains_entity_and_column() -> None:
-    schema = {"tables": [{"table_name": "orders", "columns": [{"column_name": "amount"}]}]}
+    schema = {
+        "tables": [
+            {
+                "table_name": "orders",
+                "columns": [
+                    {
+                        "column_name": "amount",
+                        "business_name": "Số tiền",
+                        "description": "Tổng tiền đơn hàng",
+                    }
+                ],
+            }
+        ]
+    }
     _, text = extract_schema_summary(schema)
     assert "orders" in text
     assert "amount" in text
+    assert "Số tiền" in text
+    assert "Tổng tiền đơn hàng" in text

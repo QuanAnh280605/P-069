@@ -12,7 +12,6 @@ Covers:
 
 from __future__ import annotations
 
-import json
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -241,11 +240,12 @@ def _multi_table_raw_schema() -> RawSchemaMetadata:
     )
 
 
-def _llm_enrichment_response_multi_table() -> str:
-    """Return JSON simulating LLM enrichment for the multi-table schema."""
-    return json.dumps(
-        {
-            "orders": {
+def _hitl_enrichment_multi_table() -> dict:
+    """Build HITL enrichment dict for the multi-table schema."""
+    return {
+        "tables": [
+            {
+                "table_name": "orders",
                 "business_name": "Đơn hàng",
                 "description": "Bảng lưu trữ thông tin đơn hàng",
                 "columns": [
@@ -255,7 +255,8 @@ def _llm_enrichment_response_multi_table() -> str:
                     {"column_name": "created_at", "business_name": "Ngày tạo", "description": "Thời gian tạo"},
                 ],
             },
-            "order_line": {
+            {
+                "table_name": "order_line",
                 "business_name": "Chi tiết đơn hàng",
                 "description": "Bảng chi tiết các mặt hàng trong đơn",
                 "columns": [
@@ -266,21 +267,18 @@ def _llm_enrichment_response_multi_table() -> str:
                     {"column_name": "unit_price", "business_name": "Đơn giá", "description": "Giá mỗi sản phẩm"},
                 ],
             },
-            "products": {
+            {
+                "table_name": "products",
                 "business_name": "Sản phẩm",
                 "description": "Danh mục sản phẩm",
                 "columns": [
                     {"column_name": "id", "business_name": "Mã SP", "description": "Khóa chính"},
                     {"column_name": "product_name", "business_name": "Tên SP", "description": "Tên sản phẩm"},
-                    {
-                        "column_name": "selling_price",
-                        "business_name": "Giá bán",
-                        "description": "Giá bán niêm yết",
-                    },
+                    {"column_name": "selling_price", "business_name": "Giá bán", "description": "Giá bán niêm yết"},
                 ],
             },
-        }
-    )
+        ]
+    }
 
 
 async def _seed_live_db_semantic(db: AsyncSession) -> dict[str, Any]:
@@ -1091,13 +1089,8 @@ async def test_ensure_semantic_database_deduplication(async_session: AsyncSessio
 
 
 @pytest.mark.asyncio
-@patch("src.services.semantic_service.get_llm")
-async def test_enrich_and_save_creates_canonical_schema(mock_get_llm: Any, async_session: AsyncSession):
+async def test_enrich_and_save_creates_canonical_schema(async_session: AsyncSession):
     """enrich_and_save_canonical_schema creates semantic tables, columns, and FK relationships."""
-    mock_llm = AsyncMock()
-    mock_llm.ainvoke.return_value = AsyncMock(content=_llm_enrichment_response_multi_table())
-    mock_get_llm.return_value = mock_llm
-
     sem_db_id = await ensure_semantic_database(
         db=async_session,
         source_type="live_target_db",
@@ -1114,6 +1107,7 @@ async def test_enrich_and_save_creates_canonical_schema(mock_get_llm: Any, async
         connection_id=sem_db_id,
         raw_schema=raw_schema,
         dialect="postgresql",
+        enrichment=_hitl_enrichment_multi_table(),
     )
 
     assert result["status"] == "draft"
@@ -1345,13 +1339,8 @@ async def test_approve_skips_other_users_metrics(client: Any, async_session: Asy
 
 
 @pytest.mark.asyncio
-@patch("src.services.semantic_service.get_llm")
-async def test_enrichment_detects_time_dimensions(mock_get_llm: Any, async_session: AsyncSession):
+async def test_enrichment_detects_time_dimensions(async_session: AsyncSession):
     """enrich_and_save_canonical_schema detects TIMESTAMP columns as time dimensions."""
-    mock_llm = AsyncMock()
-    mock_llm.ainvoke.return_value = AsyncMock(content=_llm_enrichment_response_multi_table())
-    mock_get_llm.return_value = mock_llm
-
     sem_db_id = await ensure_semantic_database(
         db=async_session,
         source_type="live_target_db",
@@ -1368,6 +1357,7 @@ async def test_enrichment_detects_time_dimensions(mock_get_llm: Any, async_sessi
         connection_id=sem_db_id,
         raw_schema=raw_schema,
         dialect="postgresql",
+        enrichment=_hitl_enrichment_multi_table(),
     )
 
     # Find the orders table

@@ -1,152 +1,390 @@
 # Architecture Document — AI Semantic Layer Agent
 
-## System Overview
+## 1. System Overview
 
-Hệ thống **AI Semantic Layer Agent v1.0** bao gồm **2 luồng chính**:
+Hệ thống **AI Semantic Layer Agent** là nền tảng quản trị và khai thác ngữ nghĩa dữ liệu doanh nghiệp tập trung, giải quyết khoảng cách giữa cấu trúc kỹ thuật (Technical Schema) và ngữ cảnh kinh doanh (Business Context). Hệ thống bao gồm **2 luồng cốt lõi (Core Pipelines)** cùng **2 đồ thị AI hội thoại thông minh (Conversational AI Graphs)**:
 
-- **Flow 1 — Generate & Manage Semantic Layer:** Kết nối tới Target DB (hoặc import SQL Dump) → AI tự động introspect schema kỹ thuật → LLM đề xuất tên nghiệp vụ, mô tả cột, Business Metrics → BA/DA review & duyệt (HITL) → lưu vào Metadata Store → xuất JSON/YAML.
-- **Flow 2 — Semantic Layer Query Engine (CHỈ DÙNG CHO CONNECTION STRING / LIVE DB):** Người dùng lựa chọn Metrics & Dimensions từ Semantic Layer → `SemanticQueryCompiler` tự động biên dịch thành câu lệnh SQL chuẩn xác → Thực thi Read-Only trên Live DB kèm Guardrails (Limit, Timeout) → Trả kết quả bảng/dữ liệu lên UI. *Không áp dụng cho SQL Dump.*
+- **Flow 1 — Generate & Manage Semantic Layer (Live DB & SQL Dump):**
+  - **Schema Ingestion:** Hỗ trợ cả kết nối Live Database (qua SQLAlchemy Inspector) và tải lên file SQL Dump DDL (PostgreSQL, MySQL, SQLite) thông qua bộ phân tích `SqlDumpScanner & Parser`.
+  - **2-Pass Hierarchical & Clustering Enrichment:**
+    - *Pass 1:* Xây dựng bảng chú giải thuật ngữ toàn cục (Global Domain Glossary).
+    - *Clustering:* Phân nhóm đồ thị bảng theo miền nghiệp vụ (Domain Clustering) để tối ưu xử lý schema lớn.
+    - *Pass 2:* Sinh tên nghiệp vụ tiếng Việt (`business_name`) và mô tả chi tiết (`description`) cho từng bảng và cột theo cụm, đi kèm cơ chế Fallback tự động.
+  - **Canonical Semantic Layer Builder:** Tự động chuẩn hóa metadata, xác định Primary Keys, Foreign Keys, Time Dimensions, quan hệ liên bảng (`canonical_relationships`) và đề xuất Business Metrics ban đầu.
+  - **HITL Governance & Versioning:** BA/DA xem xét, chỉnh sửa trực tiếp (Inline Editing), quản lý vòng đời duyệt (Approval) và lưu lịch sử phiên bản (`metric_versions`).
+  - **Export:** Đóng gói xuất Semantic Layer ra chuẩn JSON và YAML phục vụ tích hợp công cụ BI.
+
+- **Flow 2 — Deterministic Semantic Query Engine (CHỈ DÙNG CHO LIVE DB):**
+  - **Deterministic Compilation:** Người dùng chọn Metrics, Dimensions và Filters từ giao diện trực quan; `SemanticQueryCompiler` và `MetricDefinitionResolver` biên dịch thành câu lệnh SQL 100% chuẩn xác dựa trên `canonical_relationships` và metric templates.
+  - **Compile-Only Preview:** Cho phép kiểm tra câu lệnh SQL được sinh ra và chẩn đoán cấu trúc mà không cần kết nối/thực thi trên Target DB.
+  - **Security Guardrails:** Tích hợp `sqlglot` kiểm tra AST (ép duy nhất lệnh `SELECT`, chặn hoàn toàn `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`), tự động inject `LIMIT 100` (tối đa 1000 rows) và gán `statement_timeout = 15s`.
+  - **Read-Only Execution:** Thực thi an toàn trên Live Database và trả về bảng kết quả dạng JSON.
+
+- **Conversational & Interactive Layer:**
+  - **Chat Orchestrator Graph:** Tự động phân loại Intent giữa trò chuyện chung (`chitchat_node`) và yêu cầu định nghĩa chỉ số nghiệp vụ (`on_demand_metric_suggest_node`).
+  - **Query Clarifier Wizard Graph:** Hỗ trợ người dùng làm rõ các câu truy vấn phức tạp hoặc còn mơ hồ qua từng bước gợi ý thông minh (`wizard_init` $\rightarrow$ `wizard_step` $\rightarrow$ `resolve`).
 
 ---
 
-## Architecture Diagram
+## 2. Architecture Diagram
 
 ```mermaid
 graph TB
-    subgraph Client["🖥️ Client Layer"]
-        UI["React / Next.js UI (Builder & Metric Explorer)"]
+    subgraph Client["🖥️ Client Layer — Next.js 14 Web App"]
+        V1["📊 Data Model View\n(Tables, Columns, Relationships)"]
+        V2["📋 Metrics Catalog View\n(Formulas, Versions, Approvals)"]
+        V3["🔍 Metric Explorer View\n(Visual Query Builder & Live Table)"]
+        V4["💬 AI Studio View\n(Multi-agent Streaming Chat & SQL Preview)"]
+        V5["📤 Export Playground View\n(JSON / YAML Exporter)"]
     end
 
-    subgraph API["🌐 API Layer — FastAPI"]
-        SEM_API["POST /api/v1/semantic/generate"]
-        QRY_API["POST /api/v1/semantic/query (Live DB only)"]
+    subgraph API["🌐 API Layer — FastAPI (Async REST Endpoints)"]
+        AUTH_API["🔐 Auth Routes (/api/v1/auth)\nJWT, Bcrypt, Google OAuth, RBAC"]
+        INGEST_API["📥 Schema Ingestion Routes\n/semantic/import/* & /semantic/db/*"]
+        CATALOG_API["📚 Catalog & Edit Routes\n/semantic/{db_id}/catalog, /table, /column"]
+        METRIC_API["🎯 Metric Lifecycle Routes\n/semantic/{db_id}/metrics, /approve, /history"]
+        QUERY_API["⚡ Query Engine Routes\n/semantic/{db_id}/query/compile & /query"]
+        AGENT_API["🤖 Conversational & Wizard Routes\n/semantic/{db_id}/chat & /query/clarify/*"]
+        EXPORT_API["📦 Export Routes\n/semantic/{db_id}/export?format=json|yaml"]
     end
 
-    subgraph Flow1["⚙️ Flow 1 — Generate & Manage Pipeline"]
-        G1["Introspect Node\nSQLAlchemy Inspector"]
-        G2["Enrich Node\nLLM: business_name & description"]
-        G3["Metric Suggest Node\nLLM: Business Metrics"]
-        HITL["👤 Review Node (HITL)\nBA/DA duyệt & sửa"]
-        G4["Save Node\nLưu vào Metadata Store"]
-        G5["Export Service\nJSON / YAML"]
-        G1 --> G2 --> G3 --> HITL --> G4 --> G5
+    subgraph Flow1["⚙️ Flow 1 — Ingestion & 2-Pass Enrichment Pipeline"]
+        G_INGEST["Introspect Engine / SQL Dump Scanner\nExtract technical tables, cols, types, FKs"]
+        G_PASS1["Pass 1: Global Domain Glossary\nLLM trích xuất thuật ngữ cốt lõi"]
+        G_CLUSTER["Domain / Graph Clustering\nPhân cụm bảng theo liên kết FK"]
+        G_PASS2["Pass 2: Cluster Enrichment\nLLM sinh business_name & description tiếng Việt\n+ Fallback Generator"]
+        G_CANONICAL["Canonical Builder Service\nBuild canonical tables, columns, relationships"]
+        HITL["👤 HITL Review & Approval\nBA/DA phê duyệt, chỉnh sửa inline"]
+        G_PERSIST["Save & Persistence Service\nPersist vào Metadata Store"]
+
+        G_INGEST --> G_PASS1 --> G_CLUSTER --> G_PASS2 --> G_CANONICAL --> HITL --> G_PERSIST
     end
 
-    subgraph Flow2["🔍 Flow 2 — Semantic Query Pipeline (Live DB Only)"]
-        Q1["SemanticQueryCompiler\nMap Metrics + Dimensions -> SQL"]
-        Q2["SQLGuardrailNode (sqlglot)\nCheck Read-Only, Inject LIMIT & Timeout"]
-        Q3["Live DB Execution Service\nRead-Only SELECT Execution"]
-        Q1 --> Q2 --> Q3
+    subgraph Flow2["🔍 Flow 2 — Deterministic Semantic Query Engine (Live DB Only)"]
+        Q_RESOLVE["MetricDefinitionResolver\nLoad MetricDefinition v2 & Canonical Relationships"]
+        Q_COMP["SemanticQueryCompiler\nResolve joins & compile deterministic SQL"]
+        Q_GUARD["SQLGuardrailNode (sqlglot)\n1. Assert SELECT-only AST\n2. Inject LIMIT 100\n3. Set timeout 15s"]
+        Q_EXEC["Live DB Execution Service\nRead-Only SELECT Execution on Live DB"]
+
+        Q_RESOLVE --> Q_COMP --> Q_GUARD --> Q_EXEC
+    end
+
+    subgraph MultiAgent["🧠 Conversational & Clarifier Agents"]
+        CHAT_ORCH["Chat Orchestrator Graph\norchestrator -> chitchat | metric_suggest"]
+        WIZARD_ORCH["Query Clarifier Wizard Graph\nwizard_init -> wizard_step -> resolve"]
     end
 
     subgraph Data["🗄️ Data Layer"]
-        TARGET["Target Database (Live DB)\nPostgreSQL / MySQL / SQLite"]
-        METADB["Metadata Store\nPostgreSQL"]
+        METADB[("🗄️ Metadata Store (PostgreSQL / SQLite)\n10 ORM Models: users, sessions, imported_schemas,\nlive_target_dbs, databases, tables, columns,\nmetrics, canonical_relationships, metric_versions")]
+        TARGET[("🎯 Target Database (Live DB Only)\nPostgreSQL / MySQL / SQLite")]
     end
 
-    UI --> SEM_API --> Flow1
-    UI --> QRY_API --> Flow2
+    Client --> API
+    API --> Flow1
+    API --> Flow2
+    API --> MultiAgent
 
-    G1 -->|"Inspector (schema metadata)"| TARGET
-    G4 -->|save| METADB
-    Q1 -->|read semantic definitions| METADB
-    Q3 -->|"Execute Read-Only SELECT (LIMIT 100)"| TARGET
+    G_INGEST -.->|"Read Schema Only"| TARGET
+    G_PERSIST -->|Persist Metadata| METADB
+    Q_RESOLVE -->|Read Semantic Definitions| METADB
+    Q_EXEC -->|"Execute Read-Only SELECT (LIMIT 100)"| TARGET
 ```
 
 ---
 
-## Flow 1 — Generate Pipeline (Chi tiết với HITL)
+## 3. Detailed Component Workflows
+
+### 3.1. Flow 1: 2-Pass Hierarchical & Clustering Enrichment Pipeline
 
 ```mermaid
 flowchart TD
-    START(["DB Connection URL / SQL Dump"]) --> IN
+    SOURCE(["Nguồn dữ liệu: Live Connection URL hoặc SQL Dump File"]) --> PARSE
 
-    IN["Introspect Node / Dump Parser\nTên bảng, cột, FK, kiểu dữ liệu\nOutput: raw_schema"]
-    IN --> EN
+    subgraph Ingestion["1. Schema Ingestion"]
+        PARSE["SQLAlchemy Inspector (Live DB)\nhoặc SqlDumpScanner & Parser (Dump File)\nOutput: RawSchemaMetadata"]
+    end
 
-    EN["Enrich Node — LLM Batch\nGPT-4o-mini đặt business_name\nvà description cho từng bảng/cột\nOutput: enriched_schema"]
-    EN --> MS
+    subgraph Enrichment["2. 2-Pass AI Enrichment Engine"]
+        PARSE --> P1["Pass 1: Global Domain Glossary\nLLM phân tích toàn bộ tên bảng/cột\nđể định hình miền nghiệp vụ chính"]
+        P1 --> CLUST["Domain Clustering\nNhóm bảng theo đồ thị quan hệ FK\n(Tối ưu ngữ cảnh cho DB lớn)"]
+        CLUST --> P2["Pass 2: Cluster-level Schema Enrichment\nLLM gán business_name & description tiếng Việt\n(Kèm Fallback Name Generator nếu LLM gặp sự cố)"]
+    end
 
-    MS["Metric Suggest Node — LLM\nĐề xuất business metrics dựa trên schema\nOutput: suggested_metrics"]
-    MS --> HITL
+    subgraph Canonical["3. Canonical Standardization"]
+        P2 --> CANON["Canonical Builder Service\n- Xác định PK, FK, Time Dimension\n- Tự động tạo Canonical Relationships\n- Sinh MetricDefinition v2 mặc định"]
+    end
 
-    HITL{"👤 Review Node (HITL)\nLangGraph Interrupt\nChờ User kiểm tra, chỉnh sửa\ntên nghiệp vụ & duyệt metrics"}
+    subgraph HITL_Loop["4. HITL Review & Approval"]
+        CANON --> REVIEW{"👤 HITL Review (Web UI)\nBA/DA kiểm tra, chỉnh sửa inline\nvà duyệt từng Table / Column / Metric"}
+        REVIEW -->|"Sửa inline"| EDIT["PUT /table hoặc PUT /column\nLưu thay đổi ngay lập tức"]
+        EDIT --> REVIEW
+        REVIEW -->|"Duyệt (Approve)"| SAVE["Save Node / Persistence Service\nLưu vào PostgreSQL Metadata Store"]
+        REVIEW -->|"Yêu cầu sinh lại"| P2
+    end
 
-    HITL -->|"✅ Duyệt / Sửa"| SV["Save Node\nLưu vào Metadata Store\nOutput: semantic_layer_id"]
-    HITL -->|"🔄 Yêu cầu AI đặt lại"| EN
-
-    SV --> END(["✅ Semantic Layer\n(JSON response + persisted)"])
+    SAVE --> EXPORT(["✅ Semantic Layer Ready\nExport JSON / YAML hoặc truy vấn Flow 2"])
 ```
 
 ---
 
-## Flow 2 — Query Pipeline (Chi tiết cho Live DB)
+### 3.2. Flow 2: Deterministic Semantic Query Pipeline (Live DB Only)
 
 ```mermaid
 flowchart TD
-    QSTART(["Payload: Selected Metrics, Dimensions, Filters"]) --> QCOMP
+    REQ(["Payload: Metric IDs, Dimension Columns, Filters, Time Grains"]) --> CHECK_SRC
 
-    QCOMP["SemanticQueryCompiler\nĐọc Metrics sql_template & Table Joins\nBiên dịch thành SQL Query"] --> QGUARD
+    CHECK_SRC{"Kiểm tra nguồn DB\n(Live DB hay SQL Dump?)"}
+    CHECK_SRC -->|"SQL Dump"| ERR(["❌ HTTP 400 Bad Request\nChỉ hỗ trợ Live DB có kết nối thực"])
+    CHECK_SRC -->|"Live DB"| RESOLVE
 
-    QGUARD["SQLGuardrailNode (sqlglot)\n1. Check SELECT-only\n2. Inject LIMIT 100\n3. Set Statement Timeout 15s"] --> QEXEC
+    subgraph Compilation["1. Semantic Query Compilation"]
+        RESOLVE["MetricDefinitionResolver\nĐọc MetricDefinition v2 từ Metadata Store\nvà xác định Base Entity"] --> JOIN_GRAPH
+        JOIN_GRAPH["Graph Join Resolver\nTìm đường đi ngắn nhất giữa các bảng\ndựa trên CanonicalRelationshipModel"] --> COMPILE
+        COMPILE["SemanticQueryCompiler\nBiên dịch câu lệnh SQL chuẩn dialect (Postgres/MySQL/SQLite)\nvới đầy đủ Dimensions, Aggregations, GROUP BY"]
+    end
 
-    QEXEC["Live DB Execution Service\nThực thi câu SQL Read-Only trên Target DB\n(Chỉ dành cho DB kết nối qua Connection String)"] --> QRES
+    subgraph Guardrails["2. AST Security & Guardrails"]
+        COMPILE --> PREVIEW_CHECK{"Chế độ\nCompile Preview?"}
+        PREVIEW_CHECK -->|"Có"| RET_PREVIEW(["✅ Trả về Compiled SQL & Diagnostics\n(Không thực thi DB)"])
+        PREVIEW_CHECK -->|"Thực thi"| GUARD["SQLGuardrailNode (sqlglot)\n1. Kiểm tra AST: Bắt buộc duy nhất SELECT\n2. Chặn INSERT, UPDATE, DELETE, DROP, ALTER\n3. Auto inject LIMIT 100 (max 1000)\n4. Gán statement_timeout = 15s"]
+    end
 
-    QRES(["✅ Render Result Data Table / JSON Response"])
+    subgraph Execution["3. Safe Live Execution"]
+        GUARD --> DECRYPT["Decrypt Fernet Connection URL\ntrong bộ nhớ RAM"]
+        DECRYPT --> EXEC["Live DB Execution Service\nThực thi câu SQL Read-Only trên Target DB"]
+        EXEC --> FORMAT["Đóng gói Result Grid (Columns, Rows, Execution Time)"]
+    end
+
+    FORMAT --> RES(["✅ Render Data Table & Visualization trên UI"])
 ```
 
 ---
 
-## Tech Stack
+### 3.3. Conversational Multi-Agent & Query Clarifier Graphs
 
-| Layer | Technology | Version | Lý do |
-|-------|-----------|---------|-------|
-| API Framework | **FastAPI** | ≥ 0.115 | Async, auto docs |
-| ASGI Server | **Uvicorn** | ≥ 0.34 | Performance, hot-reload |
-| Data Validation | **Pydantic v2** | ≥ 2.10 | Type-safe request/response |
-| Config | **pydantic-settings** | ≥ 2.7 | Load `.env` typed |
-| Agent Orchestrator | **LangGraph** | ≥ 0.2 | StateGraph + HITL Interrupt |
-| LLM Framework | **LangChain** | ≥ 0.3 | Prompt templates |
-| LLM | **GPT-4o-mini** | API | Cost-efficient, deterministic (T=0.0) |
-| DB Abstraction | **SQLAlchemy** | ≥ 2.0 | Inspector API + Metadata Store ORM |
-| SQL Parser & AST | **sqlglot** | ≥ 25.0 | Validate SQL AST & inject Guardrails cho Flow 2 |
-| Migration | **Alembic** | ≥ 1.14 | Metadata Store schema migration |
-| Export | **pyyaml** | ≥ 6.0 | Export Semantic Layer → YAML |
-| PostgreSQL Driver | **psycopg2-binary** | ≥ 2.9 | Driver cho Metadata Store PostgreSQL |
-| Container | **Docker** multi-stage | — | Dev/prod separation |
-| CI/CD | **GitHub Actions** | — | Auto test + deploy |
-| Testing | **pytest + pytest-asyncio + httpx** | — | Async API testing |
-| Monitoring | **LangSmith** | ≥ 0.1 | LLM observability: traces, token cost |
+#### A. Chat Orchestrator Graph (`src/agents/chat_graph.py`)
+```mermaid
+flowchart LR
+    MSG(["Tin nhắn của người dùng"]) --> ORCH["orchestrator_node\n(Phân loại ý định Intent)"]
+    ORCH -->|"chitchat"| CHIT["chitchat_node\n(Trả lời câu hỏi tổng quan / chào hỏi)"]
+    ORCH -->|"metric_query"| METRIC["on_demand_metric_suggest_node\n(Gợi ý MetricDefinition v2 & SQL)"]
+    CHIT --> FIN(["Kết thúc lượt hội thoại"])
+    METRIC --> FIN
+```
+
+#### B. Query Clarifier Wizard Graph (`src/agents/query_clarifier/graph.py`)
+```mermaid
+flowchart LR
+    INPUT(["Câu hỏi truy vấn tự nhiên"]) --> W_INIT["wizard_init_node\n(Phân tích câu hỏi, xác định độ mơ hồ)"]
+    W_INIT --> W_STEP["wizard_step_node\n(Đặt câu hỏi làm rõ từng bước)"]
+    W_STEP -->|"Cần thêm thông tin"| W_STEP
+    W_STEP -->|"Đã đủ ngữ cảnh"| RESOLVE["resolve_node\n(Đóng gói cấu hình Metric & Dimension chuẩn)"]
+    RESOLVE --> OUT(["Chuyển sang Semantic Query Explorer"])
+```
 
 ---
 
-## Design Decisions
+## 4. Tech Stack Specification
 
-| Quyết định | Lựa chọn | Thay thế đã xét | Lý do |
+| Thành phần / Tầng | Công nghệ / Thư viện | Phiên bản | Vai trò & Lý do lựa chọn |
 |---|---|---|---|
-| Scope v1.0 | **2 pipelines: Generate & Query** | 1 pipeline (Generate only) | Đáp ứng nhu cầu khai thác dữ liệu trực tiếp từ Semantic Layer |
-| Query Pattern | **Deterministic Semantic Querying** | Text-to-SQL tự do qua LLM | Chính xác 100%, không bị ảo giác, hiệu năng & an toàn tuyệt đối |
-| Scope cho Query | **CHỈ áp dụng Live DB (Connection String)** | Hỗ trợ cả SQL Dump | SQL Dump chỉ có DDL cấu trúc, không có môi trường chạy DB thực tế |
-| HITL mechanism | **LangGraph Interrupt + CRUD API** | Full auto AI, không review | BA/DA phải là người duyệt cuối cùng — đảm bảo accuracy nghiệp vụ |
-| DB access pattern | **Inspector (Flow 1) + Read-Only SELECT (Flow 2)** | Full Read-Write access | An toàn tuyệt đối, chỉ cho phép SELECT kèm LIMIT & Timeout |
-| Credential storage | **Fernet encryption** | Plaintext / bcrypt | Reversible (cần decrypt để introspect/query); symmetric key an toàn |
+| **API Framework** | **FastAPI** | $\ge 0.115$ | Xử lý bất đồng bộ (Async IO), OpenAPI auto docs, hiệu năng cao |
+| **ASGI Server** | **Uvicorn** | $\ge 0.34$ | ASGI server tiêu chuẩn, hỗ trợ hot-reload trong môi trường phát triển |
+| **Data Validation** | **Pydantic v2** | $\ge 2.10$ | Ép kiểu dữ liệu request/response nghiêm ngặt, serializing nhanh |
+| **Configuration** | **pydantic-settings** | $\ge 2.7$ | Nạp cấu hình từ `.env` với Type Hints đầy đủ |
+| **Agent Orchestration** | **LangGraph** | $\ge 0.2$ | StateGraph điều phối luồng xử lý đa tác tử và cơ chế HITL Interrupt |
+| **LLM Framework** | **LangChain** | $\ge 0.3$ | Prompt templates và abstractions tương tác mô hình |
+| **LLM Provider** | **OpenAI GPT-4o-mini** | API | Chi phí tối ưu, output đồng nhất với `temperature = 0.0` |
+| **Database ORM & Metadata** | **SQLAlchemy** | $\ge 2.0$ | AsyncEngine/Session ORM kết hợp Inspector API đọc schema |
+| **SQL Parser & Guardrails** | **sqlglot** | $\ge 25.0$ | Phân tích cú pháp SQL AST, xác thực Read-Only, inject LIMIT & Timeout |
+| **Database Migrations** | **Alembic** | $\ge 1.14$ | Quản lý lịch sử thay đổi cấu trúc Metadata Store an toàn |
+| **Metadata Database** | **PostgreSQL / SQLite** | 16-alpine | PostgreSQL cho Production/Docker và SQLite cho môi trường test nhanh |
+| **Database Drivers** | **asyncpg**, **aiosqlite**, **psycopg2** | Standard | Driver async cho PostgreSQL và SQLite |
+| **Security & Auth** | **cryptography (Fernet)**, **python-jose**, **passlib (bcrypt)** | Standard | Mã hóa đối xứng Connection URL; băm mật khẩu và JWT token |
+| **Export Formats** | **PyYAML**, **json** | $\ge 6.0$ | Xuất khẩu Semantic Layer phục vụ tích hợp công cụ BI |
+| **Frontend Framework** | **Next.js 14 (App Router)** | 14.2+ | React server/client components, tối ưu SEO và routing linh hoạt |
+| **Frontend Styling** | **Tailwind CSS**, **Lucide React** | Standard | Thiết kế giao diện hiện đại, responsive, icon phong phú |
+| **Code Viewer & Highlighting** | **PrismJS** | Standard | Highlight cú pháp SQL và YAML trên giao diện Web UI |
+| **DevOps & Containers** | **Docker & Docker Compose** | Multi-stage | Đồng bộ môi trường Dev / Staging / Production |
+| **Testing Framework** | **pytest, pytest-asyncio, httpx** | $\ge 8.0$ | Async unit & integration testing với mock LLM/DB |
 
+---
+
+## 5. Architectural Design Decisions
+
+| Quyết định Kiến trúc | Lựa chọn Thực tế | Phương án Thay thế đã Xét | Lý do & Giá trị mang lại |
+|---|---|---|---|
+| **Query Engine Pattern** | **Deterministic Semantic Compilation** | Text-to-SQL tự do qua LLM | Đảm bảo tính chính xác 100%, không ảo giác, loại trừ rủi ro SQL Injection và lỗi cú pháp. |
+| **Phạm vi Query Execution** | **CHỈ áp dụng Live DB** | Áp dụng cho cả SQL Dump | SQL Dump chỉ chứa DDL cấu trúc, không có môi trường chạy dữ liệu thực tế. |
+| **Schema Enrichment** | **2-Pass Hierarchical + Clustering** | 1-Pass Flat Prompting | Tối ưu context window của LLM cho database lớn (> 20-50 bảng), đảm bảo từ vựng nghiệp vụ nhất quán trên toàn hệ thống. |
+| **Bảo vệ Dữ liệu Live DB** | **sqlglot AST Inspection + Read-Only SELECT** | Phân quyền DB user thuần túy | Ngăn ngừa mọi hành vi sửa đổi dữ liệu ở cấp độ ứng dụng, tự động gán trần `LIMIT 100` và `timeout = 15s`. |
+| **Lưu trữ Thông tin Nhạy cảm** | **Fernet Symmetric Encryption** | Lưu Plaintext / Hashing một chiều | Fernet cho phép giải mã 2 chiều an toàn trong bộ nhớ khi cần kết nối lại DB mà không để lộ connection string ra ngoài. |
+| **Quản trị Chỉ số (Metrics)** | **MetricDefinition v2 + Version History** | Lưu chuỗi SQL tự do | Hỗ trợ quản trị công thức, kiểu tổng hợp (`SUM`, `COUNT`, `AVG`...), bộ lọc độc lập và truy vết lịch sử thay đổi phiên bản. |
 
 ---
 
-## DB Schema — Metadata Store
+## 6. Database Schema — Metadata Store (10 Tables)
 
-Các bảng trong PostgreSQL **Metadata Store** (bao gồm Quản lý Người dùng & Quản trị Chỉ số):
+Hệ thống Metadata Store sử dụng **10 bảng ORM** được định nghĩa trong [`src/models/db.py`](file:///d:/project/P-069/src/models/db.py):
 
-| Bảng | Mô tả |
-|------|-------|
-| `users` | Tài khoản người dùng, email, username, password băm bcrypt, role (`admin`, `analyst`) |
-| `user_sessions` | Quản lý phiên đăng nhập, JWT refresh token hash, IP, user-agent, revoked status |
-| `semantic_databases` | Thông tin Target DB: `id`, `created_by (FK)`, `display_name`, `db_type`, `conn_url_enc` (Fernet), `created_at` |
-| `semantic_tables` | Bảng được enrich: `id`, `db_id (FK)`, `table_name`, `business_name`, `description` |
-| `semantic_columns` | Cột được enrich: `id`, `table_id (FK)`, `column_name`, `data_type`, `business_name`, `description` |
-| `semantic_metrics` | Business Metrics: `id`, `db_id (FK)`, `created_by (FK)`, `name`, `description`, `sql_template`, `source (ai\|manual)`, `created_at` |
+```mermaid
+erDiagram
+    users ||--o{ user_sessions : "has sessions (1-N)"
+    users ||--o{ imported_schemas : "owns (1-N)"
+    users ||--o{ live_target_databases : "owns (1-N)"
+    users ||--o{ semantic_databases : "creates (1-N)"
+    users ||--o{ semantic_metrics : "creates/approves (1-N)"
+    users ||--o{ metric_versions : "changes (1-N)"
 
-> **Lưu ý:** `conn_url_enc` luôn lưu dưới dạng Fernet ciphertext. Decrypt trong memory khi cần introspect lại — không bao giờ log plaintext.
+    semantic_databases ||--o{ semantic_tables : "contains (1-N)"
+    semantic_databases ||--o{ semantic_metrics : "contains (1-N)"
+    semantic_databases ||--o{ canonical_relationships : "contains (1-N)"
+
+    semantic_tables ||--o{ semantic_columns : "contains (1-N)"
+    semantic_tables ||--o{ canonical_relationships : "joins from/to (1-N)"
+    semantic_tables ||--o{ semantic_metrics : "base entity for (1-N)"
+
+    semantic_metrics ||--o{ metric_versions : "tracks versions (1-N)"
+
+    users {
+        int id PK
+        string email UK
+        string username UK
+        string hashed_password
+        string full_name
+        string role "admin | analyst"
+        string status "active | inactive | suspended"
+        datetime created_at
+        datetime updated_at
+    }
+
+    user_sessions {
+        int id PK
+        int user_id FK
+        string refresh_token_hash UK
+        string user_agent
+        string ip_address
+        datetime expires_at
+        boolean revoked
+        datetime created_at
+    }
+
+    imported_schemas {
+        int id PK
+        int created_by FK
+        string display_name
+        string dialect "postgresql | mysql | sqlite"
+        json schema_metadata
+        int semantic_db_id FK
+        datetime created_at
+        datetime updated_at
+    }
+
+    live_target_databases {
+        int id PK
+        int created_by FK
+        string display_name
+        string dialect "postgresql | mysql | sqlite"
+        text conn_url_enc "Fernet ciphertext"
+        json schema_metadata
+        int semantic_db_id FK
+        datetime created_at
+        datetime updated_at
+    }
+
+    semantic_databases {
+        int id PK
+        int created_by FK
+        string display_name
+        string db_type "postgresql | mysql | sqlite"
+        text conn_url_enc "Fernet ciphertext"
+        string status "draft | active | archived"
+        datetime created_at
+        datetime updated_at
+    }
+
+    semantic_tables {
+        int id PK
+        int db_id FK
+        string table_name
+        string business_name
+        text description
+        bigint row_count_approx
+        string physical_schema
+        string primary_key_column
+        int created_by FK
+        datetime created_at
+        datetime updated_at
+    }
+
+    semantic_columns {
+        int id PK
+        int table_id FK
+        string column_name
+        string data_type
+        string business_name
+        text description
+        boolean is_primary_key
+        boolean is_foreign_key
+        string fk_target_table
+        string fk_target_column
+        boolean is_nullable
+        boolean is_time_dimension
+        json allowed_values
+        datetime created_at
+        datetime updated_at
+    }
+
+    semantic_metrics {
+        int id PK
+        int db_id FK
+        int created_by FK
+        string name
+        text description
+        text sql_template
+        string source "ai | manual"
+        string status "draft | active | archived"
+        int base_entity_id FK
+        text formula
+        string aggregation_type
+        json definition
+        int version
+        int approved_by FK
+        datetime created_at
+        datetime updated_at
+    }
+
+    canonical_relationships {
+        int id PK
+        int connection_id FK
+        int from_entity_id FK
+        int to_entity_id FK
+        string relationship_type "many_to_one | one_to_one"
+        text join_condition
+        string relationship_key UK
+        string constraint_name
+        json column_pairs
+        string validation_status "valid | invalid"
+        datetime created_at
+    }
+
+    metric_versions {
+        int id PK
+        int metric_id FK
+        int version
+        text formula
+        json definition
+        int changed_by FK
+        text change_reason
+        datetime created_at
+    }
+```
 
 ---
+
+## 7. Security & Governance Principles
+
+1. **Schema-Only Introspection:** Agent không bao giờ truy vấn dữ liệu nhạy cảm của khách hàng trong bước sinh Semantic Layer.
+2. **Deterministic Query Compilation:** Không để LLM tự viết SQL lúc truy vấn dữ liệu thực tế nhằm loại bỏ hoàn toàn các rủi ro bảo mật và sai sót công thức.
+3. **Double Guardrails on Execution:** Mọi câu truy vấn gửi tới Live DB đều được bọc kiểm tra AST với `sqlglot`, gán cứng trần `LIMIT 100` và `timeout = 15s`.
+4. **Credential Isolation:** Toàn bộ chuỗi kết nối Target DB được mã hóa Fernet đối xứng trước khi ghi vào Database và chỉ giải mã trong RAM khi thực thi tác vụ.

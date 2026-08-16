@@ -119,6 +119,7 @@ async def _bootstrap_semantic_tables_if_empty(db: AsyncSession, db_id: int) -> N
                 is_primary_key=col_meta.primary_key,
                 is_nullable=col_meta.nullable,
                 is_time_dimension=is_time,
+                allowed_values=list(col_meta.sample_values) if col_meta.sample_values else None,
             )
             db.add(col_record)
     await db.flush()

@@ -1,11 +1,13 @@
 # 🤖 AI Semantic Layer Agent — P-069
 
 > **Dự án thuộc VinUni AI20K Build Phase (Cohort 3)**  
-> **Hệ thống AI Agent hỗ trợ xây dựng và quản trị lớp ngữ nghĩa dữ liệu (Semantic Layer) & định nghĩa chỉ số kinh doanh thống nhất.**
+> **Nền tảng AI Agent hỗ trợ xây dựng, quản trị lớp ngữ nghĩa dữ liệu (Semantic Layer) tập trung & biên dịch truy vấn dữ liệu kinh doanh chuẩn xác.**
 
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Next.js 14](https://img.shields.io/badge/Next.js-14.2+-black?style=flat&logo=next.js&logoColor=white)](https://nextjs.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-FF6F61?style=flat)](https://langchain-ai.github.io/langgraph/)
+[![SQLGlot](https://img.shields.io/badge/sqlglot-25.0+-blue?style=flat)](https://github.com/tobymao/sqlglot)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -13,12 +15,13 @@
 
 ## 📌 Tổng quan bài toán (Problem Statement)
 
-Trong các doanh nghiệp, dữ liệu lưu trữ tại cơ sở dữ liệu (PostgreSQL, MySQL, SQLite) thường gặp **2 thách thức lớn**:
+Trong các doanh nghiệp hiện nay, dữ liệu lưu trữ tại cơ sở dữ liệu quan hệ (PostgreSQL, MySQL, SQLite) thường đối mặt với **2 thách thức lớn**:
 
-1. **Khoảng cách Ngữ cảnh Nghiệp vụ (Business Context Gap):** Tên bảng và cột mang tính kỹ thuật khô khan (vd: `usr_tbl_01`, `amt_vat_inc`, `ord_sts_cd`), khiến người dùng nghiệp vụ hoặc BA/DA mất thời gian giải thích và diễn giải số liệu.
-2. **Hỗn loạn Định nghĩa Chỉ số (Metric Definition Chaos):** Thiếu một "nguồn sự thật duy nhất" (Single Source of Truth) cho các công thức tính chỉ số (doanh thu, churn rate, conversion rate...). Mỗi phòng ban tự tính theo cách riêng dẫn đến số liệu báo cáo không thống nhất.
+1. **Khoảng cách Ngữ cảnh Nghiệp vụ (Business Context Gap):** Tên bảng và cột mang tính kỹ thuật khô khan (`usr_tbl_01`, `amt_vat_inc`, `ord_sts_cd`), khiến người dùng nghiệp vụ hoặc BA/DA mất nhiều thời gian tra cứu từ điển dữ liệu (Data Dictionary), dễ gây hiểu sai bản chất số liệu.
+2. **Hỗn loạn Định nghĩa Chỉ số (Metric Definition Chaos):** Thiếu một "nguồn sự thật duy nhất" (Single Source of Truth) cho các công thức tính chỉ số cốt lõi (doanh thu thuần, tỷ lệ chuyển đổi, ARPU...). Mỗi phòng ban tự tính toán theo logic riêng dẫn đến báo cáo không thống nhất.
 
 ### 💡 Giải pháp: AI Semantic Layer Agent (v1.0)
+
 **AI Semantic Layer Agent** tự động hóa quy trình **Introspect Schema → AI Đặt tên Nghiệp vụ tiếng Việt & Đề xuất Chỉ số → HITL Review (Người dùng phê duyệt) → Lưu vào Metadata Store → Export JSON/YAML** để tích hợp với các công cụ BI.
 
 ---
@@ -26,6 +29,7 @@ Trong các doanh nghiệp, dữ liệu lưu trữ tại cơ sở dữ liệu (Po
 ## 🎯 Phạm vi dự án (Project Scope)
 
 ### ✅ In-Scope (v1.0 - Flow 1 Pipeline)
+
 - **Schema Introspection:** Tự động đọc metadata (tables, columns, foreign keys, data types) qua `SQLAlchemy Inspector`. **Tuyệt đối không query/SELECT data** trên Target DB.
 - **AI Business Enrichment:** Dùng LLM (GPT-4o-mini) chuyển đổi tên kỹ thuật sang tên nghiệp vụ chuẩn Tiếng Việt và viết mô tả chi tiết.
 - **Metric Suggestion:** LLM phân tích schema để gợi ý Business Metrics kèm câu lệnh SQL template.
@@ -34,102 +38,126 @@ Trong các doanh nghiệp, dữ liệu lưu trữ tại cơ sở dữ liệu (Po
 - **Metadata Management & Export:** Thêm/sửa/xóa Business Metrics thủ công và xuất Semantic Layer ra chuẩn **JSON** và **YAML**.
 
 ### ❌ Out-of-Scope (v1.0)
+
 - Không thực thi câu lệnh SQL SELECT trên Target DB.
 - Không hỗ trợ NL2SQL Chatbot / Natural Language Query (dành cho v2.0+).
 - Không dùng Vector Database (ChromaDB, FAISS).
 
 ---
 
-## 🏗 Kiến trúc hệ thống (System Architecture)
-
-Hệ thống xây dựng theo mô hình 3-Tier với **LangGraph StateGraph** điều phối pipeline có nút **Interrupt (HITL)**:
+## 🏗 Kiến trúc Hệ thống (System Architecture)
 
 ```mermaid
-flowchart TD
-    START(["Client / UI Request\n(Connection URL)"]) --> IN
-
-    subgraph Pipeline["⚙️ LangGraph Flow 1 Pipeline"]
-        IN["🔍 Introspect Node\nSQLAlchemy Inspector\n(Schema Metadata Only)"]
-        IN --> EN
-        
-        EN["📝 Enrich Node\nGPT-4o-mini đặt business_name\n& mô tả tiếng Việt"]
-        EN --> MS
-        
-        MS["💡 Metric Suggest Node\nGPT-4o-mini đề xuất\nBusiness Metrics + SQL Template"]
-        MS --> HITL
-        
-        HITL{"👤 HITL Review Node\n(LangGraph Interrupt)\nBA/DA duyệt & chỉnh sửa"}
-        
-        HITL -->|"✅ Approve"| SV["💾 Save Node\nPersist vào Metadata Store"]
-        HITL -->|"🔄 Request Re-enrich"| EN
+graph TB
+    subgraph Client["🖥️ Client Layer — Next.js 14 Web App"]
+        V1["📊 Data Model View"]
+        V2["📋 Metrics Catalog View"]
+        V3["🔍 Metric Explorer View"]
+        V4["💬 AI Studio View"]
+        V5["📤 Export Playground View"]
     end
 
-    SV --> EX["📤 Export Service\nJSON / YAML File"]
-    EX --> END(["✅ Complete Semantic Layer"])
+    subgraph API["🌐 API Layer — FastAPI Async Gateway"]
+        A1["🔐 Auth & RBAC (/api/v1/auth)"]
+        A2["📥 Ingestion & Live DB Connect (/api/v1/semantic/...)"]
+        A3["📚 Catalog & Metadata CRUD (/api/v1/semantic/{db_id}/...)"]
+        A4["⚡ Semantic Query Engine (/api/v1/semantic/{db_id}/query)"]
+        A5["🤖 Multi-Agent Studio & Clarifier (/api/v1/semantic/{db_id}/...)"]
+    end
 
-    IN -.- TARGET[("🗄️ Target DB\n(Postgres/MySQL/SQLite)")]
-    SV -.- METADB[("🗄️ Metadata Store\n(PostgreSQL)")]
+    subgraph Pipelines["⚙️ Core Processing Engines"]
+        P_F1["Flow 1: Ingestion -> Pass 1 Glossary -> Clustering -> Pass 2 Enrichment -> Canonical Builder -> HITL"]
+        P_F2["Flow 2: Resolver -> SemanticQueryCompiler -> sqlglot Guardrails (LIMIT 100) -> Live DB Execution"]
+        P_AG["Conversational: Chat Orchestrator Graph & Query Clarifier Wizard Graph"]
+    end
+
+    subgraph Storage["🗄️ Storage Layer"]
+        METADB[("🗄️ Metadata Store (PostgreSQL / SQLite)\n10 ORM Tables")]
+        TARGET[("🎯 Target DB (Live DB Read-Only)\nPostgreSQL / MySQL / SQLite")]
+    end
+
+    Client --> API
+    API --> Pipelines
+    Pipelines --> Storage
 ```
 
 ---
 
-## 🛠 Tech Stack
-
-| Thành phần | Công nghệ | Phiên bản | Vai trò |
-|---|---|---|---|
-| **Core & Framework** | Python / FastAPI | 3.11 / ≥ 0.115 | Language & Async REST API |
-| **Agent Orchestration** | LangGraph | ≥ 0.2 | StateGraph & HITL Interrupt |
-| **LLM Provider** | OpenAI GPT-4o-mini | API (Temp = 0.0) | Sinh tên nghiệp vụ & gợi ý metric |
-| **Database Abstraction** | SQLAlchemy | ≥ 2.0 | Metadata Inspector & ORM |
-| **Metadata Store** | PostgreSQL | 16-alpine | Lưu thông tin Semantic Layer |
-| **Security** | Cryptography (Fernet) | Standard | Mã hóa Connection URL |
-| **Export Formats** | PyYAML / JSON | Standard | Đóng gói Semantic Layer cho BI |
-| **DevOps & Quality** | Docker / Docker Compose / Ruff | Standard | Containerization & Linting |
-
----
-
-## 📁 Cấu trúc thư mục dự án
+## 📁 Cấu trúc Thư mục Dự án
 
 ```
 P-069/
 ├── src/
-│   ├── agents/               # 🧠 LangGraph Agent Pipeline
-│   │   ├── nodes/            #    Các node: introspect, enrich, metric_suggest, save
-│   │   ├── graph.py          #    Định nghĩa StateGraph & Routing logic
-│   │   └── state.py          #    AgentState TypedDict schema
-│   ├── api/                  # 🌐 FastAPI Routes & Endpoints
-│   │   ├── auth.py           #    Authentication routes (register, login, Google OAuth)
-│   │   └── routes.py         #    Flow 1 REST endpoints & CRUD Metrics
-│   ├── models/               # 📋 Pydantic Schemas & DB Models
-│   │   ├── db.py             #    SQLAlchemy ORM models
-│   │   └── schemas.py        #    Request/Response Validation Models
-│   ├── services/             # 🔧 Core Services (LLM, Security, Export)
-│   │   ├── database.py       #    Fernet encryption + AsyncEngine/Session
-│   │   ├── export_service.py #    JSON/YAML export
-│   │   └── llm.py            #    get_llm() factory (OpenAI GPT-4o-mini)
-│   ├── config.py             # ⚙️ App Settings (Pydantic-settings)
-│   └── main.py               # 🚀 FastAPI App Entry Point
-├── tests/                    # 🧪 Test Suite (pytest)
-│   ├── test_agents/          #    Unit tests cho từng node & graph
-│   ├── test_api/             #    Integration tests cho API endpoints
-│   └── test_models/          #    ORM model & encryption tests
-├── docs/                     # 📚 Tài liệu chi tiết dự án
-│   ├── BRIEF.md              #    Project Brief
-│   ├── PRD.md                #    Product Requirements Document
-│   ├── UI_FLOW.md            #    Giao diện & HITL Interaction Flow
-│   └── ACTION_PLAN.md        #    Kế hoạch triển khai dự án
-├── alembic/                  # 🗄️ Alembic Database Migration scripts
-│   ├── versions/             #    Chứa các file migration (.py)
-│   └── env.py                #    Cấu hình AsyncEngine migration
-├── alembic.ini               # ⚙️ alembic configuration
-├── scripts/                  # 🔌 AI Usage Logging Hooks
-├── ARCHITECTURE.md           # 🏛 Architecture Specification
-├── AGENTS.md                 # 📜 AI Assistant Rules & Guidelines
-├── docker-compose.dev.yml    # 🐳 Docker Compose cho Development (Hot-reload + Postgres)
-├── docker-compose.yml        # 🐙 Docker Compose cho Production
-├── Dockerfile                # 🐳 Dockerfile Multi-stage Build
-├── requirements.txt          # 📦 Python Dependencies
-└── README.md                 # 📖 Tài liệu dự án (File này)
+│   ├── agents/                   # 🧠 Hệ thống Agent LangGraph & Multi-Agent
+│   │   ├── nodes/                #    Các node: introspect, enrich, metric_suggest, chitchat, orchestrator, save
+│   │   ├── query_clarifier/      #    Query Clarifier Wizard (wizard_init, wizard_step, resolve)
+│   │   ├── graph.py              #    StateGraph Flow 1 chính với HITL interrupt
+│   │   ├── chat_graph.py         #    StateGraph hội thoại đa tác tử
+│   │   └── state.py              #    AgentState TypedDict
+│   ├── api/                      # 🌐 FastAPI REST API Routes
+│   │   ├── auth.py               #    Xác thực JWT, Bcrypt, Google OAuth, Refresh token, RBAC
+│   │   ├── query_clarify_routes.py # API endpoints cho Query Clarifier Wizard
+│   │   └── routes.py             #    Tập trung 25+ API endpoints của hệ thống
+│   ├── models/                   # 📋 SQLAlchemy ORM Models & Pydantic Schemas
+│   │   ├── db.py                 #    10 ORM Models (users, sessions, imported_schemas, canonical_relationships...)
+│   │   ├── metric_definition.py  #    MetricDefinition v2 schema & validator
+│   │   ├── schema_metadata.py    #    RawSchemaMetadata & Diagnostic codes
+│   │   └── schemas.py            #    Pydantic Request/Response models
+│   ├── services/                 # 🔧 Core Services & Business Logic
+│   │   ├── canonical_builder_service.py # Xây dựng canonical schema từ technical schema
+│   │   ├── clustering.py         #    Phân cụm đồ thị bảng (Domain/Graph Clustering)
+│   │   ├── pass1_global_glossary.py # Pass 1 Global Domain Glossary
+│   │   ├── pass2_cluster_enrichment.py # Pass 2 Cluster Enrichment + Fallback
+│   │   ├── query_compiler.py     #    Deterministic Semantic Query Compiler
+│   │   ├── query_execution.py    #    Safe Live DB execution service
+│   │   ├── sql_dump_scanner.py   #    SQL Dump DDL scanner
+│   │   ├── sql_dump_parser.py    #    SQL Dump AST parser
+│   │   ├── export_service.py     #    Xuất bản Semantic Layer ra JSON/YAML
+│   │   ├── live_db_service.py    #    Quản lý kết nối Target Live DB
+│   │   ├── imported_schema_service.py # Quản lý schema import từ file dump
+│   │   ├── semantic_service.py   #    Quản lý Semantic Layer, Catalog, Versioning
+│   │   ├── database.py           #    AsyncEngine & Fernet encryption
+│   │   └── llm.py                #    Factory get_llm() (GPT-4o-mini, temp=0.0)
+│   ├── config.py                 # ⚙️ Application Settings (Pydantic-settings)
+│   └── main.py                   # 🚀 FastAPI App Entry Point & Lifespan
+├── frontend/                     # 🖥️ Next.js 14 Single Page Workspace App
+│   ├── src/
+│   │   ├── app/                  #    App Router (Landing /, Semantic Workspace /semantic/[db_id])
+│   │   ├── components/
+│   │   │   ├── views/            #    5 Views: DataModel, MetricsCatalog, MetricExplorer, AIStudio, Export
+│   │   │   ├── studio/           #    Streaming chat & SQL/YAML syntax highlighters
+│   │   │   ├── explorer/         #    AI Query Assistant Modal & Wizard
+│   │   │   └── modals/           #    Modals kết nối DB & Upload SQL Dump
+│   │   ├── context/              #    Global State Context (Auth, Workspace, Schema)
+│   │   └── lib/                  #    API client & utility helpers
+│   ├── package.json              #    Frontend dependencies
+│   └── tailwind.config.ts        #    Tailwind CSS styling configuration
+├── alembic/                      # 🗄️ Database Migrations (Alembic)
+│   ├── versions/                 #    Lịch sử các bản migration
+│   └── env.py                    #    Cấu hình AsyncEngine migration
+├── data/                         # 💾 Dữ liệu mẫu & SQL benchmark
+├── docs/                         # 📚 Tài liệu chi tiết dự án
+│   ├── BRIEF.md                  #    Tóm tắt dự án
+│   ├── PRD.md                    #    Product Requirements Document
+│   ├── DATABASE_DESIGN.md        #    Thiết kế CSDL & ERD 10 bảng (v2.0)
+│   ├── FEATURE_SPECIFICATIONS.md #    Đặc tả chi tiết các tính năng chính
+│   ├── UI_FLOW.md                #    Luồng màn hình & Wireframes
+│   └── ACTION_PLAN.md            #    Kế hoạch hành động & Tiến độ
+├── scripts/                      # 🔌 Utility & Database Setup Scripts
+│   ├── setup_target_db.py        #    Khởi tạo Golden Retail Benchmark DB
+│   └── setup_hooks.ps1           #    Setup AI usage logging hooks
+├── tests/                        # 🧪 Test Suite (pytest)
+│   ├── test_agents/              #    Tests cho LangGraph nodes & Chat/Wizard graphs
+│   ├── test_api/                 #    Integration tests cho 25+ API endpoints
+│   ├── test_models/              #    Unit tests cho ORM models & Pydantic schemas
+│   └── test_services/            #    Unit tests cho 2-Pass, Compiler, Dump Scanner, Auth...
+├── ARCHITECTURE.md               # 🏛 Architecture Document chi tiết
+├── AGENTS.md                     # 📜 Quy tắc phát triển & AI Rules
+├── docker-compose.dev.yml        # 🐳 Docker Compose môi trường Development
+├── docker-compose.yml            # 🐙 Docker Compose môi trường Production
+├── Dockerfile                    # 🐳 Dockerfile Backend
+├── requirements.txt              # 📦 Python Dependencies
+└── README.md                     # 📖 Tài liệu hướng dẫn (File này)
 ```
 
 ---
@@ -137,38 +165,40 @@ P-069/
 ## ⚡ Quick Start & Hướng dẫn cài đặt
 
 ### 1. Yêu cầu tiên quyết
+
 - **Python:** `3.11+`
-- **Docker & Docker Compose** (nếu chạy container)
+- **Node.js:** `18+` & `npm`
+- **Docker & Docker Compose**
 - **Git**
 
-### 2. Clone repository & Môi trường Virtualenv
+### 2. Cài đặt Backend
 
 ```bash
-# Clone dự án
+# Clone repository
 git clone https://github.com/AI20K-Build-Phase-Cohort-3/P-069.git
 cd P-069
 
-# Tạo môi trường ảo
+# Tạo & kích hoạt virtualenv
 python -m venv .venv
-
-# Kích hoạt trên Windows PowerShell:
+# Trên Windows PowerShell:
 .\.venv\Scripts\Activate.ps1
-# Hoặc trên Linux/macOS:
+# Trên Linux/macOS:
 # source .venv/bin/activate
 
-# Cài đặt dependencies
+# Cài đặt dependencies backend
 pip install -r requirements.txt
 ```
 
-### 3. Cấu hình biến môi trường (`.env`)
+### 3. Cấu hình Biến môi trường (`.env`)
 
-Sao chép file `.env.example` thành `.env` và bổ sung các API Key:
+Sao chép `.env.example` thành `.env` và cập nhật các thông số:
 
 ```bash
 cp .env.example .env
 ```
 
 Nội dung `.env` chính:
+
 ```env
 APP_ENV=development
 LOG_LEVEL=INFO
@@ -196,7 +226,7 @@ MODEL_NAME=gpt-4o-mini
 # Secret Key mã hóa Fernet cho Target DB Connection URL
 ENCRYPTION_KEY=your_fernet_base64_key_here
 
-# Metadata Store DB Connection (PostgreSQL with asyncpg driver)
+# Metadata Store Database Connection (PostgreSQL asyncpg)
 DATABASE_URL=postgresql+asyncpg://dev:devpassword@localhost:5432/semantic_layer_dev
 ```
 
@@ -230,8 +260,8 @@ bash scripts/setup_hooks.sh
 ## 🗄️ Hướng dẫn Khởi tạo & Quản trị Cơ sở Dữ liệu (Database Setup & Management)
 
 Hệ thống phân biệt rõ ràng **2 nhóm Cơ sở Dữ liệu**:
-* **Metadata Store (PostgreSQL / SQLite):** Lưu thông tin người dùng, phiên đăng nhập, kết nối Target DB (đã mã hóa), bảng/cột được enrich và Business Metrics.
-* **Target DB (Chỉ đọc Schema):** Cơ sở dữ liệu nghiệp vụ của doanh nghiệp. Agent chỉ kết nối qua `SQLAlchemy Inspector` để đọc cấu trúc (Tables/Columns/FKs), **không thực thi truy vấn đọc dữ liệu (SELECT)**.
+- **Metadata Store (PostgreSQL / SQLite):** Lưu thông tin người dùng, phiên đăng nhập, kết nối Target DB (đã mã hóa), bảng/cột được enrich và Business Metrics.
+- **Target DB (Chỉ đọc Schema):** Cơ sở dữ liệu nghiệp vụ của doanh nghiệp. Agent chỉ kết nối qua `SQLAlchemy Inspector` để đọc cấu trúc (Tables/Columns/FKs), **không thực thi truy vấn đọc dữ liệu (SELECT)**.
 
 ### 1. Khởi tạo Metadata Store với Docker & PgWeb
 
@@ -240,80 +270,30 @@ Khởi chạy PostgreSQL 16 và giao diện quản trị Web GUI (PgWeb):
 ```bash
 # Khởi chạy Postgres DB & PgWeb UI trong background
 docker compose -f docker-compose.dev.yml up postgres pgweb -d
-```
 
-* **PostgreSQL:** `localhost:5432` | User: `dev` | Password: `devpassword` | DB: `semantic_layer_dev`
-* **PgWeb UI (Giao diện Web xem DB):** Mở trình duyệt tại [http://localhost:8081](http://localhost:8081)
-
-### 2. Quản trị Migration Cấu trúc Database (Alembic)
-
-Dự án tích hợp sẵn **Alembic** để tự động hóa migration cho Metadata Store (PostgreSQL / SQLite).
-
-```bash
-# 1. Cập nhật DB Schema lên phiên bản mới nhất (chạy khi setup ban đầu)
+# 2. Cập nhật Database Schema lên bản mới nhất
 alembic upgrade head
 
-# 2. (Dành cho Dev) Tự động sinh file migration mới khi chỉnh sửa SQLAlchemy ORM Model (src/models/db.py)
-alembic revision --autogenerate -m "describe_your_changes"
-
-# 3. Xem lịch sử các bản migration đã áp dụng
-alembic history --verbose
-
-# 4. Rollback 1 bản migration gần nhất
-alembic downgrade -1
+# 3. Nạp bộ dữ liệu thử nghiệm Golden Retail Database (36 bảng, 5.000 orders)
+python scripts/setup_target_db.py
 ```
 
-### 3. Tạo Secret Key mã hóa Connection URL (Fernet Encryption)
-
-Chuỗi kết nối (`conn_url`) đến Target DB **không bao giờ lưu ở dạng plaintext**. Bạn cần sinh `ENCRYPTION_KEY` và điền vào `.env`:
-
-```bash
-# Sinh Fernet Key bằng Python
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-### 4. Khởi tạo Target DB Thử nghiệm (Golden Retail Benchmark DB)
-
-Dự án cung cấp sẵn bộ dữ liệu mẫu **Golden Retail Database** (36 bảng DDL, 5.000 đơn hàng, 1.000 khách hàng, 8.000 phiên web, 8.5 MB seed dataset) để phục vụ thử nghiệm tính năng Introspection và biên dịch Query.
-
-1. Khởi chạy container PostgreSQL (nếu chưa chạy):
-   ```bash
-   docker compose -f docker-compose.dev.yml up postgres -d
-   ```
-
-2. Chạy script khởi tạo Target DB:
-   ```bash
-   python scripts/setup_target_db.py
-   ```
-   *Lưu ý:* Script hoàn toàn tự động! Nếu chưa có sẵn file seed SQL, script sẽ tự động gọi `scripts/seed_data_generator.py` và `scripts/convert_to_postgres.py` để sinh dữ liệu và nạp vào database `golden_retail_db`.
-
-3. **Connection URL của Target DB thử nghiệm**:
-   - **Khi chạy Backend trong Docker Container (`docker compose`):**
-     ```text
-     postgresql://dev:devpassword@postgres:5432/golden_retail_db
-     ```
-   - **Khi chạy Backend trên Local máy (`uvicorn`):**
-     ```text
-     postgresql://dev:devpassword@localhost:5432/golden_retail_db
-     ```
+- **PgWeb UI:** Mở trình duyệt tại [http://localhost:8081](http://localhost:8081) để xem trực tiếp cấu trúc DB.
 
 ---
 
-## 🚀 Chạy ứng dụng
+## 🚀 Khởi chạy Ứng dụng
 
 ### Cách 1: Chạy trực tiếp qua Uvicorn (Local Dev)
 
 1. Khởi động PostgreSQL Metadata Store qua Docker Compose (hoặc dùng Postgres local):
-```bash
-docker compose -f docker-compose.dev.yml up postgres pgweb -d
-```
 
-2. Khởi chạy FastAPI App Server:
 ```bash
+# Chạy uvicorn với hot-reload
 uvicorn src.main:app --reload --port 8000
 ```
 
-3. Mở tài liệu API Swagger tại: [http://localhost:8000/docs](http://localhost:8000/docs)
+1. Mở tài liệu API Swagger tại: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ### Cách 2: Chạy full-stack với Docker Compose
 
@@ -336,29 +316,29 @@ docker image prune -f
 ## 🔗 Danh sách API Endpoints chính
 
 | Method | Endpoint | Mô tả |
-|---|---|---|
+| --- | --- | --- |
 | `POST` | `/api/v1/semantic/generate` | Khởi chạy Flow 1 (Introspect DB → Enrich → Suggest Metrics) |
 | `POST` | `/api/v1/semantic/approve` | Xác nhận (Approve) từ HITL review & persist vào Metadata Store |
 | `PUT` | `/api/v1/semantic/{db_id}/table/{table_name}` | Cập nhật tên/mô tả nghiệp vụ của bảng (HITL Inline Edit) |
 | `PUT` | `/api/v1/semantic/{db_id}/column/{table_name}/{column_name}` | Cập nhật tên/mô tả nghiệp vụ của cột (HITL Inline Edit) |
 | `POST` | `/api/v1/semantic/{db_id}/metric` | Tạo mới một Business Metric (AI hoặc Thủ công) |
 | `PUT` | `/api/v1/semantic/{db_id}/metric/{metric_id}` | Cập nhật Business Metric đã tồn tại |
-| `DELETE`| `/api/v1/semantic/{db_id}/metric/{metric_id}` | Xóa Business Metric |
+| `DELETE` | `/api/v1/semantic/{db_id}/metric/{metric_id}` | Xóa Business Metric |
 | `GET` | `/api/v1/semantic/{db_id}/export?format=json\|yaml` | Xuất Semantic Layer đã phê duyệt ra JSON hoặc YAML |
 | `GET` | `/api/v1/status` | Kiểm tra trạng thái sẵn sàng của Agent |
 
 ---
 
-## 🧪 Testing & Code Quality
+## 🧪 Kiểm thử & Chất lượng Mã nguồn (Testing)
 
-Dự án tuân thủ nghiêm ngặt quy trình kiểm thử (Async unit test & Async API test with mock DB/LLM):
+Dự án áp dụng quy chuẩn kiểm thử nghiêm ngặt với 100% Mock LLM và Mock DB:
 
 ```bash
-# Kiểm tra linting & format bằng Ruff
+# Kiểm tra linter & formatting với Ruff
 ruff check src/
 ruff format src/
 
-# Chạy toàn bộ test suite
+# Chạy toàn bộ Test Suite (Unit & Integration tests)
 pytest
 
 # Chạy test kèm thông tin chi tiết
@@ -367,26 +347,28 @@ pytest -v -s
 
 ---
 
-## 🛡️ Quy tắc An toàn & Bảo mật (Security Guidelines)
+## 🛡️ Nguyên tắc An toàn & Bảo mật (Security Guidelines)
 
-1. **Schema Metadata Only:** Động cơ Introspection chỉ gọi `SQLAlchemy Inspector` để lấy cấu trúc dữ liệu (`get_tables`, `get_columns`, `get_foreign_keys`). **Không bao giờ thực thi câu lệnh SQL SELECT data**.
-2. **URL Encryption:** Connection URL của Target DB bắt buộc mã hóa qua `cryptography` Fernet trước khi lưu vào `semantic_databases.conn_url_enc`.
-3. **Human Approval:** Kết quả sinh ra từ AI phải trải qua nút HITL Interrupt trước khi ghi nhận chính thức vào Metadata Store.
+1. **Schema Metadata Only:** Động cơ Introspection chỉ đọc cấu trúc (`get_tables`, `get_columns`, `get_foreign_keys`), tuyệt đối không truy vấn dữ liệu nhạy cảm của khách hàng trong Flow 1.
+2. **Fernet Encryption:** Mọi Connection URL của Target DB đều được mã hóa đối xứng trước khi lưu vào database và chỉ giải mã trong RAM khi cần thực thi.
+3. **Double Guardrails trên Flow 2:** Ép kiểm tra AST câu lệnh qua `sqlglot` (bắt buộc duy nhất `SELECT`), tự động inject trần `LIMIT 100` (tối đa 1000 rows) và gán `statement_timeout = 15s`.
+4. **Deterministic Compilation:** Biên dịch SQL theo mô hình quan hệ bảng định danh, không dùng Text-to-SQL tự do khi truy vấn dữ liệu thực tế.
 
 ---
 
-## 📖 Tài liệu liên quan
+## 📚 Tài liệu Liên quan
 
-- 🏛️ [Architecture Specification](file:///d:/project/P-069/ARCHITECTURE.md)
-- 📜 [Agent Rules & Guidelines](file:///d:/project/P-069/AGENTS.md)
-- 📄 [Project Brief](file:///d:/project/P-069/docs/BRIEF.md)
+- 🏛️ [Architecture Document](file:///d:/project/P-069/ARCHITECTURE.md)
+- 🗄️ [Database Design Specification](file:///d:/project/P-069/docs/DATABASE_DESIGN.md)
 - 📋 [Product Requirements Document (PRD)](file:///d:/project/P-069/docs/PRD.md)
-- 🎨 [UI & HITL Flow](file:///d:/project/P-069/docs/UI_FLOW.md)
-- 📅 [Action Plan](file:///d:/project/P-069/docs/ACTION_PLAN.md)
+- 📑 [Feature Specifications](file:///d:/project/P-069/docs/FEATURE_SPECIFICATIONS.md)
+- 🎨 [UI Flow & Wireframes](file:///d:/project/P-069/docs/UI_FLOW.md)
+- 📅 [Action Plan & Tiến độ](file:///d:/project/P-069/docs/ACTION_PLAN.md)
+- 📄 [Project Brief](file:///d:/project/P-069/docs/BRIEF.md)
+- 📜 [Agent Rules & Guidelines](file:///d:/project/P-069/AGENTS.md)
 
 ---
 
-## 📄 License
+## 📄 Giấy phép (License)
 
 Dự án được phân phối theo giấy phép **MIT License**.
-

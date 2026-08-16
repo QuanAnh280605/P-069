@@ -83,6 +83,7 @@ def _default_schema(dialect: SchemaDialect) -> str:
 
 
 def _convert_column(col: dict, ordinal: int, dialect: SchemaDialect) -> ColumnMetadata:
+    sample = col.get("sample_values")
     return ColumnMetadata(
         column_name=Identifier.from_raw(col["column_name"], dialect),
         ordinal_position=ordinal,
@@ -91,6 +92,7 @@ def _convert_column(col: dict, ordinal: int, dialect: SchemaDialect) -> ColumnMe
         nullable=col.get("is_nullable", True),
         default_expression=col.get("default_value"),
         primary_key=col.get("is_primary_key", False),
+        sample_values=tuple(sample) if sample else None,
     )
 
 
@@ -137,6 +139,7 @@ async def save_node(state: AgentState) -> dict:
 
     try:
         canonical = raw_schema_to_canonical(raw_schema, dialect)
+        enrichment = state.get("enriched_schema")
         async for session in get_db_session():
             result = await enrich_and_save_canonical_schema(
                 db=session,
@@ -144,6 +147,7 @@ async def save_node(state: AgentState) -> dict:
                 connection_id=db_id,
                 raw_schema=canonical,
                 dialect=dialect,
+                enrichment=enrichment,
             )
             await _save_approved_metrics(session, state, db_id, user_id)
             await session.commit()

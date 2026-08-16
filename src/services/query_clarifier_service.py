@@ -32,54 +32,59 @@ def _cleanup_expired_sessions() -> None:
         _WIZARD_SESSIONS.pop(s_id, None)
 
 
+def _format_catalog_column(col: SemanticColumnModel) -> dict[str, Any]:
+    """Format single semantic column for wizard catalog context."""
+    return {
+        "column_id": col.id,
+        "column_name": col.column_name,
+        "business_name": col.business_name or col.column_name,
+        "description": col.description or "",
+        "data_type": col.data_type,
+        "allowed_values": col.allowed_values,
+        "is_time_dimension": "date" in col.data_type.lower() or "time" in col.data_type.lower(),
+    }
+
+
+def _format_catalog_table(tbl: SemanticTableModel, columns: list[SemanticColumnModel]) -> dict[str, Any]:
+    """Format single semantic table and its columns."""
+    return {
+        "table_id": tbl.id,
+        "table_name": tbl.table_name,
+        "business_name": tbl.business_name or tbl.table_name,
+        "description": tbl.description or "",
+        "columns": [_format_catalog_column(col) for col in columns],
+    }
+
+
+def _format_approved_metric(m: SemanticMetricModel) -> dict[str, Any]:
+    """Format single approved metric for wizard context."""
+    base_entity = m.definition.get("metric", {}).get("base_entity") if isinstance(m.definition, dict) else None
+    return {
+        "metric_id": m.id,
+        "name": m.name,
+        "description": m.description or "",
+        "base_entity_id": m.base_entity_id,
+        "base_entity": base_entity,
+    }
+
+
 async def _load_catalog_and_metrics(db: AsyncSession, db_id: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Load tables, columns, and approved metrics from metadata store."""
     tables_stmt = select(SemanticTableModel).where(SemanticTableModel.db_id == db_id)
-    tables_result = await db.execute(tables_stmt)
-    tables = list(tables_result.scalars().all())
+    tables = list((await db.execute(tables_stmt)).scalars().all())
 
     table_dicts: list[dict[str, Any]] = []
     for tbl in tables:
         cols_stmt = select(SemanticColumnModel).where(SemanticColumnModel.table_id == tbl.id)
-        cols_res = await db.execute(cols_stmt)
-        columns = list(cols_res.scalars().all())
-        table_dicts.append(
-            {
-                "table_id": tbl.id,
-                "table_name": tbl.table_name,
-                "business_name": tbl.business_name or tbl.table_name,
-                "columns": [
-                    {
-                        "column_id": col.id,
-                        "column_name": col.column_name,
-                        "business_name": col.business_name or col.column_name,
-                        "data_type": col.data_type,
-                        "is_time_dimension": "date" in col.data_type.lower() or "time" in col.data_type.lower(),
-                    }
-                    for col in columns
-                ],
-            }
-        )
+        columns = list((await db.execute(cols_stmt)).scalars().all())
+        table_dicts.append(_format_catalog_table(tbl, columns))
 
     metrics_stmt = select(SemanticMetricModel).where(
         SemanticMetricModel.db_id == db_id,
         SemanticMetricModel.status == "approved",
     )
-    metrics_res = await db.execute(metrics_stmt)
-    approved_metrics = list(metrics_res.scalars().all())
-
-    metric_dicts = [
-        {
-            "metric_id": m.id,
-            "name": m.name,
-            "description": m.description or "",
-            "base_entity_id": m.base_entity_id,
-            "base_entity": m.definition.get("metric", {}).get("base_entity")
-            if isinstance(m.definition, dict)
-            else None,
-        }
-        for m in approved_metrics
-    ]
+    approved_metrics = list((await db.execute(metrics_stmt)).scalars().all())
+    metric_dicts = [_format_approved_metric(m) for m in approved_metrics]
 
     return {"tables": table_dicts}, metric_dicts
 

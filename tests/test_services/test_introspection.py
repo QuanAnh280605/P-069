@@ -23,6 +23,8 @@ from src.services.introspection import (
     UnsupportedDatabaseTypeError,
     _normalize_url,
     _read_live_schema,
+    _sample_column_values,
+    _should_sample,
     extract_raw_schema,
 )
 
@@ -197,3 +199,169 @@ async def test_live_extraction_rejects_non_positive_connection_id() -> None:
     }
     with pytest.raises(ConnectionIntrospectionError, match="valid connection ID"):
         await extract_raw_schema(request)
+
+
+# ---------------------------------------------------------------------------
+# Value sampling: _should_sample heuristic
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("column_name", "data_type", "expected"),
+    [
+        # Categorical VARCHAR with name pattern → True
+        ("status", "VARCHAR(20)", True),
+        ("gender", "CHAR(1)", True),
+        ("role", "VARCHAR(30)", True),
+        ("priority", "VARCHAR(10)", True),
+        # BOOLEAN/BOOL → always True
+        ("is_active", "BOOLEAN", True),
+        ("is_deleted", "BOOL", True),
+        # ENUM → always True
+        ("color", "ENUM('red','blue')", True),
+        # INTEGER/SMALLINT with categorical name → True
+        ("is_completed", "INTEGER", True),
+        ("level", "SMALLINT", True),
+        ("category_id", "TINYINT", True),
+        # Plain INTEGER without categorical name → False
+        ("amount", "INTEGER", False),
+        ("total", "DECIMAL", False),
+        ("created_at", "TIMESTAMP", False),
+        ("price", "FLOAT", False),
+        # VARCHAR > 50 without categorical pattern → False
+        ("name", "VARCHAR(255)", False),
+        ("title", "VARCHAR(100)", False),
+        # PII blacklist → always False
+        ("email", "VARCHAR(100)", False),
+        ("password_hash", "VARCHAR(255)", False),
+        ("secret_key", "VARCHAR(50)", False),
+        ("token", "VARCHAR(64)", False),
+        ("description", "TEXT", False),
+        ("notes", "VARCHAR(500)", False),
+        ("phone", "VARCHAR(20)", False),
+        ("address", "VARCHAR(200)", False),
+        # TEXT, BLOB → always False
+        ("body", "TEXT", False),
+        ("data", "BLOB", False),
+    ],
+    ids=lambda param: f"{param}" if isinstance(param, str) else None,
+)
+def test_should_sample_heuristic(column_name: str, data_type: str, expected: bool) -> None:
+    """Heuristic correctly identifies categorical vs non-categorical columns."""
+    assert _should_sample(column_name, data_type) is expected
+
+
+# ---------------------------------------------------------------------------
+# Value sampling: _sample_column_values
+# ---------------------------------------------------------------------------
+
+
+def test_sample_column_values_returns_distinct_values() -> None:
+    """SELECT DISTINCT should return unique non-null values."""
+    conn = MagicMock()
+    result_mock = MagicMock()
+    result_mock.fetchall.return_value = [("active",), ("inactive",), ("pending",)]
+    conn.exec_driver_sql.return_value = result_mock
+
+    values = _sample_column_values(conn, "orders", "status", "main", "sqlite")
+
+    assert values == ["active", "inactive", "pending"]
+    sql = conn.exec_driver_sql.call_args[0][0]
+    assert "SELECT DISTINCT" in sql
+    assert "IS NOT NULL" in sql
+    assert "LIMIT 20" in sql
+
+
+def test_sample_column_values_returns_none_on_empty() -> None:
+    """Return None when no rows are returned."""
+    conn = MagicMock()
+    result_mock = MagicMock()
+    result_mock.fetchall.return_value = []
+    conn.exec_driver_sql.return_value = result_mock
+
+    values = _sample_column_values(conn, "orders", "status", "main", "sqlite")
+    assert values is None
+
+
+def test_sample_column_values_returns_none_on_failure() -> None:
+    """Graceful degradation: return None on any exception."""
+    conn = MagicMock()
+    conn.exec_driver_sql.side_effect = SQLAlchemyError("boom")
+
+    values = _sample_column_values(conn, "orders", "status", "main", "sqlite")
+    assert values is None
+
+
+# ---------------------------------------------------------------------------
+# Integration: sample_values populated in live schema extraction
+# ---------------------------------------------------------------------------
+
+SQLITE_SCHEMA_WITH_CATEGORIES = """
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    status VARCHAR(10) NOT NULL DEFAULT 'active',
+    category VARCHAR(20),
+    is_featured BOOLEAN DEFAULT 0,
+    name VARCHAR(255),
+    email VARCHAR(100),
+    description TEXT,
+    amount NUMERIC DEFAULT 0
+);
+INSERT INTO products (status, category, is_featured, name, email, description, amount) VALUES
+    ('active', 'electronics', 1, 'Widget A', 'a@test.com', 'Desc A', 10.00),
+    ('inactive', 'electronics', 0, 'Widget B', 'b@test.com', 'Desc B', 20.00),
+    ('active', 'clothing', 1, 'Widget C', 'c@test.com', 'Desc C', 30.00);
+"""
+
+
+@pytest.fixture
+def sqlite_categorized_url() -> str:
+    """SQLite DB with categorical and PII columns for sampling tests."""
+    database_name = f"sampling_{uuid4().hex}"
+    memory_uri = f"file:{database_name}?mode=memory&cache=shared"
+    anchor = sqlite3.connect(memory_uri, uri=True)
+    anchor.executescript(SQLITE_SCHEMA_WITH_CATEGORIES)
+    try:
+        yield f"sqlite:///file:{database_name}?mode=memory&cache=shared&uri=true"
+    finally:
+        anchor.close()
+
+
+@pytest.mark.asyncio
+async def test_sample_values_populated_for_categorical_column(sqlite_categorized_url: str) -> None:
+    """VARCHAR status column should have sample_values extracted."""
+    result = await _extract_sqlite(sqlite_categorized_url)
+    products = _table(result["raw_schema"]["tables"], "products")
+    status_col = next(c for c in products["columns"] if c["column_name"] == "status")
+    assert status_col["sample_values"] is not None
+    assert set(status_col["sample_values"]) == {"active", "inactive"}
+
+
+@pytest.mark.asyncio
+async def test_sample_values_none_for_pii_column(sqlite_categorized_url: str) -> None:
+    """PII columns (email, description) should NOT be sampled."""
+    result = await _extract_sqlite(sqlite_categorized_url)
+    products = _table(result["raw_schema"]["tables"], "products")
+    email_col = next(c for c in products["columns"] if c["column_name"] == "email")
+    desc_col = next(c for c in products["columns"] if c["column_name"] == "description")
+    assert email_col["sample_values"] is None
+    assert desc_col["sample_values"] is None
+
+
+@pytest.mark.asyncio
+async def test_sample_values_none_for_long_varchar(sqlite_categorized_url: str) -> None:
+    """VARCHAR(255) name column should NOT be sampled."""
+    result = await _extract_sqlite(sqlite_categorized_url)
+    products = _table(result["raw_schema"]["tables"], "products")
+    name_col = next(c for c in products["columns"] if c["column_name"] == "name")
+    assert name_col["sample_values"] is None
+
+
+@pytest.mark.asyncio
+async def test_sample_values_populated_for_boolean(sqlite_categorized_url: str) -> None:
+    """BOOLEAN is_featured column should have sample_values."""
+    result = await _extract_sqlite(sqlite_categorized_url)
+    products = _table(result["raw_schema"]["tables"], "products")
+    featured_col = next(c for c in products["columns"] if c["column_name"] == "is_featured")
+    assert featured_col["sample_values"] is not None
+    assert set(featured_col["sample_values"]) == {"0", "1"}

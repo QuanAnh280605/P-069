@@ -9,7 +9,7 @@ Provides:
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 from typing import Any
 
@@ -29,15 +29,67 @@ from src.models.db import (
 )
 from src.models.metric_definition import MetricDefinition
 from src.models.schema_metadata import RawSchemaMetadata
-from src.services.llm import get_llm
-from src.services.llm_json import ainvoke_json
+from src.services.clustering import cluster_tables
+from src.services.enrichment_config import DEFAULT_CONFIG
 from src.services.metric_definition_resolver import MetricDefinitionResolver
 from src.services.metric_definitions import validate_metric_definition, with_metric_status
+from src.services.pass1_global_glossary import execute_pass1
+from src.services.pass2_cluster_enrichment import enrich_clusters_parallel
 from src.services.query_compiler import SemanticQueryCompiler
 
 logger = logging.getLogger(__name__)
 
 _TIME_DIMENSION_TYPES = {"TIMESTAMP", "TIMESTAMP WITHOUT TIME ZONE", "TIMESTAMP WITH TIME ZONE", "DATE", "DATETIME"}
+
+
+def _pydantic_tables_to_typeddict(tables) -> list[dict]:
+    """Convert Pydantic TableMetadata to TypedDict for enrichment pipeline."""
+    result = []
+    for t in tables:
+        fk_col_names = {col.raw_name for fk in t.foreign_keys for col in fk.constrained_columns}
+        fk_ref_map: dict[str, dict] = {}
+        for fk in t.foreign_keys:
+            for i, col in enumerate(fk.constrained_columns):
+                ref_col = fk.referred_columns[i] if i < len(fk.referred_columns) else fk.referred_columns[0]
+                fk_ref_map[col.raw_name] = {
+                    "table": fk.referred_table.raw_name,
+                    "column": ref_col.raw_name,
+                    "schema": fk.referred_schema.raw_name if fk.referred_schema else None,
+                }
+        result.append(
+            {
+                "table_name": t.table_name.raw_name,
+                "schema_name": t.schema_name.raw_name if t.schema_name else None,
+                "table_type": "BASE TABLE",
+                "row_count_estimate": None,
+                "columns": [
+                    {
+                        "column_name": c.column_name.raw_name,
+                        "data_type": c.data_type,
+                        "is_nullable": c.nullable,
+                        "is_primary_key": c.primary_key,
+                        "is_foreign_key": c.column_name.raw_name in fk_col_names,
+                        "default_value": c.default_expression,
+                        "sample_values": list(c.sample_values) if c.sample_values else None,
+                        "references": fk_ref_map.get(c.column_name.raw_name),
+                    }
+                    for c in t.columns
+                ],
+                "primary_keys": [pk.raw_name for pk in (t.primary_key.constrained_columns if t.primary_key else [])],
+                "foreign_keys": [
+                    {
+                        "constraint_name": fk.constraint_name.raw_name if fk.constraint_name else None,
+                        "constrained_columns": [c.raw_name for c in fk.constrained_columns],
+                        "referred_schema": fk.referred_schema.raw_name if fk.referred_schema else None,
+                        "referred_table": fk.referred_table.raw_name,
+                        "referred_columns": [c.raw_name for c in fk.referred_columns],
+                    }
+                    for fk in t.foreign_keys
+                ],
+                "indexes": [],
+            }
+        )
+    return result
 
 
 async def ensure_semantic_database(
@@ -77,6 +129,7 @@ async def enrich_and_save_canonical_schema(
     connection_id: int,
     raw_schema: RawSchemaMetadata,
     dialect: str,
+    enrichment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Enrich raw schema metadata with LLM-generated business names and save as draft.
 
@@ -86,19 +139,38 @@ async def enrich_and_save_canonical_schema(
       3. Upsert into semantic_tables and semantic_columns (status implicit via model defaults).
       4. Extract foreign keys into canonical_relationships.
       5. Return summary dict with status='draft'.
+
+    When *enrichment* is provided (HITL path), it is used directly and no LLM call is made.
+    The dict must have a ``"tables"`` key whose value is a list of enrichment dicts (one per
+    table, in the same order as ``raw_schema.tables``).
     """
     logger.info(
         "[AI Semantic Agent] Starting canonical schema enrichment for connection_id=%d (%d tables)...",
         connection_id,
         len(raw_schema.tables),
     )
-    enrichment = await _call_llm_enrichment(raw_schema, dialect)
-    logger.info("[AI Semantic Agent] LLM enrichment returned data for %d tables", len(enrichment))
+
+    if enrichment is not None:
+        enrichment_tables: list[dict[str, Any]] = enrichment.get("tables", [])
+        logger.info("[AI Semantic Agent] Using provided enrichment (%d tables, HITL path)", len(enrichment_tables))
+    else:
+        enrichment_tables = await _call_llm_enrichment(raw_schema, dialect)
+    logger.info("[AI Semantic Agent] Enrichment ready for %d tables", len(enrichment_tables))
+
+    # Build lookup by table_name to be robust against ordering differences
+    enrichment_by_name: dict[str, dict[str, Any]] = {}
+    for e in enrichment_tables:
+        t_name = e.get("table_name")
+        if t_name:
+            enrichment_by_name[t_name] = e
+
     table_id_map: dict[str, int] = {}
 
-    for table_meta in raw_schema.tables:
+    for idx, table_meta in enumerate(raw_schema.tables):
         table_name = table_meta.table_name.raw_name
-        table_enrichment = enrichment.get(table_name, {})
+        table_enrichment = enrichment_by_name.get(
+            table_name, enrichment_tables[idx] if idx < len(enrichment_tables) else {}
+        )
         pk_cols = table_meta.primary_key.constrained_columns if table_meta.primary_key else ()
         pk_col_name = pk_cols[0].raw_name if pk_cols else None
 
@@ -334,40 +406,38 @@ async def get_metric_with_history(
 # ---------------------------------------------------------------------------
 
 
-async def _call_llm_enrichment(raw_schema: RawSchemaMetadata, dialect: str) -> dict[str, Any]:
-    """Call LLM to generate Vietnamese business names for tables and columns."""
-    tables_info = []
-    for table in raw_schema.tables:
-        cols = [{"column_name": c.column_name.raw_name, "data_type": c.data_type} for c in table.columns]
-        tables_info.append({"table_name": table.table_name.raw_name, "columns": cols})
+async def _call_llm_enrichment(raw_schema: RawSchemaMetadata, dialect: str) -> list[dict[str, Any]]:
+    """Two-Pass enrichment: Pass 1 global glossary + Pass 2 cluster enrichment."""
+    tables_typeddict = _pydantic_tables_to_typeddict(raw_schema.tables)
+    sem = asyncio.Semaphore(DEFAULT_CONFIG.max_concurrency)
 
-    prompt = (
-        "Given the following database schema, provide Vietnamese business names and descriptions "
-        "for each table and column. Return a JSON object where keys are table names, and values are "
-        'objects with "business_name" (Vietnamese), "description" (Vietnamese), and "columns" (array of '
-        '{"column_name", "business_name", "description"}).\n\n'
-        f"Schema ({dialect}):\n{json.dumps(tables_info, indent=2)}"
-    )
+    global_glossary = await execute_pass1(tables_typeddict, dialect, sem)
+    clusters = cluster_tables(tables_typeddict)
+    enriched_dict = await enrich_clusters_parallel(clusters, global_glossary, dialect, sem)
 
-    logger.info(
-        "[AI Semantic Agent] Sending schema prompt (%d tables, dialect=%s) to LLM...", len(raw_schema.tables), dialect
-    )
-    llm = get_llm(role="enrich")
-    try:
-        res_json = await ainvoke_json(llm, prompt)
-    except json.JSONDecodeError:
-        logger.warning("[AI Semantic Agent] LLM enrichment response was not valid JSON, returning empty enrichment")
-        return {}
-
-    if not isinstance(res_json, dict):
-        logger.warning("[AI Semantic Agent] LLM enrichment JSON was not an object, returning empty enrichment")
-        return {}
-
-    logger.info(
-        "[AI Semantic Agent] Successfully parsed LLM response JSON containing %d enriched table definitions",
-        len(res_json),
-    )
-    return res_json
+    enriched_tables: list[dict[str, Any]] = []
+    for t_meta in raw_schema.tables:
+        schema_name = t_meta.schema_name.raw_name if t_meta.schema_name else None
+        t_key = f"{schema_name}.{t_meta.table_name.raw_name}" if schema_name else t_meta.table_name.raw_name
+        if t_key in enriched_dict:
+            enriched_tables.append(enriched_dict[t_key])
+        else:
+            enriched_tables.append(
+                {
+                    "table_name": t_meta.table_name.raw_name,
+                    "business_name": t_meta.table_name.raw_name,
+                    "description": "",
+                    "columns": [
+                        {
+                            "column_name": c.column_name.raw_name,
+                            "business_name": c.column_name.raw_name,
+                            "description": "",
+                        }
+                        for c in t_meta.columns
+                    ],
+                }
+            )
+    return enriched_tables
 
 
 async def _upsert_semantic_table(
@@ -431,6 +501,7 @@ async def _upsert_semantic_column(
         existing.data_type = data_type
         existing.is_primary_key = col_meta.primary_key
         existing.is_nullable = col_meta.nullable
+        existing.allowed_values = list(col_meta.sample_values) if col_meta.sample_values else None
         return existing.id
 
     record = SemanticColumnModel(
@@ -442,6 +513,7 @@ async def _upsert_semantic_column(
         is_primary_key=col_meta.primary_key,
         is_nullable=col_meta.nullable,
         is_time_dimension=is_time,
+        allowed_values=list(col_meta.sample_values) if col_meta.sample_values else None,
     )
     db.add(record)
     await db.flush()

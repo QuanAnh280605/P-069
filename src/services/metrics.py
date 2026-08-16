@@ -67,8 +67,16 @@ def _format_columns(columns: list[dict[str, Any]]) -> list[str]:
             if enabled
         ]
         business = column.get("business_name") or name
+        desc = (column.get("description") or "").strip()
+        desc_str = f" — {desc}" if desc and desc.lower() != business.lower() else ""
         suffix = f"; {', '.join(flags)}" if flags else ""
-        lines.append(f"- `{name}` ({column.get('data_type', 'TEXT')}; {business}{suffix})")
+        default_val = column.get("default_value")
+        if default_val is not None:
+            suffix += f"; default: {default_val}"
+        sample_vals = column.get("sample_values") or column.get("allowed_values")
+        if sample_vals:
+            suffix += f"; values: {sample_vals}"
+        lines.append(f"- `{name}` ({column.get('data_type', 'TEXT')}; {business}{desc_str}{suffix})")
     return lines
 
 
@@ -103,8 +111,11 @@ Quy tắc BẮT BUỘC:
 3. base_entity và các cột phải tồn tại chính xác trong Schema dưới đây.
 4. Ưu tiên base_entity có PK/grain rõ ràng; không giả định quan hệ hoặc ý nghĩa không có trong schema.
 5. Filter chỉ dùng cột của base_entity và giá trị được người dùng nêu rõ hoặc có ý nghĩa chắc chắn.
+6. Khi dùng filter trên cột có values: [...] trong Schema, PHẢI dùng đúng 1 giá trị trong danh sách values. Không tự tạo giá trị mới.
+7. Với các cột cờ nhị phân (is_*, has_*, flag) kiểu VARCHAR(1)/CHAR(1)/INT mà KHÔNG có danh sách values trong schema: mặc định dùng giá trị "1" cho trạng thái Hoàn thành / Kích hoạt / Bật, và "0" cho Chưa xong / Tắt. TUYỆT ĐỐI KHÔNG tự bịa ra 'Y', 'N', 'TRUE', 'true'.
 
-Schema database:\n{schema_text}"""
+Schema database:
+{schema_text}"""
 
 
 def _extract_json_from_text(text: str) -> Any:

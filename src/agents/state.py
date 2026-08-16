@@ -42,6 +42,9 @@ class AgentState(TypedDict, total=False):
     cho từng bảng và từng cột.
     """
 
+    global_glossary: dict[str, Any] | None
+    """Pass 1 global table glossary — business_name + description for all tables."""
+
     # Flow 1 — MetricSuggest Node output
     suggested_metrics: list[dict[str, Any]]
     """Danh sách Business Metrics do LLM đề xuất.
