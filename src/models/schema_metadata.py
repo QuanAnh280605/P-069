@@ -117,6 +117,7 @@ class ColumnMetadata(CanonicalModel):
     nullable: bool
     default_expression: str | None = None
     primary_key: bool = False
+    sample_values: tuple[str, ...] | None = None
 
 
 class PrimaryKeyMetadata(CanonicalModel):

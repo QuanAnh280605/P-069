@@ -1,225 +1,224 @@
-# 🎨 Wireframe & UI Flow Document — AI Semantic Layer Agent
+# 🎨 Wireframe & UI Flow Document — AI Semantic Layer Agent (v2.0)
 
-> **Tài liệu:** Thiết kế Luồng màn hình (UI Flow) & Bố cục Sơ bộ (Wireframes)  
-> **Dự án:** AI Semantic Layer Agent  
-> **Mục đích:** Định hình trải nghiệm người dùng, thống nhất layout các màn hình trước và trong quá trình phát triển Frontend.
+> **Tài liệu:** Thiết kế Luồng Màn hình (UI Flow) & Bố cục Giao diện (Wireframes)  
+> **Dự án:** AI Semantic Layer Agent (P-069)  
+> **Framework:** Next.js 14 (App Router) + Tailwind CSS + Lucide Icons + PrismJS  
 
 ---
 
-## 1. Luồng di chuyển giữa các màn hình (User Navigation Flow)
-
-Diagram dưới đây mô tả cách người dùng di chuyển qua các màn hình chính của ứng dụng:
+## 1. Luồng Di chuyển Người dùng (User Navigation Flow)
 
 ```mermaid
 flowchart TD
-    S1["🖥️ Màn hình 1\nQuản lý Kết nối Database"]
-    S2["⚙️ Màn hình 2\nSemantic Layer Builder & HITL Review"]
-    S2note["✏️ Tab A: Bảng & Cột\n✏️ Tab B: Business Metrics Library"]
-    S3["📤 Màn hình 3\nExport & Chia sẻ Semantic Layer"]
-    M1["🔌 Modal: Kết nối DB mới"]
-    M2["➕ Modal: Thêm Metric thủ công"]
+    HOME["🏠 Trang chủ & Workspace Manager (/)"]
+    M_CONNECT["🔌 Modal: Kết nối Live Target DB"]
+    M_DUMP["📤 Modal: Upload & Preview SQL Dump"]
 
-    S1 -->|"① Kết nối DB mới"| M1
-    M1 -->|"Introspect thành công"| S2
-    S1 -->|"Mở layer có sẵn"| S2
-    S2 --- S2note
-    S2note -->|"Tab B: Thêm Metric thủ công"| M2
-    M2 -->|"Xác nhận"| S2
-    S2 -->|"② Chốt & Lưu Semantic Layer"| S1
-    S2 -->|"③ Export"| S3
-    S3 -->|"Quay lại"| S2
+    WORKSPACE["⚙️ Không gian làm việc Semantic Workspace (/semantic/[db_id])"]
+
+    TAB_DATA["📊 Tab 1: Data Model View\n(Bảng, Cột, Khóa & Quan hệ)"]
+    TAB_CATALOG["📋 Tab 2: Metrics Catalog View\n(Quản lý Chỉ số, Duyệt & Lịch sử Version)"]
+    TAB_EXPLORER["🔍 Tab 3: Metric Explorer View\n(Visual Query Builder, Safe Live Execution)"]
+    TAB_STUDIO["💬 Tab 4: AI Studio View\n(Streaming Chatbot & Multi-agent Orchestrator)"]
+    TAB_EXPORT["📦 Tab 5: Export Playground View\n(Trình xuất khẩu JSON / YAML)"]
+
+    MODAL_AI_QUERY["🤖 AI Query Assistant / Clarifier Wizard"]
+    DRAWER_HISTORY["📜 Version History Drawer"]
+
+    HOME -->|"Kết nối Live DB"| M_CONNECT
+    HOME -->|"Tải lên file Dump"| M_DUMP
+    M_CONNECT -->|"Khởi tạo thành công"| WORKSPACE
+    M_DUMP -->|"Khởi tạo thành công"| WORKSPACE
+    HOME -->|"Mở Semantic Layer có sẵn"| WORKSPACE
+
+    WORKSPACE --> TAB_DATA
+    WORKSPACE --> TAB_CATALOG
+    WORKSPACE --> TAB_EXPLORER
+    WORKSPACE --> TAB_STUDIO
+    WORKSPACE --> TAB_EXPORT
+
+    TAB_CATALOG -->|"Xem lịch sử công thức"| DRAWER_HISTORY
+    TAB_EXPLORER -->|"Mở trợ lý AI truy vấn"| MODAL_AI_QUERY
+    MODAL_AI_QUERY -->|"Hoàn tất làm rõ"| TAB_EXPLORER
 ```
 
 ---
 
-## 2. Bố cục Sơ bộ từng Màn hình (Wireframes & Screen Layouts)
+## 2. Bố cục Giao diện & Wireframes Chi tiết
 
 ---
 
-### 🖥️ Màn hình 1: Quản lý Kết nối Database (`/`)
+### 🖥️ Màn hình 1: Landing Page & Workspace Manager (`/`)
 
-**Mục đích:** Trang chủ — người dùng kết nối với Target Database mới hoặc mở một Semantic Layer đã có trong hệ thống để tiếp tục chỉnh sửa.
+Trang bắt đầu cho phép người dùng lựa chọn:
+1. Kết nối Target Database thực tế (PostgreSQL, MySQL, SQLite)
+2. Tải lên file SQL Dump DDL (`.sql`) với tính năng xem trước cấu trúc (Technical Preview)
+3. Mở các không gian làm việc Semantic Layer đã lưu trước đó.
 
 ```
-+-----------------------------------------------------------------------------------+
-| 🤖 AI SEMANTIC LAYER AGENT                      [ Docs ]  [ Settings ]  [ Admin ] |
-+-----------------------------------------------------------------------------------+
-|                                                                                   |
-|  ➕ KẾT NỐI DATABASE MỚI                                                           |
-|  -------------------------------------------------------------------------------  |
-|  Tên gợi nhớ DB: [ e.g. E-Commerce Production Database                      ]    |
-|  Loại DB:        (*) PostgreSQL   ( ) MySQL   ( ) SQLite                          |
-|  Connection URL: [ postgresql://user:pass@localhost:5432/ecommerce_db       ]    |
-|                                                                                   |
-|                  [ ⚡ Bắt đầu Phân tích Schema (Auto Introspect & Enrich) ]       |
-|                                                                                   |
-| ================================================================================= |
-|                                                                                   |
-|  📁 DANH SÁCH SEMANTIC LAYERS ĐÃ TẠO                                              |
-|  -------------------------------------------------------------------------------  |
-|  +---------------------------+---------------------+-------------------+--------+ |
-|  | Tên Database              | Loại DB             | Ngày cập nhật     | Thao tác| |
-|  +---------------------------+---------------------+-------------------+--------+ |
-|  | E-Commerce Prod DB        | PostgreSQL          | 2026-07-31 10:00  | [ Mở ] | |
-|  | Retail Sales SQLite       | SQLite              | 2026-07-30 14:20  | [ Mở ] | |
-|  +---------------------------+---------------------+-------------------+--------+ |
-|                                                                                   |
-+-----------------------------------------------------------------------------------+
-```
-
-**Trạng thái Loading (khi đang Introspect):**
-```
-+-----------------------------------------------------------------------------------+
-| ⚙️ ĐANG PHÂN TÍCH SCHEMA...                                                        |
-|  ● Introspecting schema...         ✅ Xong (2.1s)                                 |
-|  ● Enriching table & column names... ⏳ Đang xử lý...                             |
-|  ● Suggesting business metrics...  ⏸ Chờ bước trên                               |
-+-----------------------------------------------------------------------------------+
++-----------------------------------------------------------------------------------------+
+| 🤖 AI SEMANTIC LAYER AGENT                     [ Docs ]  [ Tài khoản ]  [ Đăng xuất ]  |
++-----------------------------------------------------------------------------------------+
+|                                                                                         |
+|  KHỞI TẠO SEMANTIC LAYER MỚI                                                           |
+|  +---------------------------------------+  +----------------------------------------+  |
+|  | 🔌 Kết nối Live Target DB              |  | 📥 Tải lên SQL Dump File (.sql)        |  |
+|  | PostgreSQL, MySQL, SQLite              |  | Phân tích DDL không cần kết nối mạng   |  |
+|  | [ + Tạo Kết nối Mới ]                 |  | [ ⬆ Tải File Dump Lên ]               |  |
+|  +---------------------------------------+  +----------------------------------------+  |
+|                                                                                         |
+| ======================================================================================= |
+|                                                                                         |
+|  📁 KHÔNG GIAN LÀM VIỆC ĐÃ TẠO (SEMANTIC WORKSPACES)                                    |
+|  +--------------------------+------------+---------------+-------------+--------------+ |
+|  | Tên Database / Workspace | Nguồn      | Số bảng / Cột | Cập nhật    | Thao tác     | |
+|  +--------------------------+------------+---------------+-------------+--------------+ |
+|  | Golden Retail Prod DB    | Live DB    | 36 bảng / 140 | 10 phút trước| [ Vào làm việc] |
+|  | E-Commerce Schema Dump   | SQL Dump   | 18 bảng / 72  | Hôm qua     | [ Vào làm việc] |
+|  +--------------------------+------------+---------------+-------------+--------------+ |
++-----------------------------------------------------------------------------------------+
 ```
 
 ---
 
-### ⚙️ Màn hình 2: Semantic Layer Builder & HITL Review (`/semantic/{db_id}/review`)
+### ⚙️ Màn hình 2: Semantic Workspace Header & Tab Navigation (`/semantic/[db_id]`)
 
-**Mục đích:** Hiển thị kết quả AI đã tự động phân tích (Introspect + Enrich + Metric Suggest). Cho phép BA/DA chỉnh sửa trực tiếp tên nghiệp vụ, mô tả cột và duyệt/thêm/sửa/xóa Business Metrics trước khi lưu chính thức.
+Thanh công cụ đầu trang hiển thị tên Database, trạng thái kết nối và 5 Tab điều hướng cốt lõi:
 
 ```
-+-----------------------------------------------------------------------------------+
-| ← Quay lại   |  ⚙️ REVIEW SEMANTIC LAYER: E-Commerce Prod DB    [ 📤 Export ] [ 💾 Lưu Chính Thức ] |
-+-----------------------------------------------------------------------------------+
-| [ TAB A: BẢNG & CỘT (TABLES & COLUMNS) ]    [ TAB B: BUSINESS METRICS LIBRARY (3) ] |
-+-----------------------------------------------------------------------------------+
-|                                                                                   |
-| 📂 Bảng: orders                                                                    |
-|    Tên nghiệp vụ: [ Đơn hàng                                      ] ✏️            |
-|    Mô tả:         [ Bảng chứa thông tin lịch sử mua hàng của KH   ] ✏️            |
-|                                                                                   |
-|   +-------------------+-----------------------+-----------------------+---------+ |
-|   | Tên Cột DB        | Kiểu Dữ Liệu          | Tên Nghiệp Vụ (AI)    | Mẫu DL  | |
-|   +-------------------+-----------------------+-----------------------+---------+ |
-|   | order_id          | INTEGER (PK)          | [ Mã đơn hàng       ] | 1001    | |
-|   | customer_id       | INTEGER (FK→customers)| [ Mã khách hàng     ] | C-88    | |
-|   | total_amount      | NUMERIC               | [ Tổng tiền đơn hàng] | 450,000 | |
-|   | order_status      | VARCHAR(20)           | [ Trạng thái đơn    ] | COMPLETED|
-|   | created_at        | TIMESTAMP             | [ Ngày tạo đơn      ] | 2026-07 | |
-|   +-------------------+-----------------------+-----------------------+---------+ |
-|                                                                                   |
-| --------------------------------------------------------------------------------- |
-| 📂 Bảng: customers  (Tên nghiệp vụ: [ Khách hàng ] ✏️)                            |
-| ...                                                                               |
-+-----------------------------------------------------------------------------------+
-```
-
-**Tab B — Business Metrics Library:**
-```
-+-----------------------------------------------------------------------------------+
-| [ TAB A: BẢNG & CỘT ]    [ TAB B: BUSINESS METRICS LIBRARY (3) ]                  |
-+-----------------------------------------------------------------------------------+
-|                                         [ ➕ Thêm Metric thủ công ]               |
-|                                                                                   |
-| ┌─────────────────────────────────────────────────────────────────────────────┐   |
-| │ [AI] 1. Doanh thu theo ngày                                                 │   |
-| │      Mô tả: Tổng doanh thu phân nhóm theo ngày tạo đơn hàng                │   |
-| │      SQL Template:                                                          │   |
-| │        SELECT DATE(created_at), SUM(total_amount) FROM orders               │   |
-| │        WHERE order_status = 'COMPLETED' GROUP BY 1 ORDER BY 1               │   |
-| │                                      [ ✏️ Sửa ]   [ ❌ Xóa ]               │   |
-| └─────────────────────────────────────────────────────────────────────────────┘   |
-|                                                                                   |
-| ┌─────────────────────────────────────────────────────────────────────────────┐   |
-| │ [AI] 2. Số lượng đơn hàng theo trạng thái                                  │   |
-| │      Mô tả: Đếm số đơn phân nhóm theo trạng thái xử lý                    │   |
-| │      SQL Template:                                                          │   |
-| │        SELECT order_status, COUNT(*) FROM orders GROUP BY order_status      │   |
-| │                                      [ ✏️ Sửa ]   [ ❌ Xóa ]               │   |
-| └─────────────────────────────────────────────────────────────────────────────┘   |
-|                                                                                   |
-| ┌─────────────────────────────────────────────────────────────────────────────┐   |
-| │ [Manual] 3. Tỷ lệ đơn hàng hoàn thành (Completion Rate)                   │   |
-| │      Mô tả: % đơn hàng có status COMPLETED / tổng đơn hàng                 │   |
-| │      SQL Template:                                                          │   |
-| │        SELECT ROUND(                                                        │   |
-| │          COUNT(*) FILTER(WHERE order_status='COMPLETED') * 100.0            │   |
-| │          / COUNT(*), 2) AS completion_rate FROM orders                      │   |
-| │                                      [ ✏️ Sửa ]   [ ❌ Xóa ]               │   |
-| └─────────────────────────────────────────────────────────────────────────────┘   |
-+-----------------------------------------------------------------------------------+
++-----------------------------------------------------------------------------------------+
+| ← Trang chủ | 🗄️ Golden Retail Prod DB (PostgreSQL)  [ Trạng thái: Active ] [ 💾 Đã lưu ] |
++-----------------------------------------------------------------------------------------+
+| [ 📊 Data Model ] [ 📋 Metrics Catalog ] [ 🔍 Metric Explorer ] [ 💬 AI Studio ] [ 📦 Export ] |
++-----------------------------------------------------------------------------------------+
 ```
 
 ---
 
-### 💾 Modal: Thêm / Sửa Business Metric thủ công
+### 📊 Tab 1: Data Model View (`DataModelView.tsx`)
 
-**Mục đích:** Xuất hiện khi BA/DA nhấp "Thêm Metric thủ công" hoặc "Sửa" một metric đã có. Cho phép định nghĩa chỉ số không phụ thuộc vào AI.
-
-```
-+-----------------------------------------------------------------------------------+
-| ➕ THÊM BUSINESS METRIC                                                        [X] |
-+-----------------------------------------------------------------------------------+
-|                                                                                   |
-| Tên Metric:       [ Tỷ lệ đơn hàng hoàn thành (Completion Rate)              ]   |
-|                                                                                   |
-| Mô tả nghiệp vụ:  [ % đơn hàng có status COMPLETED trên tổng số đơn hàng    ]   |
-|                                                                                   |
-| SQL Template (tham chiếu):                                                        |
-| +-------------------------------------------------------------------------------+ |
-| | SELECT ROUND(                                                                 | |
-| |   COUNT(*) FILTER(WHERE order_status = 'COMPLETED') * 100.0                  | |
-| |   / COUNT(*), 2) AS completion_rate                                           | |
-| | FROM orders                                                                   | |
-| +-------------------------------------------------------------------------------+ |
-|                                                                                   |
-|                                [ Hủy bỏ ]   [ 💾 Lưu Metric ]                    |
-+-----------------------------------------------------------------------------------+
-```
-
----
-
-### 📤 Màn hình 3: Export & Chia sẻ Semantic Layer (`/semantic/{db_id}/export`)
-
-**Mục đích:** Cho phép BA/DA xuất Semantic Layer đã duyệt ra file để tích hợp với các công cụ BI hoặc chia sẻ với team khác.
+Hiển thị toàn bộ bảng, cột, khóa chính/ngoại, kiểu dữ liệu và tên nghiệp vụ do AI sinh ra. Cho phép chỉnh sửa inline trực tiếp.
 
 ```
-+-----------------------------------------------------------------------------------+
-| ← Quay lại Review   |  📤 EXPORT SEMANTIC LAYER: E-Commerce Prod DB               |
-+-----------------------------------------------------------------------------------+
-|                                                                                   |
-|  CHỌN ĐỊNH DẠNG XUẤT:                                                             |
-|                                                                                   |
-|  ┌────────────────────────────┐   ┌────────────────────────────┐                  |
-|  │  📄 JSON                   │   │  📋 YAML                   │                  |
-|  │  Tương thích: REST API,    │   │  Tương thích: dbt, Looker  │                  |
-|  │  Metabase, custom tools    │   │  Studio, Metabase          │                  |
-|  │                            │   │                            │                  |
-|  │  [ ⬇️ Tải về JSON ]         │   │  [ ⬇️ Tải về YAML ]         │                  |
-|  └────────────────────────────┘   └────────────────────────────┘                  |
-|                                                                                   |
-|  PREVIEW (JSON):                                                                  |
-|  +-------------------------------------------------------------------------------+ |
-|  | {                                                                             | |
-|  |   "db_name": "E-Commerce Prod DB",                                            | |
-|  |   "db_type": "postgresql",                                                    | |
-|  |   "generated_at": "2026-07-31T10:00:00Z",                                    | |
-|  |   "tables": [                                                                 | |
-|  |     {                                                                         | |
-|  |       "table_name": "orders",                                                 | |
-|  |       "business_name": "Đơn hàng",                                           | |
-|  |       "description": "Bảng chứa thông tin lịch sử mua hàng của KH",          | |
-|  |       "columns": [...]                                                        | |
-|  |     }                                                                         | |
-|  |   ],                                                                          | |
-|  |   "metrics": [...]                                                            | |
-|  | }                                                                             | |
-|  +-------------------------------------------------------------------------------+ |
-|                                                                                   |
-+-----------------------------------------------------------------------------------+
++-----------------------------------------------------------------------------------------+
+| 🔍 Tìm kiếm bảng/cột...                              [ + Thêm bảng ]  [ ⚡ Sinh lại AI ] |
++-----------------------------------------------------------------------------------------+
+| ▼ 📂 Bảng: orders (Đơn hàng) — 5,000 dòng ước tính                          [ Sửa tên/mô tả ]
+|    Mô tả: Bảng ghi nhận toàn bộ các đơn hàng phát sinh từ các kênh bán hàng.           |
+|                                                                                         |
+|    +-------------------+---------------+--------------------+---------+---------------+ |
+|    | Tên Cột DB        | Kiểu Dữ Liệu  | Tên Nghiệp Vụ (AI) | Đặc tính| Mô tả Nghiệp Vụ| |
+|    +-------------------+---------------+--------------------+---------+---------------+ |
+|    | order_id          | INTEGER       | Mã đơn hàng        | [ PK ]  | Mã định danh  | |
+|    | customer_id       | INTEGER       | Mã khách hàng      | [ FK ]  | Liên kết KH   | |
+|    | order_date        | TIMESTAMP     | Ngày đặt hàng      | [ TIME ]| Trục thời gian| |
+|    | total_amount      | NUMERIC(12,2) | Tổng tiền thanh toán| [ NUM ] | Đã gồm VAT    | |
+|    +-------------------+---------------+--------------------+---------+---------------+ |
+|                                                                                         |
+| ▶ 📂 Bảng: customers (Khách hàng)                                                       |
+| ▶ 📂 Bảng: order_items (Chi tiết đơn hàng)                                              |
++-----------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 3. Quy tắc Thiết kế & Trải nghiệm Người dùng (UX Rules)
+### 📋 Tab 2: Metrics Catalog View (`MetricsCatalogView.tsx`)
 
-1. **Hiển thị tiến trình rõ ràng (Progress Feedback):** Trong lúc AI phân tích Schema (Introspect → Enrich → Metric Suggest), luôn hiển thị Step Indicator với trạng thái từng bước: `✅ Xong`, `⏳ Đang xử lý`, `⏸ Chờ`.
-2. **Phân biệt nguồn gốc Metric:** Metric do AI đề xuất gắn nhãn `[AI]`, metric do BA/DA thêm thủ công gắn nhãn `[Manual]` để dễ phân biệt mức độ tin cậy.
-3. **Thao tác 1-Click HITL:** Mọi định nghĩa AI đề xuất đều có thể sửa nhanh với icon cây bút ✏️ hoặc xóa ❌ ngay tại chỗ, không cần mở trang riêng.
-4. **Trạng thái Lưu rõ ràng:** Phân biệt rõ `Draft` (chưa lưu) và `Saved` (đã lưu chính thức) qua badge màu ở header màn hình 2.
+Quản trị danh mục chỉ số kinh doanh, công thức, trạng thái duyệt và xem lịch sử các phiên bản.
+
+```
++-----------------------------------------------------------------------------------------+
+| 🎯 DANH MỤC CHỈ SỐ KINH DOANH (METRICS CATALOG)       [ 🔍 Lọc ]  [ + Thêm Metric Mới ] |
++-----------------------------------------------------------------------------------------+
+| +-------------------------------------------------------------------------------------+ |
+| | 📈 Tổng Doanh Thu Bán Hàng                               [ Nguồn: AI ] [ ✅ Approved ] |
+| | Mô tả: Tổng giá trị các đơn hàng có trạng thái hoàn tất giao dịch.                  |
+| | Base Entity: orders  |  Aggregation: SUM  |  Version: v3                           |
+| | Công thức: SUM(orders.total_amount) WHERE orders.status = 'completed'               |
+| | [ 📜 Xem Lịch sử Phiên bản (Drawer) ]   [ ✏️ Sửa Công thức ]   [ 🗑️ Xóa Metric ]    |
+| +-------------------------------------------------------------------------------------+ |
+| | 📊 Tỷ Lệ Đổi Trả Hàng (Return Rate)                     [ Nguồn: Manual ] [ 🟡 Draft ] |
+| | Base Entity: order_returns  |  Aggregation: CUSTOM  |  Version: v1                  |
+| | [ 📜 Xem Lịch sử Phiên bản ]   [ ✅ Duyệt Metric ]   [ ✏️ Sửa ]   [ 🗑️ Xóa ]         |
+| +-------------------------------------------------------------------------------------+ |
++-----------------------------------------------------------------------------------------+
+```
+
+---
+
+### 🔍 Tab 3: Metric Explorer View (`MetricExplorerView.tsx`)
+
+Trình biên dịch và thực thi truy vấn trực quan: Người dùng chọn Metrics và Dimensions $\rightarrow$ Xem trước câu lệnh SQL $\rightarrow$ Thực thi lấy dữ liệu an toàn từ Live DB.
+
+```
++-----------------------------------------------------------------------------------------+
+| 🎛️ BỘ LỌC VÀ CHỌN CHỈ SỐ                         |  🤖 TRỢ LÝ TRUY VẤN AI                |
+| Chọn Metrics:     [x] Tổng Doanh Thu              |  [ 💬 Hỏi AI xây dựng truy vấn... ]   |
+| Chọn Dimensions:  [x] Kênh bán lẻ (channel_name)  |                                       |
+|                   [x] Tháng đặt hàng (month)      |  ⚡ [ Xem SQL ]  ▶️ [ Chạy Truy Vấn ] |
++-----------------------------------------------------------------------------------------+
+| 💻 CÂU LỆNH SQL ĐƯỢC BIÊN DỊCH (COMPILED SQL):                                          |
+| SELECT c.channel_name, DATE_TRUNC('month', o.order_date) AS month,                      |
+|        SUM(o.total_amount) AS tong_doanh_thu                                           |
+| FROM orders o JOIN channels c ON o.channel_id = c.channel_id                            |
+| GROUP BY 1, 2 ORDER BY 2 DESC LIMIT 100;                                               |
++-----------------------------------------------------------------------------------------+
+| 📊 BẢNG DỮ LIỆU THỰC TẾ (LIVE DATA RESULTS — 4 dòng trong 0.04s):                       |
+| +-----------------------+-------------------+-----------------------------------------+ |
+| | Kênh bán lẻ           | Tháng đặt hàng    | Tổng Doanh Thu (VNĐ)                    | |
+| +-----------------------+-------------------+-----------------------------------------+ |
+| | Cửa hàng Hà Nội       | 2026-07-01        | 1,450,000,000                           | |
+| | Website Online        | 2026-07-01        | 2,120,000,000                           | |
+| | Cửa hàng TP.HCM       | 2026-07-01        | 1,890,000,000                           | |
+| +-----------------------+-------------------+-----------------------------------------+ |
++-----------------------------------------------------------------------------------------+
+```
+
+---
+
+### 💬 Tab 4: AI Studio View (`AIStudioView.tsx`)
+
+Giao diện chat trực tuyến hỗ trợ streaming, tự động nhận diện ý định (Intent Routing) và hiển thị code viewer highlight cú pháp SQL/YAML.
+
+```
++-----------------------------------------------------------------------------------------+
+| 💬 TRỢ LÝ AI SEMANTIC STUDIO                                                            |
+| +-------------------------------------------------------------------------------------+ |
+| | 👤 User: Cho tôi biết cách tính chỉ số Tỷ lệ Chuyển đổi Khách hàng?                   |
+| |                                                                                     |
+| | 🤖 AI Assistant: Tôi đã phân tích cấu trúc bảng `sessions` và `orders`.             |
+| | Dưới đây là công thức MetricDefinition đề xuất:                                     |
+| |                                                                                     |
+| | ```sql                                                                              |
+| | COUNT(DISTINCT orders.customer_id)::FLOAT / COUNT(DISTINCT sessions.visitor_id)     |
+| | ```                                                                                 |
+| | [ ➕ Lưu Metric này vào Catalog ]                                                    |
+| +-------------------------------------------------------------------------------------+ |
+| [ Nhập câu hỏi hoặc yêu cầu định nghĩa chỉ số...                           ] [ Gửi ✈️ ] |
++-----------------------------------------------------------------------------------------+
+```
+
+---
+
+### 📦 Tab 5: Export Playground View (`ExportPlaygroundView.tsx`)
+
+Trình xem và xuất khẩu Semantic Layer ra chuẩn JSON hoặc YAML.
+
+```
++-----------------------------------------------------------------------------------------+
+| 📦 XUẤT BẢN SEMANTIC LAYER                             [ 📑 JSON ]  [ 📑 YAML ]  [ ⬇️ Tải Về ] |
++-----------------------------------------------------------------------------------------+
+| version: "2.0"                                                                          |
+| database:                                                                               |
+|   name: "Golden Retail Prod DB"                                                         |
+|   dialect: "postgresql"                                                                 |
+| tables:                                                                                 |
+|   - name: "orders"                                                                      |
+|     business_name: "Đơn hàng"                                                           |
+|     description: "Bảng lưu lịch sử mua hàng..."                                         |
+| metrics:                                                                                |
+|   - name: "Tổng Doanh Thu Bán Hàng"                                                     |
+|     aggregation: "SUM"                                                                  |
+|     formula: "SUM(orders.total_amount)"                                                 |
++-----------------------------------------------------------------------------------------+
+```

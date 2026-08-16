@@ -10,10 +10,11 @@ Provides:
 import asyncio
 import json
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import create_engine, inspect, select
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.db import LiveTargetDbModel, SemanticDatabaseModel
@@ -43,6 +44,88 @@ _SYNC_INSPECTION_DRIVERS = {
     "sqlite+aiosqlite": "sqlite",
 }
 
+_SAMPLE_LIMIT = 10
+
+_CATEGORICAL_PATTERNS = (
+    "status",
+    "type",
+    "flag",
+    "is_",
+    "has_",
+    "category",
+    "state",
+    "level",
+    "role",
+    "gender",
+    "priority",
+)
+
+_PII_PATTERNS = (
+    "password",
+    "secret",
+    "token",
+    "hash",
+    "note",
+    "comment",
+    "email",
+    "phone",
+    "address",
+    "ip_",
+    "user_agent",
+)
+
+
+def _should_sample(col_name: str, raw_type: str) -> bool:
+    """Heuristic: only sample categorical columns, block PII and long text."""
+    name_lower = col_name.lower()
+    if any(p in name_lower for p in _PII_PATTERNS):
+        return False
+    type_upper = raw_type.upper()
+    if any(t in type_upper for t in ("BOOLEAN", "BOOL", "ENUM")):
+        return True
+    if any(t in type_upper for t in ("VARCHAR", "CHAR")):
+        match = re.search(r"\((\d+)\)", type_upper)
+        if match and int(match.group(1)) > 50:
+            return False
+        return any(pat in name_lower for pat in _CATEGORICAL_PATTERNS)
+    if any(t in type_upper for t in ("SMALLINT", "TINYINT", "INT", "INTEGER")):
+        return any(pat in name_lower for pat in _CATEGORICAL_PATTERNS)
+    return False
+
+
+def _sample_distinct_values(
+    conn: Connection,
+    table_name: str,
+    column_name: str,
+    schema_name: str | None,
+    dialect: SchemaDialect,
+) -> tuple[str, ...] | None:
+    """Sample distinct values for a categorical column safely. Returns None on failure."""
+    try:
+        safe_col = column_name.replace('"', '""')
+        safe_tbl = table_name.replace('"', '""')
+        safe_schema = schema_name.replace('"', '""') if schema_name else None
+
+        if dialect == SchemaDialect.POSTGRESQL:
+            col_ref = f'"{safe_col}"'
+            tbl_ref = f'"{safe_schema}"."{safe_tbl}"' if safe_schema else f'"{safe_tbl}"'
+        elif dialect == SchemaDialect.MYSQL:
+            safe_col_m = column_name.replace("`", "``")
+            safe_tbl_m = table_name.replace("`", "``")
+            col_ref = f"`{safe_col_m}`"
+            tbl_ref = f"`{safe_tbl_m}`"
+        else:
+            col_ref = f'"{safe_col}"'
+            tbl_ref = f'"{safe_tbl}"'
+
+        sql = f"SELECT DISTINCT {col_ref} FROM {tbl_ref} WHERE {col_ref} IS NOT NULL LIMIT {_SAMPLE_LIMIT}"  # noqa: S608
+        rows = conn.exec_driver_sql(sql).fetchall()
+        if not rows:
+            return None
+        return tuple(str(row[0]) for row in rows)
+    except Exception:
+        return None
+
 
 def _sync_introspection_url(conn_url: str) -> str:
     """Return an Inspector-safe URL while preserving credentials and options."""
@@ -54,26 +137,27 @@ def _sync_introspection_url(conn_url: str) -> str:
 
 
 def introspect_live_database(conn_url: str, dialect: str | SchemaDialect) -> RawSchemaMetadata:
-    """Introspect technical schema metadata from a live target database without executing data queries."""
+    """Introspect technical schema metadata and sample categorical values from a live target database."""
     resolved_dialect = (
         dialect if isinstance(dialect, SchemaDialect) else resolve_and_validate_dialect(conn_url, dialect)
     )
     engine = create_engine(_sync_introspection_url(conn_url))
     try:
-        inspector = inspect(engine)
-        default_schema = default_schema_identifier(resolved_dialect)
-        table_names = inspector.get_table_names()
-        tables = []
-        for table_name in table_names:
-            table_meta = _introspect_table(inspector, table_name, default_schema, resolved_dialect)
-            if table_meta:
-                tables.append(table_meta)
-        schema_meta = SchemaMetadata(schema_name=default_schema)
-        return RawSchemaMetadata(
-            dialect=resolved_dialect,
-            schemas=(schema_meta,),
-            tables=tuple(tables),
-        )
+        with engine.connect() as conn:
+            inspector = inspect(conn)
+            default_schema = default_schema_identifier(resolved_dialect)
+            table_names = inspector.get_table_names()
+            tables = []
+            for table_name in table_names:
+                table_meta = _introspect_table(inspector, table_name, default_schema, resolved_dialect, conn)
+                if table_meta:
+                    tables.append(table_meta)
+            schema_meta = SchemaMetadata(schema_name=default_schema)
+            return RawSchemaMetadata(
+                dialect=resolved_dialect,
+                schemas=(schema_meta,),
+                tables=tuple(tables),
+            )
     finally:
         engine.dispose()
 
@@ -83,6 +167,7 @@ def _introspect_table(
     table_name: str,
     schema: Identifier,
     dialect: SchemaDialect,
+    conn: Connection | None = None,
 ) -> TableMetadata | None:
     """Extract columns, PK, and FK metadata for a single table."""
     raw_columns = inspector.get_columns(table_name)
@@ -90,7 +175,7 @@ def _introspect_table(
         return None
     pk_info = inspector.get_pk_constraint(table_name)
     pk_cols = set(pk_info.get("constrained_columns", [])) if pk_info else set()
-    columns = _build_columns(raw_columns, pk_cols, dialect)
+    columns = _build_columns(raw_columns, pk_cols, dialect, conn, table_name, schema.raw_name)
     pk_meta = _build_pk(pk_info, schema, dialect) if pk_cols else None
     fk_list = _build_fks(inspector.get_foreign_keys(table_name), schema, dialect)
     return TableMetadata(
@@ -103,15 +188,23 @@ def _introspect_table(
 
 
 def _build_columns(
-    raw_columns: list[dict[str, Any]], pk_cols: set[str], dialect: SchemaDialect
+    raw_columns: list[dict[str, Any]],
+    pk_cols: set[str],
+    dialect: SchemaDialect,
+    conn: Connection | None = None,
+    table_name: str | None = None,
+    schema_name: str | None = None,
 ) -> list[ColumnMetadata]:
-    """Convert inspector raw columns to canonical ColumnMetadata list."""
+    """Convert inspector raw columns to canonical ColumnMetadata list with safe categorical sampling."""
     columns = []
     for idx, col in enumerate(raw_columns, start=1):
         col_name = col["name"]
         raw_type = str(col["type"])
         col_ident = Identifier.from_raw(col_name, dialect)
         is_pk = col_name in pk_cols
+        sample_vals = None
+        if conn is not None and table_name and _should_sample(col_name, raw_type):
+            sample_vals = _sample_distinct_values(conn, table_name, col_name, schema_name, dialect)
         columns.append(
             ColumnMetadata(
                 column_name=col_ident,
@@ -121,6 +214,7 @@ def _build_columns(
                 nullable=bool(col.get("nullable", True)),
                 default_expression=str(col["default"]) if col.get("default") is not None else None,
                 primary_key=is_pk,
+                sample_values=sample_vals,
             )
         )
     return columns

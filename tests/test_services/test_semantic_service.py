@@ -27,6 +27,7 @@ from src.models.schema_metadata import (
     TableMetadata,
 )
 from src.services.semantic_service import (
+    _pydantic_tables_to_typeddict,
     approve_metric,
     create_metric,
     delete_semantic_database,
@@ -164,6 +165,35 @@ def _llm_enrichment_response() -> str:
     )
 
 
+def _hitl_enrichment() -> dict:
+    """Build enrichment dict in list format matching _make_raw_schema() table order."""
+    return {
+        "tables": [
+            {
+                "table_name": "users",
+                "business_name": "Người dùng",
+                "description": "Bảng lưu trữ thông tin người dùng hệ thống",
+                "columns": [
+                    {"column_name": "user_id", "business_name": "Mã người dùng", "description": "Khóa chính"},
+                    {"column_name": "email", "business_name": "Email", "description": "Địa chỉ email"},
+                ],
+            },
+            {
+                "table_name": "orders",
+                "business_name": "Đơn hàng",
+                "description": "Bảng lưu trữ thông tin đơn hàng",
+                "columns": [
+                    {"column_name": "order_id", "business_name": "Mã đơn hàng", "description": "Khóa chính"},
+                    {"column_name": "id", "business_name": "ID", "description": "Định danh"},
+                    {"column_name": "user_id", "business_name": "Mã người đặt", "description": "FK tới users"},
+                    {"column_name": "total", "business_name": "Tổng tiền", "description": "Tổng tiền đơn hàng"},
+                    {"column_name": "created_at", "business_name": "Ngày tạo", "description": "Thời gian tạo đơn"},
+                ],
+            },
+        ]
+    }
+
+
 # ---------------------------------------------------------------------------
 # ensure_semantic_database
 # ---------------------------------------------------------------------------
@@ -235,13 +265,14 @@ async def test_enrich_saves_tables_with_status_draft(async_session: AsyncSession
         db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
     )
 
-    mock_llm = AsyncMock()
-    mock_llm.ainvoke.return_value = AsyncMock(content=_llm_enrichment_response())
-
-    with patch("src.services.semantic_service.get_llm", return_value=mock_llm):
-        result = await enrich_and_save_canonical_schema(
-            db=async_session, user_id=1, connection_id=sem_db_id, raw_schema=raw_schema, dialect="postgresql"
-        )
+    result = await enrich_and_save_canonical_schema(
+        db=async_session,
+        user_id=1,
+        connection_id=sem_db_id,
+        raw_schema=raw_schema,
+        dialect="postgresql",
+        enrichment=_hitl_enrichment(),
+    )
 
     assert result["status"] == "draft"
     assert len(result["tables"]) == 2
@@ -262,13 +293,14 @@ async def test_enrich_saves_columns_with_status_draft(async_session: AsyncSessio
         db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
     )
 
-    mock_llm = AsyncMock()
-    mock_llm.ainvoke.return_value = AsyncMock(content=_llm_enrichment_response())
-
-    with patch("src.services.semantic_service.get_llm", return_value=mock_llm):
-        await enrich_and_save_canonical_schema(
-            db=async_session, user_id=1, connection_id=sem_db_id, raw_schema=raw_schema, dialect="postgresql"
-        )
+    await enrich_and_save_canonical_schema(
+        db=async_session,
+        user_id=1,
+        connection_id=sem_db_id,
+        raw_schema=raw_schema,
+        dialect="postgresql",
+        enrichment=_hitl_enrichment(),
+    )
 
     # Find orders table and check created_at is_time_dimension
     orders_table = (
@@ -299,13 +331,14 @@ async def test_enrich_creates_fk_relationships(async_session: AsyncSession):
         db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
     )
 
-    mock_llm = AsyncMock()
-    mock_llm.ainvoke.return_value = AsyncMock(content=_llm_enrichment_response())
-
-    with patch("src.services.semantic_service.get_llm", return_value=mock_llm):
-        result = await enrich_and_save_canonical_schema(
-            db=async_session, user_id=1, connection_id=sem_db_id, raw_schema=raw_schema, dialect="postgresql"
-        )
+    result = await enrich_and_save_canonical_schema(
+        db=async_session,
+        user_id=1,
+        connection_id=sem_db_id,
+        raw_schema=raw_schema,
+        dialect="postgresql",
+        enrichment=_hitl_enrichment(),
+    )
 
     assert len(result["relationships"]) == 1
     rel = result["relationships"][0]
@@ -332,18 +365,20 @@ async def test_enrich_upserts_tables_on_second_run(async_session: AsyncSession):
         db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
     )
 
-    mock_llm = AsyncMock()
-    mock_llm.ainvoke.return_value = AsyncMock(content=_llm_enrichment_response())
+    await enrich_and_save_canonical_schema(
+        db=async_session,
+        user_id=1,
+        connection_id=sem_db_id,
+        raw_schema=raw_schema,
+        dialect="postgresql",
+        enrichment=_hitl_enrichment(),
+    )
 
-    with patch("src.services.semantic_service.get_llm", return_value=mock_llm):
-        await enrich_and_save_canonical_schema(
-            db=async_session, user_id=1, connection_id=sem_db_id, raw_schema=raw_schema, dialect="postgresql"
-        )
-
-    # Update LLM response
-    updated_response = json.dumps(
-        {
-            "users": {
+    # Update enrichment data
+    updated_enrichment = {
+        "tables": [
+            {
+                "table_name": "users",
                 "business_name": "Bảng người dùng",
                 "description": "Updated description",
                 "columns": [
@@ -351,7 +386,8 @@ async def test_enrich_upserts_tables_on_second_run(async_session: AsyncSession):
                     {"column_name": "email", "business_name": "Thư điện tử", "description": "Email address"},
                 ],
             },
-            "orders": {
+            {
+                "table_name": "orders",
                 "business_name": "Đơn hàng",
                 "description": "Orders table",
                 "columns": [
@@ -360,14 +396,17 @@ async def test_enrich_upserts_tables_on_second_run(async_session: AsyncSession):
                     {"column_name": "created_at", "business_name": "Ngày đặt", "description": "Created"},
                 ],
             },
-        }
-    )
-    mock_llm.ainvoke.return_value = AsyncMock(content=updated_response)
+        ]
+    }
 
-    with patch("src.services.semantic_service.get_llm", return_value=mock_llm):
-        await enrich_and_save_canonical_schema(
-            db=async_session, user_id=1, connection_id=sem_db_id, raw_schema=raw_schema, dialect="postgresql"
-        )
+    await enrich_and_save_canonical_schema(
+        db=async_session,
+        user_id=1,
+        connection_id=sem_db_id,
+        raw_schema=raw_schema,
+        dialect="postgresql",
+        enrichment=updated_enrichment,
+    )
 
     tables = (
         (await async_session.execute(select(SemanticTableModel).where(SemanticTableModel.db_id == sem_db_id)))
@@ -583,6 +622,101 @@ async def test_get_metric_with_history_not_found(async_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_enrich_saves_allowed_values_from_sample_values(async_session: AsyncSession):
+    """enrich_and_save_canonical_schema persists sample_values as allowed_values in SemanticColumnModel."""
+    dialect = SchemaDialect.POSTGRESQL
+    users_cols = (
+        ColumnMetadata(
+            column_name=Identifier.from_raw("user_id", dialect),
+            ordinal_position=1,
+            raw_data_type="INTEGER",
+            data_type="INTEGER",
+            nullable=False,
+            primary_key=True,
+        ),
+        ColumnMetadata(
+            column_name=Identifier.from_raw("status", dialect),
+            ordinal_position=2,
+            raw_data_type="VARCHAR",
+            data_type="VARCHAR",
+            nullable=True,
+            primary_key=False,
+            sample_values=("active", "inactive"),
+        ),
+    )
+    table = TableMetadata(
+        schema_name=Identifier.from_raw("public", dialect),
+        table_name=Identifier.from_raw("users", dialect),
+        columns=users_cols,
+        primary_key=PrimaryKeyMetadata(constrained_columns=(Identifier.from_raw("user_id", dialect),)),
+    )
+    raw_schema = RawSchemaMetadata(
+        dialect=dialect,
+        schemas=(
+            SchemaMetadata(
+                schema_name=Identifier.from_raw("public", dialect),
+            ),
+        ),
+        tables=(table,),
+    )
+
+    sem_db_id = await ensure_semantic_database(
+        db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
+    )
+
+    hitl = {
+        "tables": [
+            {
+                "table_name": "users",
+                "business_name": "Người dùng",
+                "description": "Test",
+                "columns": [
+                    {"column_name": "user_id", "business_name": "ID", "description": "PK"},
+                    {"column_name": "status", "business_name": "Trạng thái", "description": "Status"},
+                ],
+            }
+        ]
+    }
+
+    await enrich_and_save_canonical_schema(
+        db=async_session,
+        user_id=1,
+        connection_id=sem_db_id,
+        raw_schema=raw_schema,
+        dialect="postgresql",
+        enrichment=hitl,
+    )
+
+    users_table = (
+        await async_session.execute(
+            select(SemanticTableModel).where(
+                SemanticTableModel.db_id == sem_db_id, SemanticTableModel.table_name == "users"
+            )
+        )
+    ).scalar_one()
+
+    status_col = (
+        await async_session.execute(
+            select(SemanticColumnModel).where(
+                SemanticColumnModel.table_id == users_table.id,
+                SemanticColumnModel.column_name == "status",
+            )
+        )
+    ).scalar_one()
+    assert status_col.allowed_values == ["active", "inactive"]
+
+    user_id_col = (
+        await async_session.execute(
+            select(SemanticColumnModel).where(
+                SemanticColumnModel.table_id == users_table.id,
+                SemanticColumnModel.column_name == "user_id",
+            )
+        )
+    ).scalar_one()
+    assert user_id_col.allowed_values is None
+
+
+@pytest.mark.asyncio
 async def test_delete_semantic_database(async_session: AsyncSession):
     """delete_semantic_database removes SemanticDatabaseModel and all child records."""
     sem_db_id = await ensure_semantic_database(
@@ -608,3 +742,181 @@ async def test_delete_semantic_database(async_session: AsyncSession):
     # Verify deleted
     db_res = await async_session.get(SemanticDatabaseModel, sem_db_id)
     assert db_res is None
+
+
+# ---------------------------------------------------------------------------
+# Task 6: Two-Pass enrichment integration tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hitl_enrichment_skips_llm(async_session: AsyncSession):
+    """When enrichment is provided (HITL), _call_llm_enrichment must NOT be called."""
+    raw_schema = _make_raw_schema()
+    sem_db_id = await ensure_semantic_database(
+        db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
+    )
+
+    with patch("src.services.semantic_service._call_llm_enrichment") as mock_llm:
+        result = await enrich_and_save_canonical_schema(
+            db=async_session,
+            user_id=1,
+            connection_id=sem_db_id,
+            raw_schema=raw_schema,
+            dialect="postgresql",
+            enrichment=_hitl_enrichment(),
+        )
+        mock_llm.assert_not_called()
+
+    assert result["status"] == "draft"
+    assert len(result["tables"]) == 2
+
+    db_result = await async_session.execute(select(SemanticTableModel).where(SemanticTableModel.db_id == sem_db_id))
+    tables = db_result.scalars().all()
+    for table in tables:
+        assert table.business_name != ""
+
+
+@pytest.mark.asyncio
+async def test_two_pass_pipeline_called_when_no_enrichment(async_session: AsyncSession):
+    """When enrichment is None, Two-Pass pipeline (execute_pass1 + enrich_clusters_parallel) must be called."""
+    raw_schema = _make_raw_schema()
+    sem_db_id = await ensure_semantic_database(
+        db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
+    )
+
+    with (
+        patch("src.services.semantic_service.execute_pass1", new_callable=AsyncMock) as mock_pass1,
+        patch("src.services.semantic_service.enrich_clusters_parallel", new_callable=AsyncMock) as mock_pass2,
+        patch("src.services.semantic_service.cluster_tables") as mock_cluster,
+    ):
+        mock_pass1.return_value = {"orders.user_id": "Users table"}
+        mock_cluster.return_value = [[t] for t in _pydantic_tables_to_typeddict(raw_schema.tables)]
+        mock_pass2.return_value = {
+            "public.users": {
+                "table_name": "users",
+                "business_name": "Người dùng",
+                "description": "Users table",
+                "columns": [
+                    {"column_name": "user_id", "business_name": "ID", "description": "PK"},
+                    {"column_name": "email", "business_name": "Email", "description": "Email"},
+                ],
+            },
+            "public.orders": {
+                "table_name": "orders",
+                "business_name": "Đơn hàng",
+                "description": "Orders table",
+                "columns": [
+                    {"column_name": "order_id", "business_name": "Order ID", "description": "PK"},
+                    {"column_name": "id", "business_name": "ID", "description": "ID"},
+                    {"column_name": "user_id", "business_name": "User ID", "description": "FK"},
+                    {"column_name": "total", "business_name": "Total", "description": "Total"},
+                    {"column_name": "created_at", "business_name": "Created", "description": "Created"},
+                ],
+            },
+        }
+
+        result = await enrich_and_save_canonical_schema(
+            db=async_session,
+            user_id=1,
+            connection_id=sem_db_id,
+            raw_schema=raw_schema,
+            dialect="postgresql",
+        )
+
+        mock_pass1.assert_called_once()
+        mock_cluster.assert_called_once()
+        mock_pass2.assert_called_once()
+
+    assert result["status"] == "draft"
+    assert len(result["tables"]) == 2
+
+
+def test_pydantic_tables_to_typeddict_references():
+    """_pydantic_tables_to_typeddict correctly maps FK references onto columns."""
+    dialect = SchemaDialect.POSTGRESQL
+    users_table = TableMetadata(
+        schema_name=Identifier.from_raw("public", dialect),
+        table_name=Identifier.from_raw("users", dialect),
+        columns=(
+            ColumnMetadata(
+                column_name=Identifier.from_raw("user_id", dialect),
+                ordinal_position=1,
+                raw_data_type="INTEGER",
+                data_type="INTEGER",
+                nullable=False,
+                primary_key=True,
+            ),
+            ColumnMetadata(
+                column_name=Identifier.from_raw("email", dialect),
+                ordinal_position=2,
+                raw_data_type="VARCHAR",
+                data_type="VARCHAR",
+                nullable=True,
+                primary_key=False,
+            ),
+        ),
+        primary_key=PrimaryKeyMetadata(constrained_columns=(Identifier.from_raw("user_id", dialect),)),
+    )
+    orders_table = TableMetadata(
+        schema_name=Identifier.from_raw("public", dialect),
+        table_name=Identifier.from_raw("orders", dialect),
+        columns=(
+            ColumnMetadata(
+                column_name=Identifier.from_raw("order_id", dialect),
+                ordinal_position=1,
+                raw_data_type="INTEGER",
+                data_type="INTEGER",
+                nullable=False,
+                primary_key=True,
+            ),
+            ColumnMetadata(
+                column_name=Identifier.from_raw("user_id", dialect),
+                ordinal_position=2,
+                raw_data_type="INTEGER",
+                data_type="INTEGER",
+                nullable=True,
+                primary_key=False,
+            ),
+        ),
+        primary_key=PrimaryKeyMetadata(constrained_columns=(Identifier.from_raw("order_id", dialect),)),
+        foreign_keys=(
+            ForeignKeyMetadata(
+                constraint_name=Identifier.from_raw("fk_user", dialect),
+                constrained_columns=(Identifier.from_raw("user_id", dialect),),
+                referred_schema=Identifier.from_raw("public", dialect),
+                referred_table=Identifier.from_raw("users", dialect),
+                referred_columns=(Identifier.from_raw("user_id", dialect),),
+            ),
+        ),
+    )
+
+    result = _pydantic_tables_to_typeddict((users_table, orders_table))
+
+    assert len(result) == 2
+
+    users_td = result[0]
+    assert users_td["table_name"] == "users"
+    assert users_td["schema_name"] == "public"
+    assert users_td["primary_keys"] == ["user_id"]
+    assert users_td["foreign_keys"] == []
+    for col in users_td["columns"]:
+        assert col["references"] is None
+
+    orders_td = result[1]
+    assert orders_td["table_name"] == "orders"
+    assert len(orders_td["foreign_keys"]) == 1
+    assert orders_td["foreign_keys"][0]["constrained_columns"] == ["user_id"]
+    assert orders_td["foreign_keys"][0]["referred_table"] == "users"
+    assert orders_td["foreign_keys"][0]["referred_columns"] == ["user_id"]
+
+    user_id_col = next(c for c in orders_td["columns"] if c["column_name"] == "user_id")
+    assert user_id_col["is_foreign_key"] is True
+    assert user_id_col["references"] is not None
+    assert user_id_col["references"]["table"] == "users"
+    assert user_id_col["references"]["column"] == "user_id"
+    assert user_id_col["references"]["schema"] == "public"
+
+    order_id_col = next(c for c in orders_td["columns"] if c["column_name"] == "order_id")
+    assert order_id_col["is_foreign_key"] is False
+    assert order_id_col["references"] is None

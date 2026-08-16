@@ -533,6 +533,10 @@ def generate_orders_and_analytics(num_orders: int = 5000, num_customers: int = 1
         status = random.choice(statuses)
         is_test = '1' if order_id % 75 == 0 else '0'  # ~65 test orders for filtering check
         seq = (order_id % 7) + 1
+        is_completed = '1' if status == "Completed" else '0'
+        is_canceled = '1' if status == "Canceled" else '0'
+        canceled_time_val = f"'{created_str}'" if is_canceled == '1' else "NULL"
+        cancel_reason_val = "'Khách hàng đổi ý / Hủy đơn'" if is_canceled == '1' else "NULL"
 
         num_items = random.randint(1, 5)
         order_gross = 0
@@ -556,13 +560,11 @@ def generate_orders_and_analytics(num_orders: int = 5000, num_customers: int = 1
             order_lines.append(
                 f"({line_counter}, {store_id}, {order_id}, {item_id}, 'LINE-{l_idx}', 'Mặt hàng mua mã #{item_id}', "
                 f"NULL, {qty}, {unit_cost}, 35, {gross - tax}, {tax}, {gross}, {gross}, {disc}, {net}, 0.00, NULL, {net}, "
-                f"'0', NULL, NULL, '0', NULL, NULL, 'Sản phẩm đóng gói đẹp, giao hàng đúng hẹn!', '1', NULL)"
+                f"'{is_canceled}', {canceled_time_val}, {cancel_reason_val}, '0', NULL, NULL, 'Sản phẩm đóng gói đẹp, giao hàng đúng hẹn!', '1', NULL)"
             )
             line_counter += 1
 
         total_price = order_gross + order_tax - order_discount
-        is_completed = '1' if status == "Completed" else '0'
-        is_canceled = '1' if status == "Canceled" else '0'
 
         order_headers.append(
             f"({order_id}, {store_id}, {channel_id}, {delivery_id}, {payment_method_id}, {payment_time_id}, '{order_no}', "
@@ -635,6 +637,7 @@ def generate_web_sessions_and_carts(num_sessions: int = 8000, num_orders: int = 
 
 def generate_seed_sql_file() -> str:
     """Combine all SQL parts and write to output file."""
+    random.seed(42)
     content = []
     content.append(generate_header())
     content.append(generate_geography_sql())

@@ -588,6 +588,8 @@ async def _load_schema_context_for_db(db: AsyncSession, db_id: Any) -> dict[str,
                             "fk_target_table": col.fk_target_table,
                             "fk_target_column": col.fk_target_column,
                             "description": col.description or "",
+                            "sample_values": col.allowed_values,
+                            "allowed_values": col.allowed_values,
                         }
                         for col in tbl.columns
                     ],

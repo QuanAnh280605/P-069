@@ -36,7 +36,7 @@ class ColumnMetadata(TypedDict):
     is_primary_key: bool
     is_foreign_key: bool
     default_value: str | None
-    sample_values: None
+    sample_values: list[str] | None
     references: ColumnReference | None
 
 

@@ -64,3 +64,33 @@ async def test_generation_rejects_unknown_expression_column() -> None:
     with patch("src.services.metrics.get_llm", return_value=llm):
         with pytest.raises(ValueError, match="valid metric definitions"):
             await generate_metrics_from_prompt("Tính doanh thu", schema_dict=schema)
+
+
+def test_extract_schema_summary_includes_column_description_and_allowed_values() -> None:
+    schema = {
+        "order_header": {
+            "business_name": "Đơn hàng",
+            "description": "Bảng chứa thông tin đơn hàng",
+            "columns": [
+                {
+                    "column_name": "is_completed",
+                    "business_name": "Đã hoàn thành",
+                    "description": "Cờ hoàn thành (1: Thành công, 0: Chưa)",
+                    "data_type": "VARCHAR(1)",
+                    "allowed_values": ["0", "1"],
+                },
+                {
+                    "column_name": "price",
+                    "business_name": "Tổng tiền",
+                    "description": "Tổng tiền sau thuế",
+                    "data_type": "DECIMAL(15,3)",
+                },
+            ],
+        }
+    }
+    from src.services.metrics import extract_schema_summary
+
+    _, text = extract_schema_summary(schema)
+    assert "Entity `order_header` (Đơn hàng): Bảng chứa thông tin đơn hàng" in text
+    assert "- `is_completed` (VARCHAR(1); Đã hoàn thành — Cờ hoàn thành (1: Thành công, 0: Chưa); values: ['0', '1'])" in text
+    assert "- `price` (DECIMAL(15,3); Tổng tiền — Tổng tiền sau thuế)" in text

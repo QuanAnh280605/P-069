@@ -142,3 +142,26 @@ async def test_saved_dbs_handles_empty_or_corrupted_metadata(client, async_sessi
     detail_res = await client.get(f"{SAVED_DB_ENDPOINT}/{live_db.id}", headers=_token_headers())
     assert detail_res.status_code == 200
     assert detail_res.json()["table_count"] == 0
+
+
+def test_live_db_introspect_samples_categorical_columns(temp_sqlite_db: str) -> None:
+    """Test that introspect_live_database samples categorical and flag columns."""
+    from src.models.schema_metadata import SchemaDialect
+    from src.services.live_db_service import introspect_live_database
+
+    conn = sqlite3.connect(temp_sqlite_db)
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE orders (id INT PRIMARY KEY, is_completed VARCHAR(1), status VARCHAR(20));")
+    cursor.execute("INSERT INTO orders VALUES (1, '1', 'Completed'), (2, '0', 'Pending'), (3, '1', 'Completed');")
+    conn.commit()
+    conn.close()
+
+    raw_schema = introspect_live_database(f"sqlite:///{temp_sqlite_db}", SchemaDialect.SQLITE)
+    orders_table = next(t for t in raw_schema.tables if t.table_name.raw_name == "orders")
+    is_completed_col = next(c for c in orders_table.columns if c.column_name.raw_name == "is_completed")
+    status_col = next(c for c in orders_table.columns if c.column_name.raw_name == "status")
+
+    assert is_completed_col.sample_values is not None
+    assert set(is_completed_col.sample_values) == {"0", "1"}
+    assert status_col.sample_values is not None
+    assert set(status_col.sample_values) == {"Completed", "Pending"}
