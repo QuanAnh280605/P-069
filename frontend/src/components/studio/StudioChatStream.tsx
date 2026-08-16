@@ -137,8 +137,12 @@ export function StudioChatStream(props: StudioChatStreamProps) {
   };
 
   const save = async (suggestion: MetricSuggestion) => {
-    await props.onAddMetric?.(suggestion);
-    setSaved((current) => [...current, suggestion.definition.metric.name]);
+    try {
+      await props.onAddMetric?.(suggestion);
+      setSaved((current) => [...current, suggestion.definition.metric.name]);
+    } catch {
+      // Error is surfaced and handled in onAddMetric callback
+    }
   };
 
   // Generate dynamic contextual suggestions based on schema table names

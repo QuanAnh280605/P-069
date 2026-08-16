@@ -167,182 +167,467 @@ P-069/
 ### 1. Yêu cầu tiên quyết
 
 - **Python:** `3.11+`
-- **Node.js:** `18+` & `npm`
-- **Docker & Docker Compose**
+- **Node.js:** `18+` & `npm` / `pnpm`
+- **Docker & Docker Compose** (khuyên dùng Docker Desktop trên Windows/macOS)
 - **Git**
 
-### 2. Cài đặt Backend
+---
+
+### 2. Cài đặt Backend (FastAPI)
 
 ```bash
-# Clone repository
+# 1. Clone repository
 git clone https://github.com/AI20K-Build-Phase-Cohort-3/P-069.git
 cd P-069
 
-# Tạo & kích hoạt virtualenv
+# 2. Tạo & kích hoạt virtualenv
 python -m venv .venv
+
 # Trên Windows PowerShell:
 .\.venv\Scripts\Activate.ps1
 # Trên Linux/macOS:
 # source .venv/bin/activate
 
-# Cài đặt dependencies backend
+# 3. Cài đặt dependencies backend
 pip install -r requirements.txt
 ```
 
-### 3. Cấu hình Biến môi trường (`.env`)
+---
 
-Sao chép `.env.example` thành `.env` và cập nhật các thông số:
+### 3. Cài đặt Frontend (Next.js 14 Web App)
+
+```bash
+# Chuyển vào thư mục frontend và cài đặt node_modules
+cd frontend
+npm install
+cd ..
+```
+
+---
+
+### 4. Cấu hình Biến môi trường (`.env`)
+
+Sao chép `.env.example` thành `.env` tại thư mục gốc:
 
 ```bash
 cp .env.example .env
 ```
 
-Nội dung `.env` chính:
+#### 📋 Bảng Chi tiết Biến Môi trường (Environment Variables Reference)
 
-```env
-APP_ENV=development
-LOG_LEVEL=INFO
+| Nhóm | Tên biến | Kiểu / Giá trị mẫu | Bắt buộc | Mô tả chi tiết |
+| --- | --- | --- | --- | --- |
+| **App Core** | `APP_ENV` | `development` / `production` | Không (Mặc định: `development`) | Môi trường thực thi của hệ thống |
+| | `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING`, `ERROR` | Không (Mặc định: `INFO`) | Mức độ chi tiết log hệ thống |
+| | `APP_PORT` | `8000` | Không (Mặc định: `8000`) | Cổng lắng nghe của FastAPI Backend |
+| | `APP_HOST` | `0.0.0.0` | Không (Mặc định: `0.0.0.0`) | Địa chỉ IP host backend lắng nghe |
+| | `CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Không | Danh sách domain client được phép gọi API |
+| | `SECRET_KEY` | `your-secret-key-32-chars-minimum` | **Có (khi chạy prod)** | Khóa bí mật ký JWT Token (Access & Refresh) |
+| **Security** | `ENCRYPTION_KEY` | `Fernet Base64 Key` | **Có** | Khóa mã hóa đối xứng Fernet dùng để mã hóa chuỗi kết nối Target DB |
+| **Database** | `DATABASE_URL` | `postgresql+asyncpg://dev:devpassword@localhost:5432/semantic_layer_dev` | **Có** | Connection string Metadata Store (PostgreSQL AsyncPG) |
+| | `TARGET_DATABASE_URL` | `postgresql://dev:devpassword@localhost:5432/ecommerce_db` | Không | Connection string dùng cho script tạo Live Target DB mẫu |
+| **LLM Provider** | `LLM_PROVIDER` | `openai` \| `gemini` \| `groq` \| `mimo` \| `anthropic` \| `custom` | Không (Mặc định: `openai`) | Lựa chọn nhà cung cấp mô hình ngôn ngữ lớn |
+| | `OPENAI_API_KEY` | `sk-proj-...` | **Có (nếu LLM=openai)** | Khóa API của OpenAI |
+| | `GOOGLE_API_KEY` | `AIzaSy...` | Tùy chọn (nếu LLM=gemini) | Khóa API Google AI Studio |
+| | `GROQ_API_KEY` | `gsk_...` | Tùy chọn (nếu LLM=groq) | Khóa API Groq Cloud (Tốc độ phản hồi cực nhanh) |
+| | `MIMO_API_KEY` | `your-mimo-key` | Tùy chọn (nếu LLM=mimo) | Khóa API Xiaomi MiMo |
+| | `ANTHROPIC_API_KEY` | `sk-ant-...` | Tùy chọn (nếu LLM=anthropic) | Khóa API Anthropic Claude |
+| | `MODEL_NAME` | `gpt-4o-mini`, `gemini-1.5-flash`, `llama-3.3-70b-versatile` | Không | Tên mô hình chính áp dụng toàn hệ thống |
+| | `LLM_TEMPERATURE` | `0.0` | Không (Mặc định: `0.0`) | Độ ngẫu nhiên (Bắt buộc `0.0` cho tính nhất quán) |
+| | `LLM_API_BASE` | `http://localhost:8000/v1` | Tùy chọn | Base URL cho endpoint OpenAI-compatible (vLLM, Ollama, proxy) |
+| | `LLM_MODEL_ENRICH` | `llama-3.1-8b-instant` | Tùy chọn | Mô hình riêng cho bước Schema Enrichment |
+| | `LLM_MODEL_METRIC` | `llama-3.3-70b-versatile` | Tùy chọn | Mô hình riêng cho bước Business Metric Suggestion |
+| **Observability** | `LANGCHAIN_API_KEY` | `lsv2_pt_...` | Không | Khóa API LangSmith để theo dõi trace AI Agent |
+| | `LANGCHAIN_PROJECT` | `ai20k-agent` | Không | Tên dự án trace trên LangSmith |
+| | `LANGCHAIN_TRACING_V2` | `true` | Không | Bật chế độ trace chi tiết cho LangGraph |
+| **AI Logging** | `AI_LOG_SERVER` | `https://ai-logs.note.transformerlabs.ai/api/ingest` | Không | Server thu thập log AI VinUni AI20K |
+| | `AI_LOG_API_KEY` | `your-ai-log-api-key` | Không | Khóa API định danh học viên |
+| **Frontend** | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Không | URL Backend API mà Frontend gọi tới |
 
-# LLM: preset có sẵn (openai | gemini | groq | mimo | anthropic)
-# Alias: google -> gemini, claude -> anthropic
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-proj-xxxx...
-MODEL_NAME=gpt-4o-mini
+> [!TIP]
+> **Cách sinh khóa Fernet nhanh bằng Python một dòng:**
+>
+> ```bash
+> python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+> ```
 
-# LLM: hoặc trỏ tới BẤT KỲ endpoint OpenAI-compatible (vLLM, Ollama, proxy nội bộ,
-# DeepSeek, OpenRouter...) — không cần sửa code, 3 biến này thắng mọi preset ở trên
-# LLM_PROVIDER=custom
-# LLM_API_BASE=http://localhost:8000/v1
-# LLM_API_KEY=sk-local
-# LLM_MODEL=qwen2.5-32b-instruct
+---
 
-# LLM: model riêng cho từng bước (để trống = dùng model chung ở trên)
-# LLM_MODEL_ENRICH=llama-3.1-8b-instant     # sinh tên nghiệp vụ cho schema
-# LLM_MODEL_METRIC=llama-3.3-70b-versatile  # đề xuất business metric
-
-# LLM: chỉ set khi endpoint KHÔNG phải OpenAI-compatible (hỗ trợ: openai | anthropic)
-# LLM_PROTOCOL=anthropic
-
-# Secret Key mã hóa Fernet cho Target DB Connection URL
-ENCRYPTION_KEY=your_fernet_base64_key_here
-
-# Metadata Store Database Connection (PostgreSQL asyncpg)
-DATABASE_URL=postgresql+asyncpg://dev:devpassword@localhost:5432/semantic_layer_dev
-```
-
-Thứ tự ưu tiên khi resolve LLM (lấy giá trị khác rỗng đầu tiên): `LLM_API_BASE` →
-`<PROVIDER>_API_BASE` → default trong code; `LLM_API_KEY` → `<PROVIDER>_API_KEY` →
-`OPENAI_API_KEY`; `LLM_MODEL_<ROLE>` → `LLM_MODEL` → `MODEL_NAME` → default theo
-provider. Provider lạ mà thiếu `LLM_API_BASE`, hoặc thiếu API key với endpoint remote,
-sẽ báo lỗi rõ ràng ngay lúc khởi tạo client (không âm thầm gọi `api.openai.com`);
-endpoint `localhost` được miễn API key. Xem [`.env.example`](./.env.example) cho danh
-sách biến đầy đủ.
-
-Đổi provider/model chỉ cần sửa `.env`: khi `APP_ENV=development`, `get_llm()` tự phát
-hiện `.env` thay đổi (theo mtime) và tạo lại client — không cần restart server. Ở môi
-trường khác, gọi `reload_llm_config()` từ `src/services/llm.py` hoặc restart. Client
-được cache theo config nên nhiều node dùng cùng model sẽ dùng chung một instance.
-
-*(Mẹo: Bạn có thể sinh Fernet Key nhanh bằng Python: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`)*
-
-### 4. Thiết lập AI Usage Logging Hooks (Dành cho Học viên VinUni AI20K)
+### 5. Thiết lập AI Usage Logging Hooks (Dành cho Học viên VinUni AI20K)
 
 ```bash
-# Windows PowerShell
+# Trên Windows PowerShell:
 powershell -ExecutionPolicy Bypass -File scripts\setup_hooks.ps1
 
-# Linux / macOS / Git Bash
+# Trên Linux / macOS / Git Bash:
 bash scripts/setup_hooks.sh
 ```
 
 ---
 
-## 🗄️ Hướng dẫn Khởi tạo & Quản trị Cơ sở Dữ liệu (Database Setup & Management)
+## 🗄️ Khởi tạo, Quản trị & Seed Dữ liệu Cơ sở Dữ liệu (Database Setup & Seeding)
 
-Hệ thống phân biệt rõ ràng **2 nhóm Cơ sở Dữ liệu**:
-- **Metadata Store (PostgreSQL / SQLite):** Lưu thông tin người dùng, phiên đăng nhập, kết nối Target DB (đã mã hóa), bảng/cột được enrich và Business Metrics.
-- **Target DB (Chỉ đọc Schema):** Cơ sở dữ liệu nghiệp vụ của doanh nghiệp. Agent chỉ kết nối qua `SQLAlchemy Inspector` để đọc cấu trúc (Tables/Columns/FKs), **không thực thi truy vấn đọc dữ liệu (SELECT)**.
+Hệ thống phân tách rành mạch **2 cơ sở dữ liệu**:
 
-### 1. Khởi tạo Metadata Store với Docker & PgWeb
+1. **Metadata Store (PostgreSQL):** Lưu thông tin người dùng, phiên làm việc, schema kỹ thuật, tên/mô tả nghiệp vụ tiếng Việt, Canonical Relationships, Business Metrics và lịch sử phiên bản (`metric_versions`).
+2. **Target Live DB (Chỉ đọc & thực thi SELECT có trần):** DB dữ liệu kinh doanh của doanh nghiệp. Agent kết nối qua SQLAlchemy Inspector để đọc cấu trúc và thực thi các câu lệnh `SELECT` đã được biên dịch qua Flow 2.
 
-Khởi chạy PostgreSQL 16 và giao diện quản trị Web GUI (PgWeb):
+---
+
+### 1. Khởi tạo Metadata Store & Chạy Migrations
 
 ```bash
-# Khởi chạy Postgres DB & PgWeb UI trong background
+# 1. Khởi chạy PostgreSQL Metadata Store và PgWeb UI
 docker compose -f docker-compose.dev.yml up postgres pgweb -d
 
-# 2. Cập nhật Database Schema lên bản mới nhất
+# 2. Cập nhật Database Schema lên phiên bản mới nhất bằng Alembic
 alembic upgrade head
+```
 
-# 3. Nạp bộ dữ liệu thử nghiệm Golden Retail Database (36 bảng, 5.000 orders)
+- **PgWeb UI (Trình quản trị Web Database):** Truy cập tại [http://localhost:8081](http://localhost:8081) để xem trực quan các bảng của Metadata Store và Target DB.
+
+---
+
+### 2. Hướng dẫn Seed Database Mẫu (Target Database Seeding)
+
+Dự án cung cấp sẵn nhiều phương thức nạp dữ liệu thử nghiệm phục vụ kiểm thử và demo:
+
+#### 🔹 Phương án A: Seed Golden Retail Benchmark Database (36 Bảng, 5.000 Orders) — *Khuyên dùng*
+
+Script tự động khởi tạo database `golden_retail_db` trên PostgreSQL, import 36 bảng chuẩn Enterprise Retail (`order_header`, `order_line`, `products`, `customers`, `stores`, `sales_channels`, `inventory`, `payments`...) kèm 8.5MB dữ liệu seed thực tế:
+
+```bash
+# Chạy script tự động seed dữ liệu
 python scripts/setup_target_db.py
 ```
 
-- **PgWeb UI:** Mở trình duyệt tại [http://localhost:8081](http://localhost:8081) để xem trực tiếp cấu trúc DB.
+- **Chuỗi kết nối (Connection URL) để kết nối trên UI / API:**
+  - Kết nối từ máy Host (Local): `postgresql://dev:devpassword@localhost:5432/golden_retail_db`
+  - Kết nối từ trong mạng Docker: `postgresql://dev:devpassword@postgres:5432/golden_retail_db`
+
+#### 🔹 Phương án B: Tự động Sinh lại Bộ Dữ liệu Mới (Custom Seed Data Generator)
+
+Nếu muốn tạo mới hoặc tùy biến khối lượng dữ liệu từ đầu:
+
+```bash
+# 1. Sinh cấu trúc DDL và bộ dữ liệu giao dịch giả lập
+python scripts/seed_data_generator.py
+
+# 2. Chuyển đổi định dạng DDL/DML tương thích hoàn toàn PostgreSQL
+python scripts/convert_to_postgres.py
+
+# 3. Nạp lại vào database đích
+python scripts/setup_target_db.py
+```
 
 ---
 
 ## 🚀 Khởi chạy Ứng dụng
 
-### Cách 1: Chạy trực tiếp qua Uvicorn (Local Dev)
+### Cách 1: Khởi chạy Cục bộ (Local Development — Khuyên dùng)
 
-1. Khởi động PostgreSQL Metadata Store qua Docker Compose (hoặc dùng Postgres local):
+**Terminal 1 — Backend (FastAPI):**
 
 ```bash
-# Chạy uvicorn với hot-reload
+# Đảm bảo virtualenv đã được kích hoạt
 uvicorn src.main:app --reload --port 8000
 ```
 
-1. Mở tài liệu API Swagger tại: [http://localhost:8000/docs](http://localhost:8000/docs)
+- API Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs)
+- API ReDoc: [http://localhost:8000/redoc](http://localhost:8000/redoc)
 
-### Cách 2: Chạy full-stack với Docker Compose
+**Terminal 2 — Frontend (Next.js 14):**
 
 ```bash
-# Development Mode (Hot-reload code + Debug port 5678)
+cd frontend
+npm run dev
+```
+
+- Web Application UI: [http://localhost:3000](http://localhost:3000)
+
+---
+
+### Cách 2: Khởi chạy Trọn gói qua Docker Compose
+
+```bash
+# Chạy toàn bộ hệ thống (PostgreSQL + Backend + Frontend + PgWeb)
 docker compose -f docker-compose.dev.yml up --build -d
 
-# Xem log server
+# Xem log thời gian thực của backend
 docker compose -f docker-compose.dev.yml logs -f backend
 
-# Dừng môi trường dev
+# Dừng toàn bộ hệ thống
 docker compose -f docker-compose.dev.yml down
-
-# Xóa image cũ
-docker image prune -f
 ```
 
 ---
 
-## 🔗 Danh sách API Endpoints chính
+## 🔗 Danh mục API Endpoints Đầy đủ (25+ Endpoints)
 
-| Method | Endpoint | Mô tả |
-| --- | --- | --- |
-| `POST` | `/api/v1/semantic/generate` | Khởi chạy Flow 1 (Introspect DB → Enrich → Suggest Metrics) |
-| `POST` | `/api/v1/semantic/approve` | Xác nhận (Approve) từ HITL review & persist vào Metadata Store |
-| `PUT` | `/api/v1/semantic/{db_id}/table/{table_name}` | Cập nhật tên/mô tả nghiệp vụ của bảng (HITL Inline Edit) |
-| `PUT` | `/api/v1/semantic/{db_id}/column/{table_name}/{column_name}` | Cập nhật tên/mô tả nghiệp vụ của cột (HITL Inline Edit) |
-| `POST` | `/api/v1/semantic/{db_id}/metric` | Tạo mới một Business Metric (AI hoặc Thủ công) |
-| `PUT` | `/api/v1/semantic/{db_id}/metric/{metric_id}` | Cập nhật Business Metric đã tồn tại |
-| `DELETE` | `/api/v1/semantic/{db_id}/metric/{metric_id}` | Xóa Business Metric |
-| `GET` | `/api/v1/semantic/{db_id}/export?format=json\|yaml` | Xuất Semantic Layer đã phê duyệt ra JSON hoặc YAML |
-| `GET` | `/api/v1/status` | Kiểm tra trạng thái sẵn sàng của Agent |
+### 1. Xác thực & Quản lý Người dùng (Auth & RBAC)
+
+- `POST /api/v1/auth/register` — Đăng ký tài khoản mới, cấp JWT Access + Refresh token
+- `POST /api/v1/auth/login` — Đăng nhập bằng Email/Username & Mật khẩu
+- `POST /api/v1/auth/google` — Đăng nhập / Đăng ký qua Google OAuth ID Token
+- `POST /api/v1/auth/refresh` — Quay vòng Refresh Token (Token Rotation) & cấp cặp token mới
+- `GET /api/v1/auth/me` — Lấy thông tin tài khoản người dùng hiện tại
+- `POST /api/v1/auth/logout` — Thu hồi phiên đăng nhập (Revoke Refresh Token)
+
+### 2. Tiếp nhận CSDL & Schema Ingestion (Flow 1)
+
+- `POST /api/v1/semantic/import/preview` — Phân tích cú pháp file SQL Dump DDL (PostgreSQL, MySQL, SQLite) và trả về Technical Schema Preview + Diagnostics
+- `POST /api/v1/semantic/import/saved` — Lưu cấu trúc SQL Dump đã parse vào Metadata Store
+- `GET /api/v1/semantic/import/saved` — Danh sách các schema SQL Dump đã lưu
+- `GET /api/v1/semantic/import/saved/{schema_id}` — Xem chi tiết schema SQL Dump
+- `DELETE /api/v1/semantic/import/saved/{schema_id}` — Xóa schema SQL Dump
+- `POST /api/v1/semantic/db/connect` — Kết nối Target Live DB, mã hóa Fernet URL, introspect schema và lưu Metadata
+- `GET /api/v1/semantic/db/saved` — Danh sách các kết nối Live DB
+- `GET /api/v1/semantic/db/saved/{db_id}` — Xem chi tiết kết nối Live DB
+- `DELETE /api/v1/semantic/db/saved/{db_id}` — Xóa kết nối Live DB
+
+### 3. Làm giàu Ngữ nghĩa & Phê duyệt HITL (Flow 1 Enrichment)
+
+- `POST /api/v1/semantic/generate` — Chạy pipeline 2-Pass AI Schema Enrichment (Glossary $\rightarrow$ Clustering $\rightarrow$ Vietnamese Business Names & Metrics)
+- `POST /api/v1/semantic/approve` — Phê duyệt toàn bộ Draft Metrics cho một Semantic Database
+- `POST /api/v1/semantic/{db_id}/metric/{metric_id}/approve` — Phê duyệt một Business Metric cụ thể
+- `PUT /api/v1/semantic/{db_id}/table/{table_name}` — Chỉnh sửa inline tên/mô tả nghiệp vụ của Bảng
+- `PUT /api/v1/semantic/{db_id}/column/{table_name}/{column_name}` — Chỉnh sửa inline tên/mô tả nghiệp vụ của Cột
+
+### 4. Quản trị Chỉ số Kinh doanh & Lịch sử Phiên bản (Business Metrics Catalog)
+
+- `POST /api/v1/semantic/{db_id}/metrics/generate` — Sinh gợi ý Business Metrics thông minh từ Prompt tiếng Việt
+- `POST /api/v1/semantic/{db_id}/metric` — Tạo mới Business Metric (AI hoặc thủ công) kèm phiên bản v1
+- `GET /api/v1/semantic/{db_id}/metrics` — Danh sách Business Metrics kèm trạng thái và phiên bản
+- `PUT /api/v1/semantic/{db_id}/metric/{metric_id}` — Cập nhật công thức Metric, tự động tăng phiên bản và lưu `metric_versions`
+- `GET /api/v1/semantic/{db_id}/metric/{metric_id}/history` — Xem lịch sử thay đổi phiên bản của Metric
+- `DELETE /api/v1/semantic/{db_id}/metric/{metric_id}` — Xóa Business Metric
+
+### 5. Catalog & Xuất bản (Catalog & Export)
+
+- `GET /api/v1/semantic/{db_id}/catalog` — Trả về danh mục Canonical Tables, Columns, Relationships và cờ hỗ trợ Live Query
+- `GET /api/v1/semantic/{db_id}/export?format=json|yaml` — Tải xuống Semantic Layer đã duyệt theo định dạng JSON hoặc YAML
+
+### 6. Động cơ Truy vấn Ngữ nghĩa & Guardrails (Flow 2 — Live DB Only)
+
+- `POST /api/v1/semantic/{db_id}/query/compile` — Biên dịch Metric/Dimensions thành câu lệnh SQL chuẩn dialect + chẩn đoán (Compile Preview, không query DB)
+- `POST /api/v1/semantic/{db_id}/query` — Biên dịch và thực thi câu lệnh SQL an toàn trên Live DB (kèm `LIMIT 100` và `timeout = 15s`)
+
+### 7. AI Conversational Studio & Query Clarifier Wizard
+
+- `POST /api/v1/semantic/{db_id}/chat` — Multi-agent Chatbot tự động phân loại Intent (Chitchat tiếng Việt vs Gợi ý Metric)
+- `POST /api/v1/semantic/{db_id}/query/wizard/start` — Bắt đầu phiên Wizard hỏi-đáp đa bước làm rõ câu truy vấn mơ hồ
+- `POST /api/v1/semantic/{db_id}/query/wizard/step` — Nạp lựa chọn người dùng cho từng bước Wizard và trả về cấu hình truy vấn đã làm rõ
 
 ---
 
-## 🧪 Kiểm thử & Chất lượng Mã nguồn (Testing)
+## 📊 Kịch bản & Mẫu Truy vấn Thực tế (Sample Queries & Scenarios)
 
-Dự án áp dụng quy chuẩn kiểm thử nghiêm ngặt với 100% Mock LLM và Mock DB:
+### Kịch bản 1: Kết nối Live Target DB & Khởi chạy Flow 1 Enrichment
+
+**1. Kết nối Target DB:**
 
 ```bash
-# Kiểm tra linter & formatting với Ruff
-ruff check src/
-ruff format src/
+curl -X POST "http://localhost:8000/api/v1/semantic/db/connect" \
+  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "display_name": "E-Commerce Production DB",
+    "dialect": "postgresql",
+    "conn_url": "postgresql://dev:devpassword@localhost:5432/ecommerce_db"
+  }'
+```
 
-# Chạy toàn bộ Test Suite (Unit & Integration tests)
+**2. Khởi chạy 2-Pass AI Schema Enrichment:**
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/semantic/generate" \
+  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db_id": 1
+  }'
+```
+
+**3. Phê duyệt (HITL Approve) Semantic Layer:**
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/semantic/approve" \
+  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db_id": 1
+  }'
+```
+
+---
+
+### Kịch bản 2: Biên dịch & Thực thi Truy vấn Semantic Layer (Flow 2)
+
+#### Ví dụ 1: Xem trước SQL biên dịch (Compile-Only Preview)
+
+**Yêu cầu:** Tính "Tổng Doanh Thu Thuần" theo "Kênh bán hàng" trong năm 2024.
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/semantic/1/query/compile" \
+  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metrics": [1],
+    "dimensions": [
+      {"table": "sales_channels", "column": "channel_name"}
+    ],
+    "time_dimension": {
+      "table": "order_header",
+      "column": "created_at",
+      "grain": "year"
+    },
+    "filters": [
+      {
+        "table": "order_header",
+        "column": "order_status",
+        "operator": "eq",
+        "value": "completed"
+      }
+    ]
+  }'
+```
+
+**Kết quả SQL Biên dịch nhận được:**
+
+```sql
+SELECT 
+  sales_channels.channel_name AS "sales_channels__channel_name",
+  DATE_TRUNC('year', order_header.created_at) AS "order_header__created_at_year",
+  SUM(order_header.total_amount - order_header.discount_amount) AS "net_revenue"
+FROM order_header
+JOIN sales_channels ON order_header.sales_channel_id = sales_channels.id
+WHERE order_header.order_status = 'completed'
+GROUP BY sales_channels.channel_name, DATE_TRUNC('year', order_header.created_at)
+ORDER BY "net_revenue" DESC
+LIMIT 100;
+```
+
+#### Ví dụ 2: Thực thi truy vấn trực tiếp trên Live Database
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/semantic/1/query" \
+  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metrics": [1],
+    "dimensions": [
+      {"table": "sales_channels", "column": "channel_name"}
+    ]
+  }'
+```
+
+**Kết quả Response:**
+
+```json
+{
+  "sql": "SELECT sales_channels.channel_name AS \"sales_channels__channel_name\", SUM(order_header.total_amount - order_header.discount_amount) AS \"net_revenue\" FROM order_header JOIN sales_channels ON order_header.sales_channel_id = sales_channels.id GROUP BY sales_channels.channel_name LIMIT 100",
+  "parameters": {},
+  "columns": [
+    {"name": "sales_channels__channel_name", "type": "VARCHAR"},
+    {"name": "net_revenue", "type": "NUMERIC"}
+  ],
+  "rows": [
+    {"sales_channels__channel_name": "Online Website", "net_revenue": 1250000000.0},
+    {"sales_channels__channel_name": "Shopee Mall", "net_revenue": 890000000.0},
+    {"sales_channels__channel_name": "Cửa hàng Offline Hà Nội", "net_revenue": 650000000.0}
+  ],
+  "row_count": 3
+}
+```
+
+---
+
+### Kịch bản 3: Tương tác qua Multi-Agent Studio & AI Assistant Wizard
+
+**1. Hỏi đáp Multi-Agent qua Chat Studio:**
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/semantic/1/chat" \
+  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Gợi ý cho tôi các chỉ số đo lường hiệu quả bán hàng và giá trị đơn hàng trung bình (AOV)"
+  }'
+```
+
+**2. Bắt đầu phiên AI Query Clarifier Wizard:**
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/semantic/1/query/wizard/start" \
+  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>"
+```
+
+---
+
+### Kịch bản 4: Xuất bản Semantic Layer (Export JSON / YAML)
+
+```bash
+# Tải về định dạng YAML phục vụ tích hợp BI / dbt Semantic Layer
+curl -X GET "http://localhost:8000/api/v1/semantic/1/export?format=yaml" \
+  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" \
+  -o semantic_layer_export.yaml
+```
+
+**Cấu trúc tệp YAML xuất bản mẫu:**
+
+```yaml
+semantic_layer:
+  version: "2.0.0"
+  database:
+    name: "E-Commerce Production DB"
+    dialect: "postgresql"
+  entities:
+    - name: "order_header"
+      business_name: "Đơn hàng"
+      description: "Thông tin tổng quan các giao dịch mua hàng"
+      primary_key: "id"
+      dimensions:
+        - name: "created_at"
+          business_name: "Ngày tạo đơn"
+          type: "timestamp"
+          is_time_dimension: true
+        - name: "order_status"
+          business_name: "Trạng thái đơn hàng"
+          type: "varchar"
+    - name: "sales_channels"
+      business_name: "Kênh bán hàng"
+      primary_key: "id"
+  relationships:
+    - from_entity: "order_header"
+      to_entity: "sales_channels"
+      type: "many_to_one"
+      join_condition: "order_header.sales_channel_id = sales_channels.id"
+  metrics:
+    - name: "total_net_revenue"
+      business_name: "Tổng Doanh Thu Thuần"
+      base_entity: "order_header"
+      aggregation: "SUM"
+      formula: "order_header.total_amount - order_header.discount_amount"
+      status: "active"
+      version: 2
+```
+
+---
+
+## 🧪 Kiểm thử & Đảm bảo Chất lượng (Testing Suite)
+
+Dự án áp dụng 100% Mock LLM và Mock DB theo chuẩn quy định tại [AGENTS.md](file:///d:/project/P-069/AGENTS.md):
+
+```bash
+# 1. Kiểm tra linter & formatting chuẩn với Ruff
+ruff check src/ tests/
+ruff format src/ tests/
+
+# 2. Chạy toàn bộ Test Suite (60+ unit & integration tests)
 pytest
 
-# Chạy test kèm thông tin chi tiết
-pytest -v -s
+# 3. Chạy kiểm thử có hiển thị chi tiết và đo thời gian
+pytest -v -s --durations=10
 ```
 
 ---
@@ -359,6 +644,7 @@ pytest -v -s
 ## 📚 Tài liệu Liên quan
 
 - 🏛️ [Architecture Document](file:///d:/project/P-069/ARCHITECTURE.md)
+- 📊 [Evaluation Evidence Report (Báo cáo Đánh giá Thực nghiệm)](file:///d:/project/P-069/eval/results/report.md)
 - 🗄️ [Database Design Specification](file:///d:/project/P-069/docs/DATABASE_DESIGN.md)
 - 📋 [Product Requirements Document (PRD)](file:///d:/project/P-069/docs/PRD.md)
 - 📑 [Feature Specifications](file:///d:/project/P-069/docs/FEATURE_SPECIFICATIONS.md)

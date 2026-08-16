@@ -48,9 +48,20 @@ export function AIStudioView({ layer, theme, onMetricsChanged, onEditMetricReque
   };
 
   const save = async (suggestion: MetricSuggestion) => {
-    if (!semanticDbId) throw new Error('Semantic database chưa sẵn sàng');
-    await createMetricApi(String(semanticDbId), { definition: suggestion.definition, source: 'ai' });
-    await onMetricsChanged();
+    if (!semanticDbId) {
+      appendError(setMessages, 'Semantic database chưa sẵn sàng hoặc đã bị xóa. Vui lòng tải lại trang.');
+      return;
+    }
+    try {
+      await createMetricApi(String(semanticDbId), { definition: suggestion.definition, source: 'ai' });
+      await onMetricsChanged();
+    } catch (error) {
+      appendError(
+        setMessages,
+        `Không thể lưu chỉ số "${suggestion.definition.metric.name}": ${error instanceof Error ? error.message : 'Lỗi không xác định'}`
+      );
+      throw error;
+    }
   };
 
   return (
