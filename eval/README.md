@@ -177,6 +177,11 @@ python -m eval.run_eval --domain ecommerce --engine hybrid            # smoke, n
 python -m eval.run_eval --domain ecommerce --engine hybrid --judge    # + AI judge lane
 ```
 
+`--judge` uses the dedicated `JUDGE_*` configuration. Judge provider, model,
+and API key must each differ from the Agent LLM; missing or matching values
+stop the run before any API call. There is no fallback to Agent credentials.
+Judge temperature is always `0.0`.
+
 Reports go to `--report-dir` (default `eval/reports/hybrid`) as `report.json`
 (full contract), `report.csv` (one row per sample), and `report.md` (summary).
 Status follows the spec gates: PASS ≥ 90, WARN 80–90, FAIL on a critical-gate

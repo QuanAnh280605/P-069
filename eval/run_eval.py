@@ -63,13 +63,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--domain", default="ecommerce", help="Domain identifier to evaluate.")
     parser.add_argument("--engine", choices=("legacy", "hybrid"), default="legacy")
     parser.add_argument("--run-type", choices=("smoke", "benchmark", "release"), default="smoke")
-    parser.add_argument("--judge", action="store_true", help="enable the AI judge lane (requires OPENAI_API_KEY)")
+    parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="enable the isolated AI Judge lane (requires JUDGE_* configuration)",
+    )
     parser.add_argument("--report-dir", type=Path, default=Path("eval/reports/hybrid"))
     return parser.parse_args(argv)
 
 
 def _build_judge_runner() -> JudgeRunner:
-    """Wire the real get_llm()-backed judge lane (never called from tests)."""
+    """Wire the isolated get_llm(role='judge') lane."""
     from eval.evaluator.hybrid.judge.base import JudgeRunner, LangChainJudgeLLM
     from eval.evaluator.hybrid.judge.cache import MemoryJudgeCache
 

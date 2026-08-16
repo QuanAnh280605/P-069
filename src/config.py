@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     model_name: str = ""  # empty -> per-provider default in services/llm.py
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 0.0 for deterministic output
 
+    # AI Judge identity is mandatory and isolated when role="judge" is requested.
+    judge_llm_provider: str = ""
+    judge_llm_protocol: str = ""
+    judge_api_key: str = ""
+    judge_model_name: str = ""
+    judge_api_base: str = ""
+
     # LLM per-provider base URLs (used when LLM_API_BASE is empty)
     openai_api_base: str = "https://api.openai.com/v1"
     mimo_api_base: str = "https://api.xiaomimimo.com/v1"
