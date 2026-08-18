@@ -65,6 +65,70 @@ class UserProfileResponse(BaseModel):
     created_at: datetime
 
 
+class OrganizationCreateRequest(BaseModel):
+    """Request to create a company Workspace."""
+
+    name: str = Field(..., min_length=1, max_length=200)
+    slug: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class OrganizationSummaryResponse(BaseModel):
+    """Workspace summary and current user's role."""
+
+    id: int
+    name: str
+    slug: str
+    role: Literal["admin", "data_lead", "member"]
+    permissions: dict[str, bool] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class OrganizationMemberResponse(BaseModel):
+    """Workspace member with account identity and role."""
+
+    user_id: int
+    email: str
+    username: str
+    full_name: str
+    role: Literal["admin", "data_lead", "member"]
+    joined_at: datetime
+
+
+class OrganizationRoleUpdateRequest(BaseModel):
+    """Request to change a Workspace member role."""
+
+    role: Literal["admin", "data_lead", "member"]
+
+
+class OrganizationInviteCreateRequest(BaseModel):
+    """Request to create a one-time Workspace invitation."""
+
+    role: Literal["data_lead", "member"] = "member"
+    invitee_email: EmailStr | None = None
+
+
+class OrganizationInviteResponse(BaseModel):
+    """Invitation details; raw token is only returned on creation."""
+
+    id: int
+    org_id: int
+    role: Literal["data_lead", "member"]
+    invitee_email: str | None = None
+    status: Literal["pending", "accepted", "revoked", "expired"]
+    expires_at: datetime
+    invite_url: str | None = None
+
+
+class OrganizationInvitePreviewResponse(BaseModel):
+    """Public invitation preview before authentication."""
+
+    organization_name: str
+    organization_slug: str
+    role: Literal["data_lead", "member"]
+    invitee_email: str | None = None
+    expires_at: datetime
+
+
 # ---------------------------------------------------------------------------
 # DB Connection
 # ---------------------------------------------------------------------------

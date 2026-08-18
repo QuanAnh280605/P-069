@@ -10,10 +10,10 @@ import { metricName, renderMetricYaml, statusLabel } from '@/lib/metrics';
 interface MetricsCatalogViewProps {
   dbId?: number | null;
   metrics: MetricRecord[];
-  onDeleteMetric: (id: number) => Promise<void> | void;
-  onEditMetric: (metric: MetricRecord) => void;
-  onOpenStudio: () => void;
-  onApproveAll: () => Promise<void>;
+  onDeleteMetric?: (id: number) => Promise<void> | void;
+  onEditMetric?: (metric: MetricRecord) => void;
+  onOpenStudio?: () => void;
+  onApproveAll?: () => Promise<void>;
   onApproveMetric?: (id: number) => Promise<void> | void;
 }
 
@@ -46,7 +46,7 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
   const approveAll = async () => {
     setApproving(true);
     try {
-      await props.onApproveAll();
+      await props.onApproveAll?.();
     } finally {
       setApproving(false);
     }
@@ -88,7 +88,7 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
             />
           </label>
 
-          <button
+          {props.onApproveAll && <button
             type='button'
             onClick={() => void approveAll()}
             disabled={!totalPending || approving}
@@ -96,16 +96,16 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
           >
             <CheckCircle2 className='h-4 w-4' />
             {approving ? 'Đang duyệt...' : `Duyệt tất cả (${totalPending})`}
-          </button>
+          </button>}
 
-          <button
+          {props.onOpenStudio && <button
             type='button'
             onClick={props.onOpenStudio}
             className='inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-indigo-500 transition-all cursor-pointer'
           >
             <Sparkles className='h-4 w-4' />
             Sinh với AI
-          </button>
+          </button>}
         </div>
       </header>
 
@@ -253,8 +253,8 @@ function MetricCard({
   onApprove,
 }: {
   metric: MetricRecord;
-  onEdit: (item: MetricRecord) => void;
-  onDelete: (id: number) => Promise<void> | void;
+  onEdit?: (item: MetricRecord) => void;
+  onDelete?: (id: number) => Promise<void> | void;
   onHistory: (id: number) => Promise<void>;
   onApprove?: (id: number) => Promise<void> | void;
 }) {
@@ -308,14 +308,14 @@ function MetricCard({
           >
             <History className='h-3.5 w-3.5' />
           </button>
-          <button
+          {onEdit && <button
             onClick={() => onEdit(metric)}
             className='rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300'
           >
             <Edit2 className='mr-1 inline h-3.5 w-3.5' />
             {definition ? 'Chỉnh sửa' : 'Chuẩn hóa'}
-          </button>
-          <button
+          </button>}
+          {onDelete && <button
             onClick={() => {
               if (window.confirm(`Xóa metric ${metricName(metric)}?`)) void onDelete(metric.metric_id);
             }}
@@ -323,7 +323,7 @@ function MetricCard({
             title='Xóa metric'
           >
             <Trash2 className='h-3.5 w-3.5' />
-          </button>
+          </button>}
         </div>
 
         {isPending && onApprove && (
@@ -357,13 +357,15 @@ function StatusBadge({ status }: { status: MetricRecord['status'] }) {
   );
 }
 
-function Empty({ onOpenStudio }: { onOpenStudio: () => void }) {
+function Empty({ onOpenStudio }: { onOpenStudio?: () => void }) {
   return (
     <div className='rounded-2xl border border-dashed border-slate-300 p-12 text-center'>
       <p className='text-sm font-bold'>Chưa có Metric Definition</p>
-      <button onClick={onOpenStudio} className='mt-3 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white'>
-        Mở AI Studio
-      </button>
+      {onOpenStudio && (
+        <button onClick={onOpenStudio} className='mt-3 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white'>
+          Mở AI Studio
+        </button>
+      )}
     </div>
   );
 }

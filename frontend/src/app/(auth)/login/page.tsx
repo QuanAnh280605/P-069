@@ -7,6 +7,12 @@ import { useAuth } from '@/context/AuthContext';
 import { GoogleLogin } from '@react-oauth/google';
 import { Database, Lock, Mail, ArrowRight } from 'lucide-react';
 
+function getPostAuthPath(): string {
+  if (typeof window === 'undefined') return '/';
+  const returnTo = new URLSearchParams(window.location.search).get('returnTo');
+  return returnTo?.startsWith('/invite/') ? returnTo : '/';
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { token, isLoading, login, loginWithGoogle } = useAuth();
@@ -17,7 +23,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!isLoading && token) {
-      router.replace('/');
+      router.replace(getPostAuthPath());
     }
   }, [isLoading, token, router]);
 
@@ -38,7 +44,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      router.push('/');
+      router.push(getPostAuthPath());
     } catch (err: any) {
       setError(err?.message || 'Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.');
     } finally {
@@ -134,7 +140,7 @@ export default function LoginPage() {
                   try {
                     setError('');
                     await loginWithGoogle(credentialResponse.credential);
-                    router.push('/');
+                    router.push(getPostAuthPath());
                   } catch (err: unknown) {
                     setError(err instanceof Error ? err.message : 'Đăng nhập Google thất bại');
                   }

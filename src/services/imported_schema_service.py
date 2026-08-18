@@ -24,6 +24,7 @@ async def create_imported_schema(
     owner_id: int,
     display_name: str,
     raw_schema: RawSchemaMetadata,
+    org_id: int | None = None,
 ) -> ImportedSchemaResponse:
     """Persist validated schema metadata for one authenticated user."""
     logger.info(
@@ -51,6 +52,7 @@ async def create_imported_schema(
             user_id=owner_id,
             display_name=display_name.strip(),
             dialect=raw_schema.dialect.value,
+            org_id=org_id,
         )
         record.semantic_db_id = semantic_db_id
         await db.commit()
@@ -80,13 +82,19 @@ async def create_imported_schema(
 async def list_imported_schemas(
     db: AsyncSession,
     owner_id: int,
+    org_id: int | None = None,
 ) -> list[ImportedSchemaSummaryResponse]:
     """List persisted schemas owned by one authenticated user."""
-    statement = (
-        select(ImportedSchemaModel)
-        .where(ImportedSchemaModel.created_by == owner_id)
-        .order_by(ImportedSchemaModel.updated_at.desc(), ImportedSchemaModel.id.desc())
-    )
+    statement = select(ImportedSchemaModel).order_by(ImportedSchemaModel.updated_at.desc(), ImportedSchemaModel.id.desc())
+    if org_id is None:
+        statement = statement.where(ImportedSchemaModel.created_by == owner_id)
+    else:
+        statement = statement.outerjoin(
+            SemanticDatabaseModel, ImportedSchemaModel.semantic_db_id == SemanticDatabaseModel.id
+        ).where(
+            (SemanticDatabaseModel.org_id == org_id)
+            | ((SemanticDatabaseModel.org_id.is_(None)) & (ImportedSchemaModel.created_by == owner_id))
+        )
     records = (await db.scalars(statement)).all()
     return [_summary_response(record) for record in records]
 
@@ -95,15 +103,16 @@ async def get_imported_schema(
     db: AsyncSession,
     owner_id: int,
     schema_id: int,
+    org_id: int | None = None,
 ) -> ImportedSchemaResponse | None:
     """Return one persisted schema only when it belongs to the user."""
-    record = await _owned_record(db, owner_id, schema_id)
+    record = await _owned_record(db, owner_id, schema_id, org_id)
     return _full_response(record) if record else None
 
 
-async def delete_imported_schema(db: AsyncSession, owner_id: int, schema_id: int) -> bool:
+async def delete_imported_schema(db: AsyncSession, owner_id: int, schema_id: int, org_id: int | None = None) -> bool:
     """Delete one persisted schema and all related semantic layer metadata when it belongs to the user."""
-    record = await _owned_record(db, owner_id, schema_id)
+    record = await _owned_record(db, owner_id, schema_id, org_id)
     if record is None:
         return False
 
@@ -129,11 +138,18 @@ async def _owned_record(
     db: AsyncSession,
     owner_id: int,
     schema_id: int,
+    org_id: int | None = None,
 ) -> ImportedSchemaModel | None:
-    statement = select(ImportedSchemaModel).where(
-        ImportedSchemaModel.id == schema_id,
-        ImportedSchemaModel.created_by == owner_id,
-    )
+    statement = select(ImportedSchemaModel).where(ImportedSchemaModel.id == schema_id)
+    if org_id is None:
+        statement = statement.where(ImportedSchemaModel.created_by == owner_id)
+    else:
+        statement = statement.outerjoin(
+            SemanticDatabaseModel, ImportedSchemaModel.semantic_db_id == SemanticDatabaseModel.id
+        ).where(
+            (SemanticDatabaseModel.org_id == org_id)
+            | ((SemanticDatabaseModel.org_id.is_(None)) & (ImportedSchemaModel.created_by == owner_id))
+        )
     return await db.scalar(statement)
 
 

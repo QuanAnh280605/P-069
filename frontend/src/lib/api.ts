@@ -281,11 +281,114 @@ const API_BASE_URL =
   'http://localhost:8000';
 const API_BASE = API_BASE_URL;
 
+export type WorkspaceRole = 'admin' | 'data_lead' | 'member';
+
+export interface WorkspaceSummary {
+  id: number;
+  name: string;
+  slug: string;
+  role: WorkspaceRole;
+  permissions: Record<string, boolean>;
+  created_at: string;
+}
+
+export interface WorkspaceMember {
+  user_id: number;
+  email: string;
+  username: string;
+  full_name: string;
+  role: WorkspaceRole;
+  joined_at: string;
+}
+
+export interface WorkspaceInvite {
+  id: number;
+  org_id: number;
+  role: 'member' | 'data_lead';
+  invitee_email?: string | null;
+  status: 'pending' | 'accepted' | 'revoked' | 'expired';
+  expires_at: string;
+  invite_url?: string | null;
+}
+
+export interface WorkspaceInvitePreview {
+  organization_name: string;
+  organization_slug: string;
+  role: 'member' | 'data_lead';
+  invitee_email?: string | null;
+  expires_at: string;
+}
+
+function getWorkspaceHeader(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  const id = window.localStorage.getItem('current_organization_id');
+  return id ? { 'X-Organization-ID': id } : {};
+}
+
 function getAuthHeader(): Record<string, string> {
   const token =
     getStoredToken() ||
     (typeof window !== 'undefined' ? localStorage.getItem('access_token') || localStorage.getItem('token') : null);
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...getWorkspaceHeader(),
+  };
+}
+
+export function listWorkspacesApi(): Promise<WorkspaceSummary[]> {
+  return semanticRequest<WorkspaceSummary[]>('/api/v1/org/my-orgs');
+}
+
+export function getCurrentWorkspaceApi(): Promise<WorkspaceSummary> {
+  return semanticRequest<WorkspaceSummary>('/api/v1/org/current');
+}
+
+export function createWorkspaceApi(name: string, slug?: string): Promise<WorkspaceSummary> {
+  return semanticRequest<WorkspaceSummary>('/api/v1/org', {
+    method: 'POST',
+    body: JSON.stringify({ name, slug }),
+  });
+}
+
+export function listWorkspaceMembersApi(): Promise<WorkspaceMember[]> {
+  return semanticRequest<WorkspaceMember[]>('/api/v1/org/members');
+}
+
+export function updateWorkspaceMemberApi(userId: number, role: WorkspaceRole): Promise<void> {
+  return semanticRequest<void>(`/api/v1/org/members/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ role }),
+  });
+}
+
+export function removeWorkspaceMemberApi(userId: number): Promise<void> {
+  return semanticRequest<void>(`/api/v1/org/members/${userId}`, { method: 'DELETE' });
+}
+
+export function createWorkspaceInviteApi(
+  role: 'member' | 'data_lead',
+  inviteeEmail?: string,
+): Promise<WorkspaceInvite> {
+  return semanticRequest<WorkspaceInvite>('/api/v1/org/invite', {
+    method: 'POST',
+    body: JSON.stringify({ role, invitee_email: inviteeEmail || null }),
+  });
+}
+
+export function revokeWorkspaceInviteApi(invitationId: number): Promise<void> {
+  return semanticRequest<void>(`/api/v1/org/invite/${invitationId}`, { method: 'DELETE' });
+}
+
+export function listWorkspaceInvitesApi(): Promise<WorkspaceInvite[]> {
+  return semanticRequest<WorkspaceInvite[]>('/api/v1/org/invites');
+}
+
+export function previewWorkspaceInviteApi(token: string): Promise<WorkspaceInvitePreview> {
+  return semanticRequest<WorkspaceInvitePreview>(`/api/v1/invite/${token}`);
+}
+
+export function acceptWorkspaceInviteApi(token: string): Promise<WorkspaceSummary> {
+  return semanticRequest<WorkspaceSummary>(`/api/v1/invite/${token}/accept`, { method: 'POST' });
 }
 
 export class SemanticApiError extends Error {
@@ -682,6 +785,7 @@ export async function uploadSqlDumpPreview(
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/sql',
     'X-Filename': file.name,
+    ...getWorkspaceHeader(),
   };
   if (dialect) headers['X-SQL-Dialect'] = dialect;
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/preview`, {
@@ -714,7 +818,7 @@ export async function saveImportedSchema(
 
 export async function listImportedSchemas(token: string): Promise<ImportedSchemaSummary[]> {
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/saved`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
   return response.json() as Promise<ImportedSchemaSummary[]>;
@@ -727,7 +831,7 @@ export async function getImportedSchema(id: number, token: string): Promise<Impo
 export async function deleteImportedSchema(id: number, token: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/saved/${id}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
 }
@@ -741,6 +845,7 @@ async function requestImportedSchema(
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,
+      ...getWorkspaceHeader(),
       'Content-Type': 'application/json',
     },
   });
@@ -772,6 +877,7 @@ export async function connectLiveTargetDb(
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
+      ...getWorkspaceHeader(),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -786,7 +892,7 @@ export async function connectLiveTargetDb(
 
 export async function listLiveTargetDbs(token: string): Promise<LiveDbSummary[]> {
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/saved`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
   return response.json() as Promise<LiveDbSummary[]>;
@@ -794,7 +900,7 @@ export async function listLiveTargetDbs(token: string): Promise<LiveDbSummary[]>
 
 export async function getLiveTargetDb(id: number, token: string): Promise<LiveDbRecord> {
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/saved/${id}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
   return response.json() as Promise<LiveDbRecord>;
@@ -803,7 +909,7 @@ export async function getLiveTargetDb(id: number, token: string): Promise<LiveDb
 export async function deleteLiveTargetDb(id: number, token: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/saved/${id}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
 }
@@ -815,7 +921,7 @@ export async function deleteDatabaseApi(id: string, token: string): Promise<void
   }
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/${id}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) {
     await deleteLiveTargetDb(numId, token).catch(() => null);

@@ -27,12 +27,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConnectDbModal } from '@/components/modals/ConnectDbModal';
 import { MetricModal } from '@/components/modals/MetricModal';
 import { SettingsModal } from '@/components/modals/SettingsModal';
+import { WorkspaceManagementModal } from '@/components/modals/WorkspaceManagementModal';
 import { AIStudioView } from '@/components/views/AIStudioView';
 import { ExportPlaygroundView } from '@/components/views/ExportPlaygroundView';
 import { MetricExplorerView } from '@/components/views/MetricExplorerView';
 import { MetricsCatalogView } from '@/components/views/MetricsCatalogView';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
+import { useWorkspace } from '@/context/WorkspaceContext';
 import {
   approveMetricsApi,
   approveSingleMetricApi,
@@ -65,12 +67,14 @@ export default function DashboardPage() {
   const router = useRouter();
   const { user, token, logout, isLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { currentWorkspace, permissions } = useWorkspace();
   const [layers, setLayers] = useState<SemanticLayerData[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tab, setTab] = useState<WorkspaceTab>('studio');
+  const [tab, setTab] = useState<WorkspaceTab>(permissions.can_use_chat === false ? 'explorer' : 'studio');
   const [catalog, setCatalog] = useState<SemanticCatalog | null>(null);
   const [connectOpen, setConnectOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [workspaceManagementOpen, setWorkspaceManagementOpen] = useState(false);
   const [metricOpen, setMetricOpen] = useState(false);
   const [editingMetric, setEditingMetric] = useState<MetricRecord | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<MetricSuggestion | null>(null);
@@ -118,14 +122,21 @@ export default function DashboardPage() {
   }, [isLoading, token, router]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !currentWorkspace) return;
+    setLayers([]);
+    setSelectedId(null);
+    setCatalog(null);
     void loadConnections(token)
       .then((items) => {
         setLayers(items);
         setSelectedId((current) => current || items[0]?.id || null);
       })
       .catch((error) => notify(error instanceof Error ? error.message : 'Không thể tải database'));
-  }, [notify, token]);
+  }, [currentWorkspace?.id, notify, token]);
+
+  useEffect(() => {
+    if (permissions.can_use_chat === false && tab === 'studio') setTab('explorer');
+  }, [permissions.can_use_chat, tab]);
 
   const refreshSemanticData = useCallback(async () => {
     if (!activeLayerId || !semanticDbId) return;
@@ -217,7 +228,7 @@ export default function DashboardPage() {
           setSelectedId(id);
           setTab('studio');
         }}
-        onConnect={() => setConnectOpen(true)}
+        onConnect={permissions.can_manage_schema ? () => setConnectOpen(true) : undefined}
         onDelete={async (layer) => {
           if (!token || !window.confirm(`Xóa database ${layer.db_name}?`)) return;
           await deleteDatabaseApi(layer.id, token);
@@ -233,16 +244,17 @@ export default function DashboardPage() {
 
       {/* 🖥️ Main Workspace Content */}
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <WorkspaceHeader
+          layer={activeLayer}
+          description={activeLayer ? dbDescriptions[activeLayer.id] : undefined}
+          tab={tab}
+          onTab={setTab}
+          onManage={() => setWorkspaceManagementOpen(true)}
+        />
         {activeLayer ? (
           <>
-            <WorkspaceHeader
-              layer={activeLayer}
-              description={dbDescriptions[activeLayer.id]}
-              tab={tab}
-              onTab={setTab}
-            />
             <div className="flex-1 overflow-y-auto p-4 md:p-5">
-              {tab === 'studio' && (
+              {tab === 'studio' && permissions.can_use_chat && (
                 <AIStudioView
                   layer={activeLayer}
                   theme={theme}
@@ -254,11 +266,11 @@ export default function DashboardPage() {
                 <MetricsCatalogView
                   dbId={activeLayer.semantic_db_id}
                   metrics={activeLayer.metrics}
-                  onDeleteMetric={removeMetric}
-                  onEditMetric={(item) => openEditor(item)}
-                  onOpenStudio={() => setTab('studio')}
-                  onApproveAll={approve}
-                  onApproveMetric={approveSingleMetric}
+                  onDeleteMetric={permissions.can_create_metrics ? removeMetric : undefined}
+                  onEditMetric={permissions.can_create_metrics ? (item) => openEditor(item) : undefined}
+                  onOpenStudio={permissions.can_use_chat ? () => setTab('studio') : undefined}
+                  onApproveAll={permissions.can_approve_metrics ? approve : undefined}
+                  onApproveMetric={permissions.can_approve_metrics ? approveSingleMetric : undefined}
                 />
               )}
               {tab === 'explorer' && (
@@ -273,7 +285,7 @@ export default function DashboardPage() {
             </div>
           </>
         ) : (
-          <EmptyWorkspace onConnect={() => setConnectOpen(true)} />
+          <EmptyWorkspace canConnect={permissions.can_manage_schema} onConnect={() => setConnectOpen(true)} />
         )}
       </main>
 
@@ -296,6 +308,10 @@ export default function DashboardPage() {
         tables={activeLayer?.tables || []}
         initialDefinition={editingMetric?.definition || editingSuggestion?.definition}
         initialName={editingMetric?.name}
+      />
+      <WorkspaceManagementModal
+        isOpen={workspaceManagementOpen}
+        onClose={() => setWorkspaceManagementOpen(false)}
       />
     </div>
   );
@@ -371,7 +387,7 @@ function Sidebar({
   onUpdateDescription: (layerId: string, description: string) => void;
   onToggleCollapse: () => void;
   onSelect: (id: string) => void;
-  onConnect: () => void;
+  onConnect?: () => void;
   onDelete: (layer: SemanticLayerData) => void;
   onSettings: () => void;
   onTheme: () => void;
@@ -414,14 +430,14 @@ function Sidebar({
             <PanelLeftOpen className="h-5 w-5" />
           </button>
 
-          <button
+          {onConnect && <button
             type="button"
             onClick={onConnect}
             className="rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 p-2.5 text-white shadow-md shadow-indigo-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer"
             title="Thêm kết nối mới"
           >
             <PlusCircle className="h-4 w-4" />
-          </button>
+          </button>}
         </div>
 
         {/* Middle: Database icons list */}
@@ -505,7 +521,7 @@ function Sidebar({
       </div>
 
       {/* Add Connection */}
-      <div className="p-3">
+      {onConnect && <div className="p-3">
         <button
           type="button"
           onClick={onConnect}
@@ -514,7 +530,7 @@ function Sidebar({
           <PlusCircle className="h-4 w-4" />
           <span>Thêm kết nối mới</span>
         </button>
-      </div>
+      </div>}
 
       {/* Target Databases List */}
       <div className="flex-1 space-y-2 overflow-y-auto px-3">
@@ -673,23 +689,45 @@ function WorkspaceHeader({
   description,
   tab,
   onTab,
+  onManage,
 }: {
-  layer: SemanticLayerData;
+  layer: SemanticLayerData | null;
   description?: string;
   tab: WorkspaceTab;
   onTab: (tab: WorkspaceTab) => void;
+  onManage: () => void;
 }) {
-  const tabs: Array<[WorkspaceTab, string, React.ReactNode]> = [
-    ['studio', 'AI Studio', <Sparkles key="s" className="h-3.5 w-3.5" />],
-    ['metrics', `Catalog (${layer.metrics.length})`, <BarChart3 key="m" className="h-3.5 w-3.5" />],
-    ['explorer', 'Explorer', <Search key="q" className="h-3.5 w-3.5" />],
-    ['export', 'Export', <Share2 key="e" className="h-3.5 w-3.5" />],
-  ];
+  const { workspaces, currentWorkspace, switchWorkspace, permissions, role } = useWorkspace();
+  const tabs: Array<[WorkspaceTab, string, React.ReactNode]> = [];
+  if (layer) {
+    if (permissions.can_use_chat) tabs.push(['studio', 'AI Studio', <Sparkles key="s" className="h-3.5 w-3.5" />]);
+    tabs.push(
+      ['metrics', `Catalog (${layer.metrics.length})`, <BarChart3 key="m" className="h-3.5 w-3.5" />],
+      ['explorer', 'Explorer', <Search key="q" className="h-3.5 w-3.5" />],
+      ['export', 'Export', <Share2 key="e" className="h-3.5 w-3.5" />],
+    );
+  }
 
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-3 dark:border-slate-800 dark:bg-[#0B0F19]">
       <div className="flex items-center gap-3">
-        <div>
+        {workspaces.length > 0 && (
+          <div className="flex items-center gap-2">
+            <select
+              value={currentWorkspace?.id || ''}
+              onChange={(event) => switchWorkspace(Number(event.target.value))}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold dark:border-slate-700 dark:bg-slate-900"
+              aria-label="Workspace"
+            >
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+              ))}
+            </select>
+            {role && <span className="rounded-full bg-indigo-100 px-2 py-1 text-[10px] font-bold uppercase text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">{role}</span>}
+            {permissions.can_manage_members && <button type="button" onClick={onManage} className="rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-bold text-white">Quản lý team</button>}
+          </div>
+        )}
+        {layer && <div>
           <div className="flex items-center gap-2">
             <strong className="text-sm font-bold text-slate-900 dark:text-slate-100">
               {layer.db_name}
@@ -703,7 +741,7 @@ function WorkspaceHeader({
               {description}
             </p>
           )}
-        </div>
+        </div>}
       </div>
 
       <nav className="flex rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
@@ -727,7 +765,7 @@ function WorkspaceHeader({
   );
 }
 
-function EmptyWorkspace({ onConnect }: { onConnect: () => void }) {
+function EmptyWorkspace({ canConnect, onConnect }: { canConnect: boolean; onConnect: () => void }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
       <div className="rounded-2xl bg-indigo-50 p-4 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
@@ -741,13 +779,13 @@ function EmptyWorkspace({ onConnect }: { onConnect: () => void }) {
           Kết nối tới Live Database hoặc tải lên tệp SQL Dump để tự động tạo Semantic Layer và định nghĩa các chỉ số.
         </p>
       </div>
-      <button
+      {canConnect ? <button
         type="button"
         onClick={onConnect}
         className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-md shadow-indigo-500/20 hover:bg-indigo-700 transition-all cursor-pointer"
       >
         Thêm kết nối Database
-      </button>
+      </button> : <p className="text-xs font-semibold text-slate-500">Liên hệ Data Lead để thêm database.</p>}
     </div>
   );
 }
