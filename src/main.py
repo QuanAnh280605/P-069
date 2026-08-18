@@ -25,8 +25,9 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     logger.info("Starting %s in %s mode", settings.app_name, settings.app_env)
     engine = get_async_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    if settings.app_env in {"development", "test"}:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
     yield
     logger.info("Shutting down %s...", settings.app_name)
 

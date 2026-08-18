@@ -363,31 +363,101 @@ export interface ChatOrchestratorResponse {
   intent: 'chitchat' | 'metric_query';
   chat_response?: string | null;
   suggestions?: MetricSuggestion[] | null;
+  session_id: string;
+  user_message_id: string;
+  assistant_message_id: string;
+  session?: ChatSessionItem | null;
+}
+
+export interface ChatSessionItem {
+  id: string;
+  db_id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface ChatMessageItem {
+  id: string;
+  session_id: string;
+  client_message_id?: string | null;
+  sequence_no: number;
+  sender: 'user' | 'assistant' | 'system';
+  content: string;
+  intent?: string | null;
+  metadata_json?: {
+    schema_version?: number;
+    status?: 'pending' | 'completed' | 'error';
+    suggestions?: MetricSuggestion[];
+    error?: string | null;
+  } | null;
+  created_at: string;
+}
+
+export interface ChatSessionDetail extends ChatSessionItem {
+  messages: ChatMessageItem[];
+  next_before_sequence?: number | null;
+}
+
+async function chatRequest<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader(), ...(init?.headers || {}) },
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({ detail: 'Lỗi khi gọi API Chat' }));
+    throw new Error(typeof errData?.detail === 'string' ? errData.detail : 'Không thể xử lý yêu cầu chat');
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+export async function listChatSessionsApi(dbId: string): Promise<ChatSessionItem[]> {
+  return chatRequest<ChatSessionItem[]>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions`);
+}
+
+export async function createChatSessionApi(dbId: string, title?: string): Promise<ChatSessionItem> {
+  return chatRequest<ChatSessionItem>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions`, {
+    method: 'POST',
+    body: JSON.stringify(title ? { title } : {}),
+  });
+}
+
+export async function getChatSessionDetailApi(
+  dbId: string,
+  sessionId: string,
+  beforeSequence?: number,
+): Promise<ChatSessionDetail> {
+  const cursor = beforeSequence ? `?limit=100&before_sequence=${beforeSequence}` : '?limit=100';
+  return chatRequest<ChatSessionDetail>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}${cursor}`);
+}
+
+export async function deleteChatSessionApi(dbId: string, sessionId: string): Promise<void> {
+  await chatRequest<void>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}`, { method: 'DELETE' });
+}
+
+export async function updateChatSessionTitleApi(
+  dbId: string,
+  sessionId: string,
+  title: string,
+): Promise<ChatSessionItem> {
+  return chatRequest<ChatSessionItem>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  });
 }
 
 export async function sendChatOrchestratorApi(
   dbId: string,
   message: string,
+  sessionId?: string | null,
+  clientMessageId?: string,
 ): Promise<ChatOrchestratorResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/semantic/${dbId}/chat`, {
+  return chatRequest<ChatOrchestratorResponse>(`${API_BASE}/api/v1/semantic/${dbId}/chat`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...getAuthHeader(),
-    },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, session_id: sessionId || null, client_message_id: clientMessageId }),
   });
-
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({ detail: 'Lỗi khi gọi API Chat Orchestrator' }));
-    const errorMsg =
-      typeof errData?.detail === 'string'
-        ? errData.detail
-        : JSON.stringify(errData?.detail || 'Không thể gửi tin nhắn đến Chat Orchestrator');
-    throw new Error(`[Chat Error ${res.status}]: ${errorMsg}`);
-  }
-
-  return await res.json();
 }
 
 /* Legacy SQL metric adapter removed in favor of canonical definitions.

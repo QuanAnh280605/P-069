@@ -18,7 +18,10 @@ Phân loại câu hỏi của người dùng vào đúng 1 trong 2 nhóm:
 
 Chỉ trả về DUY NHẤT 1 từ: "chitchat" hoặc "metric_query"
 
-Câu hỏi: {user_message}"""
+Câu hỏi trước đây:
+{history}
+
+Câu hỏi mới nhất: {user_message}"""
 
 
 async def orchestrator_node(state: AgentState) -> dict[str, Any]:
@@ -36,7 +39,8 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
 
     try:
         llm = get_llm()
-        prompt = _CLASSIFY_PROMPT.format(user_message=user_message)
+        history = _format_history(state.get("chat_history", []))
+        prompt = _CLASSIFY_PROMPT.format(user_message=user_message, history=history)
         response = await llm.ainvoke(prompt)
         raw = (response.content if hasattr(response, "content") else str(response)).strip().lower()
 
@@ -52,3 +56,14 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("Orchestrator classification failed, defaulting to chitchat: %s", exc)
         return {"intent": "chitchat"}
+
+
+def _format_history(history: list[dict[str, str]]) -> str:
+    """Format a small untrusted history excerpt for intent classification."""
+    lines = []
+    for item in history[-6:]:
+        role = item.get("role")
+        content = item.get("content", "").strip()[:1000]
+        if role in {"user", "assistant"} and content:
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines) or "(không có)"

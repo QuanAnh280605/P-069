@@ -521,6 +521,63 @@ class ChatRequest(BaseModel):
         max_length=2000,
         description="Câu hỏi hoặc tin nhắn ngôn ngữ tự nhiên từ người dùng",
     )
+    session_id: str | None = Field(default=None, min_length=36, max_length=36)
+    client_message_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class ChatMessageResponse(BaseModel):
+    """Persisted chat message returned to the frontend."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    session_id: str
+    client_message_id: str | None = None
+    sequence_no: int
+    sender: Literal["user", "assistant", "system"]
+    content: str
+    intent: str | None = None
+    metadata_json: dict[str, Any] | list[Any] | None = None
+    created_at: datetime
+
+
+class ChatSessionSummaryResponse(BaseModel):
+    """Summary of one owned chat session."""
+
+    id: str
+    db_id: int
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    message_count: int = 0
+
+
+class ChatSessionDetailResponse(ChatSessionSummaryResponse):
+    """Paginated chat session detail."""
+
+    messages: list[ChatMessageResponse] = Field(default_factory=list)
+    next_before_sequence: int | None = None
+
+
+class ChatSessionCreateRequest(BaseModel):
+    """Request to create an empty chat session."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class ChatSessionUpdateRequest(BaseModel):
+    """Request to rename a chat session."""
+
+    title: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        """Trim whitespace before validating a session title."""
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("Title cannot be empty")
+        return normalized
 
 
 class ChatResponse(BaseModel):
@@ -535,3 +592,7 @@ class ChatResponse(BaseModel):
         default=None,
         description="Danh sách Business Metrics JSON (khi intent = 'metric_query')",
     )
+    session_id: str
+    user_message_id: str
+    assistant_message_id: str
+    session: ChatSessionSummaryResponse | None = None

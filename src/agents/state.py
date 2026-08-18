@@ -74,3 +74,10 @@ class AgentState(TypedDict, total=False):
     # Chitchat Agent — Output
     chat_response: str
     """Câu trả lời ngôn ngữ tự nhiên khi intent = 'chitchat'."""
+
+    # Chat persistence — history excludes the current user message.
+    session_id: str
+    """ID phiên chat hiện tại."""
+
+    chat_history: list[dict[str, str]]
+    """Prior user/assistant messages used as conversational context."""

@@ -3,7 +3,7 @@
 import logging
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,8 @@ from sqlalchemy.orm import selectinload
 from src.api.auth import get_current_user, get_current_user_profile
 from src.models.db import (
     CanonicalRelationshipModel,
+    ChatMessageModel,
+    ChatSessionModel,
     ImportedSchemaModel,
     LiveTargetDbModel,
     SemanticColumnModel,
@@ -25,8 +27,13 @@ from src.models.schema_metadata import DiagnosticCode, RawSchemaMetadata, Schema
 from src.models.schemas import (
     ApproveRequest,
     CanonicalRelationshipResponse,
+    ChatMessageResponse,
     ChatRequest,
     ChatResponse,
+    ChatSessionCreateRequest,
+    ChatSessionDetailResponse,
+    ChatSessionSummaryResponse,
+    ChatSessionUpdateRequest,
     CustomMetricGenerateRequest,
     CustomMetricGenerateResponse,
     GenerateRequest,
@@ -54,6 +61,21 @@ from src.models.schemas import (
     SemanticTableUpdate,
     SqlDumpPreviewResponse,
     UserProfileResponse,
+)
+from src.services.chat_service import (
+    ChatAuthorizationError,
+    auto_generate_session_title,
+    create_chat_session,
+    delete_chat_session,
+    get_chat_database,
+    get_chat_message_by_client_id,
+    get_chat_messages_page,
+    get_chat_session,
+    get_chat_session_with_messages,
+    get_recent_chat_history,
+    list_chat_sessions,
+    save_chat_message,
+    update_chat_session_title,
 )
 from src.services.database import decrypt_conn_url, get_db_session
 from src.services.export_service import build_semantic_layer_dict, serialize_to_json, serialize_to_yaml
@@ -1080,10 +1102,147 @@ async def agent_status() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _chat_db_id(raw_db_id: str) -> int:
+    """Parse a semantic database id for chat endpoints."""
+    try:
+        return int(raw_db_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Chat database not found") from exc
+
+
+def _session_summary(session: ChatSessionModel) -> ChatSessionSummaryResponse:
+    """Serialize a chat session summary without exposing sensitive data."""
+    return ChatSessionSummaryResponse(
+        id=session.id,
+        db_id=session.db_id,
+        title=session.title,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        message_count=len(session.messages) if "messages" in session.__dict__ else 0,
+    )
+
+
+def _message_response(message: ChatMessageModel) -> ChatMessageResponse:
+    """Serialize one persisted chat message."""
+    return ChatMessageResponse.model_validate(message)
+
+
+def _assistant_metadata(suggestions: list[Any] | None, status_name: str = "completed") -> dict[str, Any]:
+    """Build the versioned assistant message metadata contract."""
+    return {"schema_version": 1, "status": status_name, "suggestions": suggestions or [], "error": None}
+
+
+@router.get("/semantic/{db_id}/chat/sessions", response_model=list[ChatSessionSummaryResponse])
+async def get_chat_sessions(
+    db_id: str,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> list[ChatSessionSummaryResponse]:
+    """List chat sessions owned by the current user for one live database."""
+    try:
+        sessions = await list_chat_sessions(db, current_user.id, _chat_db_id(db_id))
+    except ChatAuthorizationError as exc:
+        raise HTTPException(status_code=404, detail="Chat database not found") from exc
+    return [_session_summary(session) for session in sessions]
+
+
+@router.post("/semantic/{db_id}/chat/sessions", response_model=ChatSessionSummaryResponse, status_code=201)
+async def create_chat_session_route(
+    db_id: str,
+    body: ChatSessionCreateRequest | None = None,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ChatSessionSummaryResponse:
+    """Create an empty chat session for an owned live database."""
+    try:
+        session = await create_chat_session(db, current_user.id, _chat_db_id(db_id), body.title if body else None)
+    except (ChatAuthorizationError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Chat database not found") from exc
+    return _session_summary(session)
+
+
+@router.get("/semantic/{db_id}/chat/sessions/{session_id}", response_model=ChatSessionDetailResponse)
+async def get_chat_session_route(
+    db_id: str,
+    session_id: str,
+    limit: int = Query(default=50, ge=1, le=100),
+    before_sequence: int | None = Query(default=None, ge=1),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ChatSessionDetailResponse:
+    """Return one authorized page of chat history."""
+    try:
+        numeric_db_id = _chat_db_id(db_id)
+        await get_chat_database(db, current_user.id, numeric_db_id)
+        session = await get_chat_session(db, session_id, current_user.id)
+        if session is None or session.db_id != numeric_db_id:
+            raise ChatAuthorizationError("Chat session not found")
+        messages, total, next_cursor = await get_chat_messages_page(
+            db, session_id, current_user.id, limit, before_sequence
+        )
+    except ChatAuthorizationError as exc:
+        raise HTTPException(status_code=404, detail="Chat session not found") from exc
+    summary = _session_summary(session)
+    return ChatSessionDetailResponse(
+        id=summary.id,
+        db_id=summary.db_id,
+        title=summary.title,
+        created_at=summary.created_at,
+        updated_at=summary.updated_at,
+        messages=[_message_response(item) for item in messages],
+        message_count=total,
+        next_before_sequence=next_cursor,
+    )
+
+
+@router.patch("/semantic/{db_id}/chat/sessions/{session_id}", response_model=ChatSessionSummaryResponse)
+async def rename_chat_session(
+    db_id: str,
+    session_id: str,
+    body: ChatSessionUpdateRequest,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ChatSessionSummaryResponse:
+    """Rename one authorized chat session."""
+    try:
+        numeric_db_id = _chat_db_id(db_id)
+        await get_chat_database(db, current_user.id, numeric_db_id)
+        existing = await get_chat_session(db, session_id, current_user.id)
+        if existing is None or existing.db_id != numeric_db_id:
+            raise ChatAuthorizationError("Chat session not found")
+        session = await update_chat_session_title(db, session_id, current_user.id, body.title)
+    except (ChatAuthorizationError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Chat session not found") from exc
+    assert session is not None
+    return _session_summary(session)
+
+
+@router.delete("/semantic/{db_id}/chat/sessions/{session_id}", status_code=204)
+async def remove_chat_session(
+    db_id: str,
+    session_id: str,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    """Delete one authorized chat session and its messages."""
+    try:
+        numeric_db_id = _chat_db_id(db_id)
+        await get_chat_database(db, current_user.id, numeric_db_id)
+        existing = await get_chat_session(db, session_id, current_user.id)
+        if existing is None or existing.db_id != numeric_db_id:
+            raise ChatAuthorizationError("Chat session not found")
+        deleted = await delete_chat_session(db, session_id, current_user.id)
+    except ChatAuthorizationError as exc:
+        raise HTTPException(status_code=404, detail="Chat session not found") from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+
 @router.post("/semantic/{db_id}/chat", response_model=ChatResponse)
 async def chat_orchestrator(
     db_id: str,
     body: ChatRequest,
+    current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> ChatResponse:
     """Multi-agent chatbot: route chitchat to natural-language reply or metric generation.
@@ -1093,16 +1252,50 @@ async def chat_orchestrator(
     """
     from src.agents.chat_graph import chat_agent
 
-    schema_context = await _load_schema_context_for_db(db, db_id)
-
-    initial_state: dict = {
-        "user_message": body.message,
-        "enriched_schema": schema_context,
-    }
+    numeric_db_id = _chat_db_id(db_id)
+    try:
+        await get_chat_database(db, current_user.id, numeric_db_id)
+        session = await _resolve_chat_session(db, body.session_id, current_user.id, numeric_db_id)
+        replay = await _replay_chat_response(db, session, current_user.id, body.client_message_id)
+        if replay is not None:
+            return replay
+        history = await get_recent_chat_history(db, session.id)
+        user_message = await save_chat_message(
+            db,
+            session.id,
+            "user",
+            body.message,
+            client_message_id=body.client_message_id,
+        )
+        if session.title == "Cuộc trò chuyện mới":
+            await update_chat_session_title(db, session.id, current_user.id, auto_generate_session_title(body.message))
+        schema_context = await _load_schema_context_for_db(db, str(numeric_db_id))
+    except ChatAuthorizationError as exc:
+        raise HTTPException(status_code=404, detail="Chat session or database not found") from exc
 
     try:
-        final_state = await chat_agent.ainvoke(initial_state)
+        final_state = await chat_agent.ainvoke(
+            {
+                "session_id": session.id,
+                "user_message": body.message,
+                "chat_history": history,
+                "enriched_schema": schema_context,
+            }
+        )
     except Exception as exc:
+        await save_chat_message(
+            db,
+            session.id,
+            "assistant",
+            "Xin lỗi, tôi không thể xử lý yêu cầu lúc này.",
+            metadata_json={
+                "schema_version": 1,
+                "status": "error",
+                "suggestions": [],
+                "error": "chat_agent_failed",
+            },
+            client_message_id=f"{body.client_message_id}:assistant" if body.client_message_id else None,
+        )
         logger.error("Chat orchestrator failed: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1111,11 +1304,71 @@ async def chat_orchestrator(
 
     intent = final_state.get("intent", "chitchat")
 
+    raw_metrics = final_state.get("suggested_metrics") or []
+    response_text = final_state.get("chat_response", "")
     if intent == "metric_query":
-        raw_metrics = final_state.get("suggested_metrics") or []
-        return ChatResponse(intent=intent, suggestions=raw_metrics)
-
+        response_text = (
+            f"Đã đề xuất {len(raw_metrics)} Metric Definition."
+            if raw_metrics
+            else "Không sinh được metric phù hợp với schema."
+        )
+    assistant = await save_chat_message(
+        db,
+        session.id,
+        "assistant",
+        response_text,
+        intent=intent,
+        metadata_json=_assistant_metadata(raw_metrics),
+        client_message_id=f"{body.client_message_id}:assistant" if body.client_message_id else None,
+    )
+    refreshed = await get_chat_session_with_messages(db, session.id, current_user.id)
+    assert refreshed is not None
     return ChatResponse(
         intent=intent,
-        chat_response=final_state.get("chat_response", ""),
+        chat_response=final_state.get("chat_response") if intent == "chitchat" else response_text,
+        suggestions=raw_metrics if intent == "metric_query" else None,
+        session_id=session.id,
+        user_message_id=user_message.id,
+        assistant_message_id=assistant.id,
+        session=_session_summary(refreshed),
+    )
+
+
+async def _resolve_chat_session(db: AsyncSession, session_id: str | None, user_id: int, db_id: int) -> ChatSessionModel:
+    """Resolve an existing owned session or create a new one."""
+    if session_id:
+        session = await get_chat_session(db, session_id, user_id)
+        if session is None or session.db_id != db_id:
+            raise ChatAuthorizationError("Chat session not found")
+        return session
+    return await create_chat_session(db, user_id, db_id)
+
+
+async def _replay_chat_response(
+    db: AsyncSession,
+    session: ChatSessionModel,
+    user_id: int,
+    client_message_id: str | None,
+) -> ChatResponse | None:
+    """Return a completed response for a retried client request."""
+    if not client_message_id:
+        return None
+    user_message = await get_chat_message_by_client_id(db, session.id, client_message_id)
+    assistant = await get_chat_message_by_client_id(db, session.id, f"{client_message_id}:assistant")
+    if user_message is None or assistant is None:
+        return None
+    metadata = assistant.metadata_json if isinstance(assistant.metadata_json, dict) else {}
+    suggestions = metadata.get("suggestions") or []
+    intent = assistant.intent or "chitchat"
+    refreshed = await get_chat_session_with_messages(db, session.id, user_id)
+    if refreshed is None:
+        return None
+    return ChatResponse(
+        intent=intent,
+        chat_response=assistant.content if intent == "chitchat" else None,
+        suggestions=suggestions if intent == "metric_query" else None,
+        session_id=session.id,
+        user_message_id=user_message.id,
+        assistant_message_id=assistant.id,
+        session=_session_summary(refreshed),
     )

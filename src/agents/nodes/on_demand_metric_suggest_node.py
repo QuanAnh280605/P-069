@@ -28,10 +28,9 @@ async def on_demand_metric_suggest_node(state: AgentState) -> dict[str, Any]:
         _, schema_text = extract_schema_summary(schema)
         sys_prompt = build_metric_system_prompt(schema_text)
         user_msg = state.get("user_message", "").strip()
-        messages = [
-            ("system", sys_prompt),
-            ("user", user_msg if user_msg else "Hãy đề xuất 3 metric quan trọng nhất từ schema trên."),
-        ]
+        history = _format_history(state.get("chat_history", []))
+        current = user_msg if user_msg else "Hãy đề xuất 3 metric quan trọng nhất từ schema trên."
+        messages = [("system", sys_prompt), ("user", f"Lịch sử liên quan:\n{history}\n\nYêu cầu mới nhất:\n{current}")]
         definitions = await _generate_definitions_with_fallback(messages)
 
         # Format the response as MetricSuggestionItem to match the frontend expectations
@@ -59,3 +58,12 @@ async def _generate_definitions_with_fallback(prompt: Any) -> list[MetricDefinit
 
     parsed = await ainvoke_json(raw_llm, prompt)
     return _parse_metric_payload(parsed)
+
+
+def _format_history(history: list[dict[str, str]]) -> str:
+    """Format bounded prior conversation context for metric generation."""
+    lines = []
+    for item in history[-6:]:
+        if item.get("role") in {"user", "assistant"} and item.get("content"):
+            lines.append(f"{item['role']}: {item['content'][:1200]}")
+    return "\n".join(lines) or "(không có)"

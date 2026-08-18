@@ -239,8 +239,6 @@ export default function DashboardPage() {
               layer={activeLayer}
               description={dbDescriptions[activeLayer.id]}
               tab={tab}
-              sidebarCollapsed={sidebarCollapsed}
-              onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
               onTab={setTab}
             />
             <div className="flex-1 overflow-y-auto p-4 md:p-5">
@@ -674,15 +672,11 @@ function WorkspaceHeader({
   layer,
   description,
   tab,
-  sidebarCollapsed,
-  onToggleSidebar,
   onTab,
 }: {
   layer: SemanticLayerData;
   description?: string;
   tab: WorkspaceTab;
-  sidebarCollapsed: boolean;
-  onToggleSidebar: () => void;
   onTab: (tab: WorkspaceTab) => void;
 }) {
   const tabs: Array<[WorkspaceTab, string, React.ReactNode]> = [
@@ -695,18 +689,6 @@ function WorkspaceHeader({
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-3 dark:border-slate-800 dark:bg-[#0B0F19]">
       <div className="flex items-center gap-3">
-        {sidebarCollapsed && (
-          <button
-            type="button"
-            onClick={onToggleSidebar}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50 dark:border-slate-800 dark:bg-slate-900 dark:text-indigo-400 cursor-pointer transition-all"
-            title="Mở rộng Sidebar"
-          >
-            <PanelLeftOpen className="h-4 w-4" />
-            <span>Sidebar</span>
-          </button>
-        )}
-
         <div>
           <div className="flex items-center gap-2">
             <strong className="text-sm font-bold text-slate-900 dark:text-slate-100">

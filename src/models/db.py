@@ -9,6 +9,8 @@ Includes tables:
   - semantic_metrics
   - canonical_relationships
   - metric_versions
+  - chat_sessions
+  - chat_messages
 """
 
 from datetime import UTC, datetime
@@ -65,6 +67,9 @@ class UserModel(Base):
         "UserSessionModel", back_populates="user", cascade="all, delete-orphan"
     )
     databases: Mapped[list["SemanticDatabaseModel"]] = relationship("SemanticDatabaseModel", back_populates="creator")
+    chat_sessions: Mapped[list["ChatSessionModel"]] = relationship(
+        "ChatSessionModel", back_populates="user", cascade="all, delete-orphan"
+    )
     imported_schemas: Mapped[list["ImportedSchemaModel"]] = relationship(
         "ImportedSchemaModel", back_populates="creator", cascade="all, delete-orphan"
     )
@@ -173,6 +178,9 @@ class SemanticDatabaseModel(Base):
     )
     relationships: Mapped[list["CanonicalRelationshipModel"]] = relationship(
         "CanonicalRelationshipModel", back_populates="database", cascade="all, delete-orphan"
+    )
+    chat_sessions: Mapped[list["ChatSessionModel"]] = relationship(
+        "ChatSessionModel", back_populates="database", cascade="all, delete-orphan"
     )
 
 
@@ -324,3 +332,51 @@ class MetricVersionModel(Base):
 
     metric: Mapped["SemanticMetricModel"] = relationship("SemanticMetricModel", back_populates="versions")
     changer: Mapped["UserModel | None"] = relationship("UserModel")
+
+
+class ChatSessionModel(Base):
+    """A persisted conversation owned by one user and semantic database."""
+
+    __tablename__ = "chat_sessions"
+    __table_args__ = (Index("idx_chat_sessions_user_db", "user_id", "db_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    db_id: Mapped[int] = mapped_column(Integer, ForeignKey("semantic_databases.id", ondelete="CASCADE"), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="Cuộc trò chuyện mới")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    user: Mapped["UserModel"] = relationship("UserModel", back_populates="chat_sessions")
+    database: Mapped["SemanticDatabaseModel"] = relationship("SemanticDatabaseModel", back_populates="chat_sessions")
+    messages: Mapped[list["ChatMessageModel"]] = relationship(
+        "ChatMessageModel",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ChatMessageModel.sequence_no",
+    )
+
+
+class ChatMessageModel(Base):
+    """One user, assistant, or system message in a chat session."""
+
+    __tablename__ = "chat_messages"
+    __table_args__ = (
+        Index("idx_chat_messages_session_created", "session_id", "created_at"),
+        UniqueConstraint("session_id", "client_message_id", name="uq_chat_messages_session_client_id"),
+        UniqueConstraint("session_id", "sequence_no", name="uq_chat_messages_session_sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    client_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    sender: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    intent: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    metadata_json: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    session: Mapped["ChatSessionModel"] = relationship("ChatSessionModel", back_populates="messages")

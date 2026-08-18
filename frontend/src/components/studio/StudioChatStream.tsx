@@ -26,7 +26,8 @@ import {
 } from 'lucide-react';
 import React, { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 
-import { MetricSuggestion } from '@/lib/api';
+import { ChatSessionItem, MetricSuggestion } from '@/lib/api';
+import { ChatSessionSwitcher } from '@/components/studio/ChatSessionSwitcher';
 import { YamlCodeViewer } from '@/components/studio/YamlCodeViewer';
 
 export interface ChatMessage {
@@ -38,7 +39,7 @@ export interface ChatMessage {
   isError?: boolean;
 }
 
-interface StudioChatStreamProps {
+export interface StudioChatStreamProps {
   messages: ChatMessage[];
   onSendMessage: (promptText: string, targetTables: string[]) => Promise<void>;
   isLoading: boolean;
@@ -48,6 +49,13 @@ interface StudioChatStreamProps {
   onRefineWithAI?: (suggestion: MetricSuggestion) => void;
   activePromptText?: string;
   theme?: 'light' | 'dark';
+  sessions?: ChatSessionItem[];
+  activeSessionId?: string | null;
+  loadingSessions?: boolean;
+  onSelectSession?: (sessionId: string) => void;
+  onNewChat?: () => void;
+  onDeleteSession?: (sessionId: string) => void;
+  onRenameSession?: (sessionId: string, newTitle: string) => Promise<void> | void;
 }
 
 interface PromptSuggestionItem {
@@ -167,16 +175,21 @@ export function StudioChatStream(props: StudioChatStreamProps) {
     return list;
   }, [props.tableNames]);
 
+  const hasUserSentMessage = useMemo(
+    () => props.messages.some((m) => m.sender === 'user'),
+    [props.messages]
+  );
+
   return (
     <div className="flex h-full w-full flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
       {/* 🌟 Chat Header */}
-      <div className="flex items-center justify-between border-b border-slate-200/80 bg-slate-50/70 px-6 py-3.5 dark:border-slate-800 dark:bg-slate-900/90">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-slate-50/70 px-6 py-3.5 dark:border-slate-800 dark:bg-slate-900/90">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-sm shadow-indigo-500/20">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-sm shadow-indigo-500/20 shrink-0">
             <Sparkles className="h-4.5 w-4.5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 flex-wrap">
               AI Semantic Studio Copilot
               <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
                 ● Live Schema Ready
@@ -187,6 +200,19 @@ export function StudioChatStream(props: StudioChatStreamProps) {
             </p>
           </div>
         </div>
+
+        {/* 💬 Header Chat Session Switcher & New Chat */}
+        {props.sessions && props.onSelectSession && props.onNewChat && (
+          <ChatSessionSwitcher
+            sessions={props.sessions}
+            activeSessionId={props.activeSessionId ?? null}
+            loadingSessions={Boolean(props.loadingSessions)}
+            onSelectSession={props.onSelectSession}
+            onNewChat={props.onNewChat}
+            onDeleteSession={props.onDeleteSession || (() => {})}
+            onRenameSession={props.onRenameSession || (() => {})}
+          />
+        )}
       </div>
 
       {/* 💬 Messages Stream */}
@@ -218,54 +244,30 @@ export function StudioChatStream(props: StudioChatStreamProps) {
         <div ref={endRef} />
       </div>
 
-      {/* 💡 Suggested Prompts Bar & Modern Input Area */}
-      <div className="space-y-3 border-t border-slate-200/80 bg-slate-50/50 p-5 dark:border-slate-800 dark:bg-slate-900/60">
-        {/* 🌟 Suggested Questions Chips (Có checkbox để tick bật / tắt) */}
-        <div className="space-y-1.5 rounded-xl border border-slate-200/80 bg-white/80 p-2.5 shadow-2xs dark:border-slate-800 dark:bg-slate-950/40">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                GỢI Ý CÂU HỎI TẠO METRIC
-              </span>
-              {showSuggestions && (
-                <span className="text-[10px] text-slate-400 font-medium">
-                  ({contextualSuggestions.length} mẫu)
-                </span>
-              )}
-            </div>
-
-            {/* ☑️ Tick Checkbox to Toggle/Hide Suggestions */}
-            <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showSuggestions}
-                onChange={toggleShowSuggestions}
-                className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
-              />
-              <span>{showSuggestions ? 'Hiển thị gợi ý' : 'Đã ẩn (Tick để hiện)'}</span>
-            </label>
+      {/* ✍️ Bottom Input Area */}
+      <div className="space-y-2 border-t border-slate-200/80 bg-slate-50/50 p-4 md:p-5 dark:border-slate-800 dark:bg-slate-900/60">
+        {/* 🌟 1 Single Horizontal Row of Suggestion Pills (Ngay bên trên phần nhập chat, chỉ hiển thị trước khi gửi query đầu tiên) */}
+        {!hasUserSentMessage && (
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs select-none">
+            <span className="shrink-0 text-[11px] font-semibold text-slate-400 dark:text-slate-500 flex items-center gap-1">
+              <Sparkles className="h-3 w-3 text-indigo-500" />
+              <span>Gợi ý:</span>
+            </span>
+            {contextualSuggestions.map((item, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleSelectSuggestion(item.prompt)}
+                className="group shrink-0 inline-flex items-center gap-1.5 rounded-full border border-slate-200/90 bg-white/90 px-3 py-1 text-xs font-medium text-slate-700 shadow-2xs hover:border-indigo-400 hover:bg-indigo-50/80 hover:text-indigo-900 transition-all active:scale-95 dark:border-slate-800 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:border-indigo-600 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-200 cursor-pointer whitespace-nowrap"
+                title={item.prompt}
+              >
+                <span>{item.icon}</span>
+                <span>{item.title}</span>
+                <ArrowUpRight className="h-3 w-3 text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors opacity-60 group-hover:opacity-100" />
+              </button>
+            ))}
           </div>
-
-          {/* Chips list (chỉ hiển thị khi showSuggestions = true) */}
-          {showSuggestions && (
-            <div className="flex flex-wrap gap-2 pt-1 max-h-28 overflow-y-auto pr-1">
-              {contextualSuggestions.map((item, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => handleSelectSuggestion(item.prompt)}
-                  className="group inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-2xs hover:border-indigo-400 hover:bg-indigo-50/60 hover:text-indigo-900 transition-all active:scale-95 dark:border-slate-800 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:border-indigo-600 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-200 cursor-pointer text-left"
-                  title={item.prompt}
-                >
-                  <span className="text-sm">{item.icon}</span>
-                  <span className="truncate max-w-[340px]">{item.title}</span>
-                  <ArrowUpRight className="h-3.5 w-3.5 text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors opacity-60 group-hover:opacity-100" />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        )}
 
         {/* ✍️ Form Input Box */}
         <form

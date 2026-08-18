@@ -66,7 +66,7 @@ describe('StudioChatStream', () => {
     );
 
     // Verify suggested questions header
-    expect(screen.getByText(/GỢI Ý CÂU HỎI TẠO METRIC/i)).toBeInTheDocument();
+    expect(screen.getByText(/Gợi ý/i)).toBeInTheDocument();
 
     // Verify sample suggestions
     const suggestionChip = screen.getByText('Doanh thu thuần đơn hàng thành công');
@@ -80,36 +80,25 @@ describe('StudioChatStream', () => {
     expect(textarea.value).toContain('Tính tổng doanh thu thuần của các đơn hàng');
   });
 
-  it('allows user to toggle off/on suggested questions via checkbox', async () => {
-    const { fireEvent } = await import('@testing-library/react');
+  it('hides suggested questions after the user sends the first query', () => {
     render(
       <StudioChatStream
-        messages={[]}
+        messages={[
+          {
+            id: 'u1',
+            sender: 'user',
+            text: 'Tính tổng doanh thu',
+            timestamp: '10:00',
+          },
+        ]}
         onSendMessage={vi.fn()}
         isLoading={false}
         tableNames={['orders']}
       />
     );
 
-    // Should initially show suggestions
-    expect(screen.getByText('Doanh thu thuần đơn hàng thành công')).toBeInTheDocument();
-
-    // Checkbox is checked
-    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
-    expect(checkbox.checked).toBe(true);
-
-    // Click checkbox to turn off
-    fireEvent.click(checkbox);
-    expect(checkbox.checked).toBe(false);
-
-    // Suggestion chips should now be hidden
+    expect(screen.queryByText(/Gợi ý câu hỏi tạo Metric/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Doanh thu thuần đơn hàng thành công')).not.toBeInTheDocument();
-    expect(screen.getByText(/Đã ẩn \(Tick để hiện\)/i)).toBeInTheDocument();
-
-    // Click again to turn back on
-    fireEvent.click(checkbox);
-    expect(checkbox.checked).toBe(true);
-    expect(screen.getByText('Doanh thu thuần đơn hàng thành công')).toBeInTheDocument();
   });
 });
 
