@@ -77,6 +77,21 @@ from src.services.chat_service import (
     save_chat_message,
     update_chat_session_title,
 )
+from src.services.chat_service import (
+    ChatAuthorizationError,
+    auto_generate_session_title,
+    create_chat_session,
+    delete_chat_session,
+    get_chat_database,
+    get_chat_message_by_client_id,
+    get_chat_messages_page,
+    get_chat_session,
+    get_chat_session_with_messages,
+    get_recent_chat_history,
+    list_chat_sessions,
+    save_chat_message,
+    update_chat_session_title,
+)
 from src.services.database import decrypt_conn_url, get_db_session
 from src.services.export_service import build_semantic_layer_dict, serialize_to_json, serialize_to_yaml
 from src.services.imported_schema_service import (

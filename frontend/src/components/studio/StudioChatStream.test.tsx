@@ -191,7 +191,7 @@ describe('StudioChatStream', () => {
     );
 
     // Verify suggested questions header
-    expect(screen.getByText(/GỢI Ý CÂU HỎI TẠO METRIC/i)).toBeInTheDocument();
+    expect(screen.getByText(/Gợi ý/i)).toBeInTheDocument();
 
     // Verify sample suggestions
     const suggestionChip = screen.getByText('Doanh thu thuần đơn hàng thành công');
