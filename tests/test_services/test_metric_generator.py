@@ -92,5 +92,8 @@ def test_extract_schema_summary_includes_column_description_and_allowed_values()
 
     _, text = extract_schema_summary(schema)
     assert "Entity `order_header` (Đơn hàng): Bảng chứa thông tin đơn hàng" in text
-    assert "- `is_completed` (VARCHAR(1); Đã hoàn thành — Cờ hoàn thành (1: Thành công, 0: Chưa); values: ['0', '1'])" in text
+    assert (
+        "- `is_completed` (VARCHAR(1); Đã hoàn thành — Cờ hoàn thành (1: Thành công, 0: Chưa); values: ['0', '1'])"
+        in text
+    )
     assert "- `price` (DECIMAL(15,3); Tổng tiền — Tổng tiền sau thuế)" in text

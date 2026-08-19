@@ -358,11 +358,13 @@ def _compiled_metadata(
 
 
 def _column_info(column: SemanticColumnModel, table: SemanticTableModel) -> dict[str, Any]:
+    dt = (column.data_type or "").upper()
+    is_time = column.is_time_dimension or any(t in dt for t in ("DATE", "TIME", "TIMESTAMP", "DATETIME"))
     return {
         "column_id": column.id,
         "column_name": column.column_name,
         "business_name": column.business_name,
-        "is_time_dimension": column.is_time_dimension,
+        "is_time_dimension": is_time,
         "table_id": table.id,
         "table_name": table.table_name,
     }

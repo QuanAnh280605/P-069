@@ -65,8 +65,7 @@ describe('WorkspaceSidebar', () => {
     it('shows the brand header with collapse button', () => {
       render(<WorkspaceSidebar {...defaultProps} collapsed={false} />);
 
-      expect(screen.getByText('S206')).toBeInTheDocument();
-      expect(screen.getByText('SEMANTIC')).toBeInTheDocument();
+      expect(screen.getByText('SemanticLayer')).toBeInTheDocument();
       expect(screen.getByLabelText('Collapse sidebar')).toBeInTheDocument();
     });
 
@@ -128,7 +127,7 @@ describe('WorkspaceSidebar', () => {
       render(<WorkspaceSidebar {...defaultProps} collapsed={true} />);
 
       expect(screen.getByLabelText('Expand sidebar')).toBeInTheDocument();
-      expect(screen.queryByText('S206')).not.toBeInTheDocument();
+      expect(screen.queryByText('SemanticLayer')).not.toBeInTheDocument();
     });
 
     it('shows expand button with rotated chevron icon', () => {

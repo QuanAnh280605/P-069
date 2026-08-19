@@ -2,53 +2,77 @@
 
 import {
   AlertTriangle,
+  AreaChart as AreaChartIcon,
   BarChart3,
   Calendar,
-  ChevronDown,
-  ChevronRight,
+  Check,
   Code2,
-  Database,
+  Copy,
+  Download,
   Eye,
   Filter,
   Layers,
+  LineChart as LineChartIcon,
   Loader2,
-  Lock,
+  PieChart as PieChartIcon,
   Play,
   Plus,
   RotateCcw,
+  Search,
   ShieldCheck,
-  Sparkles,
   Table as TableIcon,
   Table2,
-  Trash2,
   TrendingUp,
   X,
+  Zap,
 } from 'lucide-react';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { SqlCodeViewer } from '@/components/studio/SqlCodeViewer';
-import { AIQueryModal } from '@/components/explorer/AIQueryModal';
+
 import {
   CatalogColumn,
   CatalogTable,
   compileSemanticQueryApi,
   DimensionSelection,
   executeSemanticQueryApi,
-  FilterOperator,
+  getMetricRecommendedDimensionsApi,
+  MetricDimensionsResponse,
   MetricRecord,
+  RecommendedDimensionItem,
   SemanticApiError,
   SemanticCatalog,
-  SemanticQueryFilter,
   SemanticQueryPreview,
   SemanticQueryRequest,
   SemanticQueryResult,
-  SemanticQuerySpec,
   TimeGrain,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { coerceFilterValue, metricName } from '@/lib/metrics';
+import { metricName } from '@/lib/metrics';
+import {
+  getDimensionCategory,
+  getDimensionCategoryBadge,
+  isBusinessDimension,
+  isTimeDimension,
+} from '@/lib/dimensions';
 import { SectionLabel, StatusPill, type WorkspaceDatabase } from '@/components/workspace/shared';
 import { ViewHeader } from '@/components/workspace/ViewHeader';
 
@@ -60,68 +84,236 @@ interface Props {
   database?: WorkspaceDatabase | null;
 }
 
-interface DraftFilter {
-  column_id: number;
-  operator: FilterOperator;
-  raw: string;
+const TIME_GRAIN_OPTIONS: { label: string; value: TimeGrain; enLabel: string }[] = [
+  { label: 'Ngày', value: 'day', enLabel: 'Day' },
+  { label: 'Tuần', value: 'week', enLabel: 'Week' },
+  { label: 'Tháng', value: 'month', enLabel: 'Month' },
+  { label: 'Quý', value: 'quarter', enLabel: 'Quarter' },
+  { label: 'Năm', value: 'year', enLabel: 'Year' },
+];
+
+type ChartType = 'bar' | 'line' | 'area' | 'pie';
+
+const PIE_COLORS = [
+  '#3b82f6', // blue
+  '#10b981', // emerald
+  '#8b5cf6', // violet
+  '#f59e0b', // amber
+  '#ec4899', // pink
+  '#06b6d4', // cyan
+  '#6366f1', // indigo
+  '#14b8a6', // teal
+  '#f97316', // orange
+  '#84cc16', // lime
+];
+
+/**
+ * Format raw column aliases / keys into friendly Vietnamese business names.
+ */
+function formatColumnTitle(
+  colKey: string,
+  metadata?: Record<string, any>,
+  catalog?: SemanticCatalog | null,
+  metrics?: MetricRecord[],
+): string {
+  if (!colKey) return '';
+
+  // 1. Check compiler metadata map (e.g. metadata.dimensions['dimension_101'])
+  if (metadata?.dimensions && metadata.dimensions[colKey]) {
+    return metadata.dimensions[colKey];
+  }
+  if (metadata?.metrics && metadata.metrics[colKey]) {
+    return metadata.metrics[colKey];
+  }
+
+  // 2. Check pattern dimension_{id} or metric_{id}
+  const dimMatch = colKey.match(/^dimension_(\d+)$/i);
+  if (dimMatch && catalog) {
+    const colId = Number(dimMatch[1]);
+    for (const table of catalog.tables) {
+      const found = table.columns.find((c) => c.column_id === colId);
+      if (found) return found.business_name || found.column_name;
+    }
+  }
+
+  const metricMatch = colKey.match(/^metric_(\d+)$/i);
+  if (metricMatch && metrics) {
+    const mId = Number(metricMatch[1]);
+    const found = metrics.find((m) => m.metric_id === mId);
+    if (found) return found.name;
+  }
+
+  // 3. Check direct column match in catalog
+  if (catalog) {
+    for (const table of catalog.tables) {
+      const found = table.columns.find(
+        (c) => c.column_name.toLowerCase() === colKey.toLowerCase(),
+      );
+      if (found && found.business_name) return found.business_name;
+    }
+  }
+
+  // 4. Check direct metric match
+  if (metrics) {
+    const found = metrics.find(
+      (m) => m.name.toLowerCase() === colKey.toLowerCase(),
+    );
+    if (found) return found.name;
+  }
+
+  // 5. Clean up SQL aggregation names
+  if (/^SUM\((.+)\)$/i.test(colKey)) {
+    return `Tổng ${colKey.replace(/^SUM\((.+)\)$/i, '$1')}`;
+  }
+  if (/^AVG\((.+)\)$/i.test(colKey)) {
+    return `Trung bình ${colKey.replace(/^AVG\((.+)\)$/i, '$1')}`;
+  }
+  if (/^COUNT\((.+)\)$/i.test(colKey)) {
+    return `Số lượng ${colKey.replace(/^COUNT\((.+)\)$/i, '$1')}`;
+  }
+
+  return colKey;
 }
 
-const OPERATORS: { label: string; value: FilterOperator }[] = [
-  { label: '= (Bằng)', value: 'eq' },
-  { label: '≠ (Khác)', value: 'neq' },
-  { label: '> (Lớn hơn)', value: 'gt' },
-  { label: '≥ (Lớn hơn hoặc bằng)', value: 'gte' },
-  { label: '< (Nhỏ hơn)', value: 'lt' },
-  { label: '≤ (Nhỏ hơn hoặc bằng)', value: 'lte' },
-  { label: 'IN (Trong danh sách)', value: 'in' },
-  { label: 'NOT IN (Ngoài danh sách)', value: 'not_in' },
-  { label: 'IS NULL (Rỗng)', value: 'is_null' },
-  { label: 'IS NOT NULL (Không rỗng)', value: 'is_not_null' },
-];
+/**
+ * Format categorical / date dimension values according to data types.
+ */
+function formatDimensionValue(val: unknown): string {
+  if (val === null || val === undefined || val === '') return '(Trống)';
+  const str = String(val).trim();
 
-const TIME_GRAIN_OPTIONS: { label: string; value: TimeGrain | '' }[] = [
-  { label: 'Ngày', value: 'day' },
-  { label: 'Tuần', value: 'week' },
-  { label: 'Tháng', value: 'month' },
-  { label: 'Quý', value: 'quarter' },
-  { label: 'Năm', value: 'year' },
-  { label: 'Gốc', value: '' },
-];
+  // Boolean
+  if (val === true || str.toLowerCase() === 'true') return 'Có';
+  if (val === false || str.toLowerCase() === 'false') return 'Không';
+
+  // Date format: YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    const parts = str.split('T')[0].split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+  }
+
+  // Month format: YYYY-MM
+  if (/^\d{4}-\d{2}$/.test(str)) {
+    const [year, month] = str.split('-');
+    return `Tháng ${month}/${year}`;
+  }
+
+  // Week format: YYYY-Www or YYYY-ww
+  if (/^\d{4}-W?(\d{1,2})$/i.test(str)) {
+    const match = str.match(/^(\d{4})-W?(\d{1,2})$/i);
+    if (match) return `Tuần ${match[2]}/${match[1]}`;
+  }
+
+  // Quarter format: YYYY-Qx
+  if (/^\d{4}-Q(\d)$/i.test(str)) {
+    const match = str.match(/^(\d{4})-Q(\d)$/i);
+    if (match) return `Quý ${match[2]}/${match[1]}`;
+  }
+
+  // Year format: YYYY
+  if (/^\d{4}$/.test(str) && Number(str) >= 1990 && Number(str) <= 2100) {
+    return `Năm ${str}`;
+  }
+
+  return str;
+}
+
+/**
+ * Format metric numeric values for charts and axes.
+ */
+function formatShortNumber(num: number): string {
+  if (Math.abs(num) >= 1_000_000_000) {
+    return `${(num / 1_000_000_000).toFixed(1).replace(/\.0$/, '')} Tỷ`;
+  }
+  if (Math.abs(num) >= 1_000_000) {
+    return `${(num / 1_000_000).toFixed(1).replace(/\.0$/, '')} Tr`;
+  }
+  if (Math.abs(num) >= 1_000) {
+    return `${(num / 1_000).toFixed(1).replace(/\.0$/, '')} K`;
+  }
+  return num.toLocaleString();
+}
 
 export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: Props) {
   const [metricIds, setMetricIds] = useState<number[]>([]);
   const [dimensions, setDimensions] = useState<DimensionSelection[]>([]);
-  const [filters, setFilters] = useState<DraftFilter[]>([]);
   const [limit, setLimit] = useState(100);
   const [output, setOutput] = useState<SemanticQueryResult | SemanticQueryPreview | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [viewTab, setViewTab] = useState<'table' | 'chart' | 'sql'>('table');
-  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-  const [dimTab, setDimTab] = useState<'connected' | 'all'>('connected');
-  const [openTables, setOpenTables] = useState<Record<number, boolean>>({});
+  const [chartType, setChartType] = useState<ChartType>('bar');
+  const [dimSearch, setDimSearch] = useState('');
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [recommendedDims, setRecommendedDims] = useState<RecommendedDimensionItem[]>([]);
+  const [loadingDims, setLoadingDims] = useState(false);
 
-  const approved = metrics.filter((item) => item.status === 'approved' && item.definition);
-  const allColumns = catalog ? catalog.tables.flatMap((table) => table.columns) : [];
-
-  const reachableTableIds = useMemo(
-    () => (catalog ? getReachableTableIds(metricIds, approved, catalog) : new Set<number>()),
-    [metricIds, approved, catalog],
+  const approved = useMemo(
+    () => metrics.filter((item) => item.status === 'approved' && item.definition),
+    [metrics],
   );
 
-  React.useEffect(() => {
-    if (metricIds.length > 0 && reachableTableIds && catalog) {
-      setDimensions((prev) => {
-        const next = prev.filter((dim) => {
-          const table = catalog.tables.find((t) =>
-            t.columns.some((c) => c.column_id === dim.column_id),
-          );
-          return table ? reachableTableIds.has(table.table_id) : true;
-        });
-        return next.length === prev.length ? prev : next;
-      });
+  const selectedMetric = useMemo(
+    () => approved.find((m) => metricIds.includes(m.metric_id)),
+    [approved, metricIds],
+  );
+
+  const baseTable = useMemo(() => {
+    if (!catalog || !selectedMetric?.definition?.metric.base_entity) return null;
+    return (
+      catalog.tables.find(
+        (t) =>
+          t.table_name === selectedMetric.definition?.metric.base_entity ||
+          t.table_id === selectedMetric.definition?.metric.base_entity_id,
+      ) || null
+    );
+  }, [catalog, selectedMetric]);
+
+  const allColumns = useMemo(
+    () => (catalog ? catalog.tables.flatMap((table) => table.columns) : []),
+    [catalog],
+  );
+
+  // Time columns available contextually for the selected metric
+  const availableTimeColumns = useMemo(() => {
+    if (!catalog) return [];
+    if (baseTable) {
+      const baseTimeCols = baseTable.columns.filter((col) => isTimeDimension(col));
+      if (baseTimeCols.length > 0) return baseTimeCols;
     }
-  }, [metricIds, reachableTableIds, catalog]);
+    return allColumns.filter((col) => isTimeDimension(col));
+  }, [catalog, baseTable, allColumns]);
+
+  // Fetch backend-recommended dimensions whenever selected metric changes
+  useEffect(() => {
+    if (!dbId || metricIds.length === 0) {
+      setRecommendedDims([]);
+      return;
+    }
+    const primaryMetricId = metricIds[0];
+    let isMounted = true;
+    setLoadingDims(true);
+
+    getMetricRecommendedDimensionsApi(dbId, primaryMetricId)
+      .then((res) => {
+        if (isMounted && res && Array.isArray(res.dimensions)) {
+          setRecommendedDims(res.dimensions);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load recommended dimensions from backend:', err);
+      })
+      .finally(() => {
+        if (isMounted) setLoadingDims(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [dbId, metricIds]);
+
 
   if (!catalog) {
     return (
@@ -158,17 +350,7 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
   const request = (): SemanticQueryRequest => ({
     metric_ids: metricIds,
     dimensions,
-    filters: filters
-      .map((f) => {
-        const col = allColumns.find((c) => c.column_id === f.column_id);
-        if (!col) return null;
-        return {
-          column_id: f.column_id,
-          operator: f.operator,
-          value: coerceFilterValue(f.operator, f.raw),
-        };
-      })
-      .filter((item): item is SemanticQueryFilter => item !== null),
+    filters: [],
     limit,
   });
 
@@ -186,47 +368,81 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
     );
   };
 
-  const setGrain = (columnId: number, grain: TimeGrain | '') => {
+  const selectedTimeDimension = dimensions.find((d) => {
+    const col = allColumns.find((c) => c.column_id === d.column_id);
+    return col && isTimeDimension(col);
+  });
+
+  const setTimeDimensionColumn = (columnIdStr: string) => {
+    if (!columnIdStr) {
+      setDimensions((prev) =>
+        prev.filter((d) => {
+          const col = allColumns.find((c) => c.column_id === d.column_id);
+          return !col || !isTimeDimension(col);
+        }),
+      );
+      return;
+    }
+    const columnId = Number(columnIdStr);
+    const existingGrain = selectedTimeDimension?.time_grain || 'month';
+    setDimensions((prev) => {
+      const nonTime = prev.filter((d) => {
+        const col = allColumns.find((c) => c.column_id === d.column_id);
+        return !col || !isTimeDimension(col);
+      });
+      return [...nonTime, { column_id: columnId, time_grain: existingGrain }];
+    });
+  };
+
+  const setTimeGrain = (grain: TimeGrain | '') => {
+    if (grain === '') {
+      if (selectedTimeDimension) {
+        setDimensions((prev) =>
+          prev.map((item) =>
+            item.column_id === selectedTimeDimension.column_id
+              ? { ...item, time_grain: undefined }
+              : item,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (!selectedTimeDimension) {
+      const primaryTimeCol =
+        availableTimeColumns[0] || allColumns.find((col) => isTimeDimension(col));
+      if (primaryTimeCol) {
+        const alreadySelected = dimensions.some((d) => d.column_id === primaryTimeCol.column_id);
+        if (alreadySelected) {
+          setDimensions((prev) =>
+            prev.map((d) =>
+              d.column_id === primaryTimeCol.column_id ? { ...d, time_grain: grain } : d,
+            ),
+          );
+        } else {
+          setDimensions((prev) => [
+            ...prev,
+            { column_id: primaryTimeCol.column_id, time_grain: grain },
+          ]);
+        }
+      }
+      return;
+    }
+
     setDimensions((prev) =>
       prev.map((item) =>
-        item.column_id === columnId
-          ? { ...item, time_grain: grain === '' ? undefined : grain }
+        item.column_id === selectedTimeDimension.column_id
+          ? { ...item, time_grain: grain }
           : item,
       ),
     );
   };
 
-  const addFilter = () => {
-    if (!allColumns.length) return;
-    setFilters((prev) => [...prev, { column_id: allColumns[0].column_id, operator: 'eq', raw: '' }]);
-  };
-
-  const updateFilter = (index: number, patch: Partial<DraftFilter>) => {
-    setFilters((prev) =>
-      prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)),
-    );
-  };
-
-  const removeFilter = (index: number) => {
-    setFilters((prev) => prev.filter((_, idx) => idx !== index));
-  };
-
-  const handleAiResolved = (spec: SemanticQuerySpec) => {
-    if (spec.metric_ids && spec.metric_ids.length > 0) {
-      setMetricIds(spec.metric_ids);
-    }
-    if (spec.dimensions) {
-      setDimensions(spec.dimensions);
-    }
-    if (spec.filters && spec.filters.length > 0) {
-      setFilters(
-        spec.filters.map((f: SemanticQueryFilter) => ({
-          column_id: f.column_id,
-          operator: f.operator,
-          raw: String(f.value ?? ''),
-        })),
-      );
-    }
+  const handleReset = () => {
+    setMetricIds([]);
+    setDimensions([]);
+    setOutput(null);
+    setError('');
   };
 
   const runCompile = async () => {
@@ -259,6 +475,85 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
     }
   };
 
+  const handleCopySql = () => {
+    if (!output?.sql) return;
+    void navigator.clipboard.writeText(output.sql);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2000);
+  };
+
+  const handleExportCsv = () => {
+    if (!output || !isQueryResult(output)) return;
+    const header = output.columns
+      .map((c) => formatColumnTitle(c, output.metadata, catalog, approved))
+      .join(',');
+    const rowsStr = output.rows.map((row) => row.map((v) => `"${String(v ?? '')}"`).join(','));
+    const csvContent = 'data:text/csv;charset=utf-8,' + [header, ...rowsStr].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `semantic_query_export_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const displayedDimensions = useMemo(() => {
+    if (metricIds.length === 0) return [];
+
+    if (recommendedDims.length > 0 && !dimSearch.trim()) {
+      return recommendedDims;
+    }
+
+    if (dimSearch.trim()) {
+      const q = dimSearch.toLowerCase();
+      const list: RecommendedDimensionItem[] = [];
+      catalog.tables.forEach((t) => {
+        t.columns.forEach((c) => {
+          if (isBusinessDimension(c)) {
+            const matches =
+              c.column_name.toLowerCase().includes(q) ||
+              (c.business_name && c.business_name.toLowerCase().includes(q)) ||
+              t.table_name.toLowerCase().includes(q);
+            if (matches) {
+              list.push({
+                column_id: c.column_id,
+                column_name: c.column_name,
+                business_name: c.business_name || c.column_name,
+                table_id: t.table_id,
+                table_name: t.table_name,
+                table_business_name: t.business_name || t.table_name,
+                tier: 'A',
+                tier_label: 'Tìm kiếm',
+                is_safe_join: true,
+                requires_reaggregation: false,
+                data_type: c.data_type,
+              });
+            }
+          }
+        });
+      });
+      return list;
+    }
+
+    if (!baseTable) return [];
+    return baseTable.columns
+      .filter((c) => isBusinessDimension(c))
+      .map((c) => ({
+        column_id: c.column_id,
+        column_name: c.column_name,
+        business_name: c.business_name || c.column_name,
+        table_id: baseTable.table_id,
+        table_name: baseTable.table_name,
+        table_business_name: baseTable.business_name || baseTable.table_name,
+        tier: 'A' as const,
+        tier_label: 'Trực tiếp',
+        is_safe_join: true,
+        requires_reaggregation: false,
+        data_type: c.data_type,
+      }));
+  }, [metricIds, recommendedDims, dimSearch, catalog.tables, baseTable]);
+
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
       <ViewHeader
@@ -269,76 +564,97 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
 
       <div className="flex min-h-0 flex-1">
         {/* Left Config Panel */}
-        <div className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border p-5">
-          {/* Natural Language Prompt Trigger */}
-          <div className="rounded-lg border border-border bg-card p-3 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <SectionLabel>Hỏi bằng ngôn ngữ tự nhiên</SectionLabel>
-              <Sparkles className="h-3.5 w-3.5 text-primary" />
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Mô tả báo cáo bạn cần xem để AI tự động chọn Metric và Dimension phù hợp.
-            </p>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="mt-2.5 w-full gap-1.5 text-xs"
-              onClick={() => setIsAiModalOpen(true)}
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              <span>AI Tự Động Thiết Lập Truy Vấn</span>
-            </Button>
-          </div>
-
+        <div className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border p-4.5 bg-card/40">
           {/* Question Summary Banner */}
-          <div className="rounded-lg border border-border bg-secondary/30 p-3 text-xs">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              CÂU HỎI PHÂN TÍCH HIỆN TẠI
-            </span>
-            <div className="mt-1 space-y-1">
-              <p className="font-medium text-foreground">
-                {metricIds.length > 0
-                  ? `Xem ${metricIds
+          <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                CÂU HỎI PHÂN TÍCH HIỆN TẠI
+              </span>
+              {(metricIds.length > 0 || dimensions.length > 0) && (
+                <button
+                  onClick={handleReset}
+                  className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                >
+                  <RotateCcw className="h-2.5 w-2.5" />
+                  <span>Đặt lại</span>
+                </button>
+              )}
+            </div>
+            <div className="mt-1.5 space-y-1">
+              <p className="font-medium text-foreground leading-relaxed">
+                {metricIds.length > 0 ? (
+                  <span className="text-primary font-semibold">
+                    Xem{' '}
+                    {metricIds
                       .map((id) => approved.find((m) => m.metric_id === id)?.name || id)
-                      .join(', ')}`
-                  : 'Chưa chọn chỉ số (Chọn ít nhất 1 metric)'}
-                {dimensions.length > 0
-                  ? ` theo ${dimensions
-                      .map((d) => allColumns.find((c) => c.column_id === d.column_id)?.business_name || d.column_id)
-                      .join(', ')}`
-                  : ''}
+                      .join(', ')}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground italic">
+                    Chưa chọn chỉ số (Chọn ít nhất 1 metric)
+                  </span>
+                )}
+                {dimensions.length > 0 && (
+                  <span className="text-foreground">
+                    {' '}
+                    theo{' '}
+                    <span className="font-semibold">
+                      {dimensions
+                        .map((d) => {
+                          const col = allColumns.find((c) => c.column_id === d.column_id);
+                          const name = col?.business_name || col?.column_name || d.column_id;
+                          return d.time_grain ? `${name} (${d.time_grain})` : name;
+                        })
+                        .join(', ')}
+                    </span>
+                  </span>
+                )}
               </p>
             </div>
           </div>
+
 
           {/* 1. Metrics Selector */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <SectionLabel>1. CHỈ SỐ ĐO LƯỜNG ({approved.length})</SectionLabel>
+              <span className="text-[10px] text-muted-foreground font-mono">Measures</span>
             </div>
-            <div className="space-y-1">
+
+            <div className="space-y-1.5">
               {approved.map((m) => {
                 const checked = metricIds.includes(m.metric_id);
+                const formulaFn = m.definition?.metric.formula.function || 'SUM';
                 return (
                   <label
                     key={m.metric_id}
                     className={cn(
-                      'flex cursor-pointer items-center gap-2 rounded-md border p-2 text-xs transition-colors hover:bg-accent/40',
+                      'flex cursor-pointer items-center justify-between gap-2 rounded-lg border p-2 text-xs transition-all',
                       checked
-                        ? 'border-primary/50 bg-accent text-foreground'
-                        : 'border-border bg-card text-muted-foreground',
+                        ? 'border-primary bg-primary/10 text-foreground shadow-2xs'
+                        : 'border-border bg-card text-muted-foreground hover:bg-accent/40 hover:text-foreground',
                     )}
                   >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleMetric(m.metric_id)}
-                      className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
-                    />
-                    <span className="flex-1 font-medium text-foreground">{metricName(m)}</span>
-                    <span className="font-mono text-[10px] text-muted-foreground">
-                      {m.definition?.metric.base_entity}
-                    </span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleMetric(m.metric_id)}
+                        className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
+                      />
+                      <span className="font-medium truncate">{metricName(m)}</span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="rounded bg-secondary/80 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-primary">
+                        {formulaFn}
+                      </span>
+                      {m.definition?.metric.base_entity && (
+                        <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
+                          {m.definition.metric.base_entity}
+                        </span>
+                      )}
+                    </div>
                   </label>
                 );
               })}
@@ -351,205 +667,202 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
           </div>
 
           {/* 2. Dimensions Selector */}
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between">
-              <SectionLabel>2. CHIỀU PHÂN TÍCH</SectionLabel>
-              <div className="flex rounded-md border border-border bg-card p-0.5 text-[10px]">
+              <div className="flex items-center gap-2">
+                <SectionLabel>
+                  2. CHIỀU PHÂN TÍCH ({displayedDimensions.length})
+                </SectionLabel>
+                {loadingDims && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
+              </div>
+              <span className="text-[10px] text-muted-foreground font-mono">Dimensions</span>
+            </div>
+
+            {/* Quick Search */}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                value={dimSearch}
+                onChange={(e) => setDimSearch(e.target.value)}
+                placeholder="Tìm nhanh chiều phân tích..."
+                className="h-8 pl-8 text-xs bg-background"
+              />
+              {dimSearch && (
                 <button
-                  type="button"
-                  onClick={() => setDimTab('connected')}
-                  className={cn(
-                    'rounded px-2 py-0.5 transition-colors cursor-pointer',
-                    dimTab === 'connected' ? 'bg-primary text-primary-foreground font-semibold' : 'text-muted-foreground',
-                  )}
+                  onClick={() => setDimSearch('')}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
                 >
-                  Chỉ hiện bảng liên kết
+                  <X className="h-3.5 w-3.5" />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setDimTab('all')}
-                  className={cn(
-                    'rounded px-2 py-0.5 transition-colors cursor-pointer',
-                    dimTab === 'all' ? 'bg-primary text-primary-foreground font-semibold' : 'text-muted-foreground',
+              )}
+            </div>
+
+            {/* Selected Chips Tray */}
+            {dimensions.filter((d) => {
+              const col = allColumns.find((c) => c.column_id === d.column_id);
+              return col && !isTimeDimension(col);
+            }).length > 0 && (
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-2 space-y-1.5">
+                <span className="text-[10px] font-semibold text-primary uppercase tracking-wider block">
+                  Đang chọn ({dimensions.filter((d) => {
+                    const col = allColumns.find((c) => c.column_id === d.column_id);
+                    return col && !isTimeDimension(col);
+                  }).length}):
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {dimensions
+                    .filter((d) => {
+                      const col = allColumns.find((c) => c.column_id === d.column_id);
+                      return col && !isTimeDimension(col);
+                    })
+                    .map((dim) => {
+                      const col = allColumns.find((c) => c.column_id === dim.column_id);
+                      return (
+                        <span
+                          key={dim.column_id}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-primary bg-primary text-primary-foreground px-2.5 py-0.5 text-[11px] font-medium shadow-2xs"
+                        >
+                          <span>{col?.business_name || col?.column_name || dim.column_id}</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleDimension(dim.column_id)}
+                            className="rounded-full hover:bg-primary-foreground/20 p-0.5 cursor-pointer"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+
+            {/* Scoped Dimension Pills */}
+            <div className="rounded-xl border border-border bg-card/40 p-3">
+              {metricIds.length === 0 && !dimSearch.trim() ? (
+                <div className="p-3 text-center text-xs text-muted-foreground space-y-1">
+                  <p className="font-medium text-foreground">Chọn ít nhất 1 Chỉ số ở mục 1</p>
+                  <p className="text-[11px]">
+                    Hệ thống sẽ gợi ý các chiều phân tích an toàn (Tier A/B/C) tương ứng với chỉ số.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {displayedDimensions.map((item) => {
+                    const isChecked = dimensions.some((d) => d.column_id === item.column_id);
+
+                    return (
+                      <button
+                        key={item.column_id}
+                        type="button"
+                        onClick={() => toggleDimension(item.column_id)}
+                        className={cn(
+                          'group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all cursor-pointer select-none',
+                          isChecked
+                            ? 'border-primary bg-primary text-primary-foreground shadow-2xs font-semibold'
+                            : 'border-border bg-background text-foreground hover:border-primary/60 hover:bg-accent/40',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}}
+                          aria-label={item.business_name || item.column_name}
+                          className="h-3 w-3 rounded accent-primary pointer-events-none"
+                        />
+                        <span>{item.business_name || item.column_name}</span>
+                        <span
+                          className={cn(
+                            'rounded px-1 py-0.2 font-mono text-[9px]',
+                            isChecked
+                              ? 'bg-primary-foreground/20 text-primary-foreground'
+                              : 'bg-secondary text-muted-foreground',
+                          )}
+                        >
+                          {item.table_business_name}
+                        </span>
+                      </button>
+                    );
+                  })}
+
+                  {displayedDimensions.length === 0 && (
+                    <p className="p-2 text-xs text-muted-foreground italic w-full text-center">
+                      Không tìm thấy chiều phân tích phù hợp.
+                    </p>
                   )}
-                >
-                  Tất cả
-                </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 3. Time Dimension & Grain */}
+          <div className="space-y-2 rounded-xl border border-border bg-card/60 p-3.5 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <SectionLabel>3. CHIỀU THỜI GIAN & CHU KỲ</SectionLabel>
+              <Calendar className="h-3.5 w-3.5 text-primary" />
+            </div>
+
+            {/* Time Column Picker */}
+            <div>
+              <label className="text-[11px] text-muted-foreground block mb-1">
+                Cột mốc thời gian (Time Dimension):
+              </label>
+              <select
+                value={selectedTimeDimension?.column_id || ''}
+                onChange={(e) => setTimeDimensionColumn(e.target.value)}
+                className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-primary"
+              >
+                <option value="">-- Không chọn mốc thời gian --</option>
+                {availableTimeColumns.map((col) => {
+                  const table = catalog.tables.find((t) =>
+                    t.columns.some((c) => c.column_id === col.column_id),
+                  );
+                  return (
+                    <option key={col.column_id} value={col.column_id}>
+                      {table ? `${table.business_name || table.table_name} · ` : ''}
+                      {col.business_name || col.column_name}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            {/* 5-Grain Buttons */}
+            <div>
+              <label className="text-[11px] text-muted-foreground block mb-1">
+                Chu kỳ tổng hợp (Granularity):
+              </label>
+              <div className="grid grid-cols-5 gap-1">
+                {TIME_GRAIN_OPTIONS.map((g) => {
+                  const isActive = selectedTimeDimension?.time_grain === g.value;
+                  return (
+                    <button
+                      key={g.value}
+                      type="button"
+                      onClick={() => setTimeGrain(isActive ? '' : g.value)}
+                      className={cn(
+                        'flex flex-col items-center justify-center rounded-md border py-1.5 text-xs transition-all cursor-pointer',
+                        isActive
+                          ? 'border-primary bg-primary text-primary-foreground font-semibold shadow-2xs'
+                          : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-primary/40',
+                      )}
+                    >
+                      <span className="text-[11px]">{g.label}</span>
+                      <span className="text-[9px] font-mono opacity-70">{g.enLabel}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
-
-            <div className="space-y-2">
-              {catalog.tables.map((table) => {
-                const isReachable = reachableTableIds.has(table.table_id);
-                if (dimTab === 'connected' && metricIds.length > 0 && !isReachable) {
-                  return null;
-                }
-
-                const isOpen = openTables[table.table_id] ?? isReachable;
-
-                return (
-                  <div
-                    key={table.table_id}
-                    className="overflow-hidden rounded-md border border-border bg-card shadow-2xs"
-                  >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setOpenTables((prev) => ({ ...prev, [table.table_id]: !isOpen }))
-                      }
-                      className="flex w-full items-center justify-between bg-secondary/30 px-3 py-2 text-left text-xs font-semibold text-foreground cursor-pointer"
-                    >
-                      <div className="flex items-center gap-1.5">
-                        {isOpen ? (
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                        ) : (
-                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                        )}
-                        <span>{table.business_name || table.table_name}</span>
-                        <span className="font-mono text-[10px] text-muted-foreground">
-                          ({table.table_name})
-                        </span>
-                      </div>
-                      {!isReachable && metricIds.length > 0 && (
-                        <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                          Chưa liên kết
-                        </span>
-                      )}
-                    </button>
-
-                    {isOpen && (
-                      <div className="divide-y divide-border/50 px-2 py-1">
-                        {table.columns.map((col) => {
-                          const dimSelected = dimensions.find((d) => d.column_id === col.column_id);
-                          const isChecked = !!dimSelected;
-                          const disabled = metricIds.length > 0 && !isReachable;
-
-                          return (
-                            <div
-                              key={col.column_id}
-                              className="flex items-center justify-between gap-2 py-1.5 text-xs"
-                            >
-                              <label className="flex items-center gap-2 cursor-pointer select-none">
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  disabled={disabled}
-                                  onChange={() => toggleDimension(col.column_id)}
-                                  className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer disabled:opacity-40"
-                                />
-                                <span
-                                  className={cn(
-                                    'text-foreground',
-                                    disabled && 'opacity-50',
-                                  )}
-                                >
-                                  {col.business_name || col.column_name}
-                                </span>
-                              </label>
-
-                              {col.is_time_dimension && isChecked && (
-                                <select
-                                  value={dimSelected?.time_grain || ''}
-                                  onChange={(e) =>
-                                    setGrain(col.column_id, e.target.value as TimeGrain | '')
-                                  }
-                                  className="h-6 rounded border border-border bg-background px-1 font-mono text-[10px] outline-none"
-                                >
-                                  {TIME_GRAIN_OPTIONS.map((opt) => (
-                                    <option key={opt.value} value={opt.value}>
-                                      {opt.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
           </div>
 
-          {/* 3. Filters Section */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <SectionLabel>3. BỘ LỌC ĐIỀU KIỆN ({filters.length})</SectionLabel>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 gap-1 text-[11px] text-primary"
-                onClick={addFilter}
-              >
-                <Plus className="h-3 w-3" />
-                Thêm
-              </Button>
-            </div>
-
-            <div className="space-y-2">
-              {filters.map((f, idx) => (
-                <div
-                  key={idx}
-                  className="flex flex-wrap items-center gap-1.5 rounded-md border border-border bg-card p-2 text-xs"
-                >
-                  <select
-                    value={f.column_id}
-                    onChange={(e) =>
-                      updateFilter(idx, { column_id: Number(e.target.value) })
-                    }
-                    className="h-7 flex-1 min-w-[120px] rounded border border-border bg-background px-1.5 text-[11px] outline-none"
-                  >
-                    {allColumns.map((c) => (
-                      <option key={c.column_id} value={c.column_id}>
-                        {c.business_name || c.column_name}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={f.operator}
-                    onChange={(e) =>
-                      updateFilter(idx, { operator: e.target.value as FilterOperator })
-                    }
-                    className="h-7 w-24 rounded border border-border bg-background px-1 text-[11px] outline-none"
-                  >
-                    {OPERATORS.map((op) => (
-                      <option key={op.value} value={op.value}>
-                        {op.label}
-                      </option>
-                    ))}
-                  </select>
-
-                  {!f.operator.startsWith('is_') && (
-                    <Input
-                      value={f.raw}
-                      onChange={(e) => updateFilter(idx, { raw: e.target.value })}
-                      placeholder="Giá trị..."
-                      className="h-7 flex-1 min-w-[80px] px-2 text-[11px]"
-                    />
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => removeFilter(idx)}
-                    className="rounded p-1 text-muted-foreground hover:text-destructive cursor-pointer"
-                    aria-label="Remove filter"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
 
           {/* Action Buttons */}
           <div className="mt-auto space-y-2 pt-4 border-t border-border">
             <div className="grid grid-cols-2 gap-2">
               <Button
                 variant="outline"
-                className="w-full gap-1.5 text-xs"
+                className="w-full gap-1.5 text-xs font-semibold"
                 onClick={() => void runCompile()}
                 disabled={!metricIds.length || loading}
               >
@@ -557,11 +870,15 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
                 <span>Preview SQL</span>
               </Button>
               <Button
-                className="w-full gap-1.5 text-xs"
+                className="w-full gap-1.5 text-xs font-semibold shadow-sm"
                 onClick={() => void runExecute()}
                 disabled={!metricIds.length || loading}
               >
-                <Play className="h-3.5 w-3.5" />
+                {loading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Play className="h-3.5 w-3.5" />
+                )}
                 <span>Thực thi (Execute)</span>
               </Button>
             </div>
@@ -571,8 +888,8 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
         {/* Right Results Panel */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
           {/* Result Tab Bar & Guardrails Badge */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-3 bg-secondary/10">
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-2.5 bg-secondary/15">
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 shadow-2xs">
               {([
                 { key: 'table' as const, label: 'Bảng số liệu', icon: Table2 },
                 { key: 'chart' as const, label: 'Biểu đồ', icon: TrendingUp },
@@ -585,9 +902,9 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
                     type="button"
                     onClick={() => setViewTab(t.key)}
                     className={cn(
-                      'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors cursor-pointer',
+                      'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-all cursor-pointer',
                       viewTab === t.key
-                        ? 'bg-primary text-primary-foreground font-semibold'
+                        ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
                         : 'text-muted-foreground hover:text-foreground',
                     )}
                   >
@@ -598,221 +915,527 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
               })}
             </div>
 
-            <div className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-              <ShieldCheck className="h-4 w-4 text-emerald-500" />
-              <span>Read-only · LIMIT 100 · max 1000 · 15s timeout</span>
+            {/* Quick Actions (Copy / Export) */}
+            <div className="flex items-center gap-3">
+              {viewTab === 'table' && output && isQueryResult(output) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 text-[11px]"
+                  onClick={handleExportCsv}
+                >
+                  <Download className="h-3 w-3" />
+                  <span>Xuất CSV</span>
+                </Button>
+              )}
+
+              {viewTab === 'sql' && output?.sql && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 text-[11px]"
+                  onClick={handleCopySql}
+                >
+                  {copiedSql ? (
+                    <Check className="h-3 w-3 text-emerald-500" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                  <span>{copiedSql ? 'Đã sao chép' : 'Sao chép SQL'}</span>
+                </Button>
+              )}
+
+              <div className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground border-l border-border pl-3">
+                <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                <span>Read-only · LIMIT 100 · max 1000 · 15s timeout</span>
+              </div>
             </div>
           </div>
 
           {/* Results Area */}
           <div className="min-h-0 flex-1 overflow-auto p-6">
             {loading ? (
-              <div className="flex h-full min-h-[300px] flex-col items-center justify-center gap-2 text-muted-foreground">
+              <div className="flex h-full min-h-[360px] flex-col items-center justify-center gap-3 text-muted-foreground">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <p className="text-xs">Đang biên dịch & thực thi truy vấn...</p>
+                <p className="text-xs font-medium">Đang biên dịch & thực thi truy vấn an toàn...</p>
               </div>
             ) : error ? (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-xs text-destructive">
-                <p className="font-semibold">Lỗi truy vấn:</p>
-                <p className="mt-1">{error}</p>
+              <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-5 text-xs text-destructive">
+                <div className="flex items-center gap-2 font-semibold text-sm">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span>Lỗi truy vấn Semantic:</span>
+                </div>
+                <p className="mt-2 font-mono leading-relaxed bg-background/50 p-3 rounded-lg border border-destructive/20">
+                  {error}
+                </p>
               </div>
             ) : !output ? (
-              <div className="flex h-full min-h-[300px] flex-col items-center justify-center gap-3 text-center text-muted-foreground">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-secondary text-muted-foreground">
-                  <Play className="h-6 w-6" />
+              <div className="flex h-full min-h-[360px] flex-col items-center justify-center gap-3 text-center text-muted-foreground">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-secondary/50 text-muted-foreground shadow-2xs">
+                  <Play className="h-7 w-7 text-primary" />
                 </div>
-                <div>
-                  <p className="font-semibold text-foreground text-sm">
-                    Sẵn sàng biên dịch & phân tích
+                <div className="max-w-md">
+                  <p className="font-semibold text-foreground text-base">
+                    Sẵn sàng biên dịch & phân tích số liệu
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Chọn các chỉ số và chiều phân tích ở cột bên trái rồi nhấn Preview SQL hoặc Thực thi.
+                  <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
+                    Chọn các chỉ số (Measures) và chiều phân tích (Dimensions / Time Grain) ở bảng điều khiển bên trái, sau đó nhấn <strong>Preview SQL</strong> hoặc <strong>Thực thi</strong>.
                   </p>
                 </div>
               </div>
             ) : viewTab === 'table' ? (
               isQueryResult(output) ? (
-                <div className="overflow-hidden rounded-lg border border-border bg-card shadow-xs">
-                  <div className="overflow-x-auto">
-                    <table className="w-full border-collapse text-xs">
-                      <thead>
-                        <tr className="border-b border-border bg-secondary/50">
-                          {output.columns.map((c) => (
-                            <th
-                              key={c}
-                              className="px-4 py-2.5 text-left font-mono text-[11px] uppercase tracking-wider text-muted-foreground"
-                            >
-                              {c}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {output.rows.map((row, i) => (
-                          <tr
-                            key={i}
-                            className="border-b border-border last:border-0 hover:bg-accent/40"
-                          >
-                            {output.columns.map((_, colIdx) => (
-                              <td key={colIdx} className="px-4 py-2.5 font-mono text-xs tabular-nums">
-                                {String(row[colIdx] ?? '—')}
-                              </td>
+                <div className="space-y-4">
+                  <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-border bg-secondary/60">
+                            {output.columns.map((c, idx) => (
+                              <th
+                                key={c}
+                                className={cn(
+                                  'px-4 py-3 font-semibold uppercase tracking-wider text-muted-foreground',
+                                  idx === 0 ? 'text-left' : 'text-right',
+                                )}
+                              >
+                                {formatColumnTitle(c, output.metadata, catalog, approved)}
+                              </th>
                             ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="flex items-center justify-between border-t border-border bg-secondary/20 px-4 py-2 text-[11px] text-muted-foreground">
-                    <span>Tổng số dòng: {output.row_count}</span>
+                        </thead>
+                        <tbody>
+                          {output.rows.map((row, i) => (
+                            <tr
+                              key={i}
+                              className="border-b border-border last:border-0 hover:bg-accent/40 transition-colors"
+                            >
+                              {output.columns.map((_, colIdx) => {
+                                const val = row[colIdx];
+                                const isNum =
+                                  typeof val === 'number' ||
+                                  (!isNaN(Number(val)) && val !== '' && val !== null);
+                                return (
+                                  <td
+                                    key={colIdx}
+                                    className={cn(
+                                      'px-4 py-2.5 text-xs tabular-nums',
+                                      colIdx === 0 ? 'text-left text-foreground' : 'text-right',
+                                      isNum && colIdx > 0 ? 'font-medium font-mono text-foreground' : 'text-muted-foreground',
+                                    )}
+                                  >
+                                    {colIdx === 0 ? formatDimensionValue(val) : formatCellValue(val)}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-border bg-secondary/30 px-4 py-2.5 text-xs text-muted-foreground">
+                      <span>Hiển thị <strong>{output.rows.length}</strong> dòng kết quả</span>
+                      <span className="font-mono text-[11px]">LIMIT {limit} applied</span>
+                    </div>
                   </div>
                 </div>
               ) : (
-                <div className="rounded-lg border border-border bg-card p-6 text-center text-xs text-muted-foreground">
-                  Đây là bản xem trước SQL. Bấm &quot;Thực thi (Execute)&quot; để chạy trên Live DB và xem bảng số liệu.
+                <div className="rounded-xl border border-border bg-card p-8 text-center text-xs text-muted-foreground">
+                  <p className="text-sm font-semibold text-foreground mb-1">
+                    Bản xem trước SQL đã sẵn sàng
+                  </p>
+                  <p>Nhấn nút &quot;Thực thi (Execute)&quot; để nạp số liệu thực tế từ Live DB.</p>
                 </div>
               )
             ) : viewTab === 'chart' ? (
               isQueryResult(output) && output.rows.length > 0 ? (
-                <ChartViewer rows={output.rows} columns={output.columns} />
+                <RechartsInteractiveStudio
+                  rows={output.rows}
+                  columns={output.columns}
+                  metadata={output.metadata}
+                  catalog={catalog}
+                  metrics={approved}
+                  chartType={chartType}
+                  onChartTypeChange={setChartType}
+                />
               ) : (
-                <div className="rounded-lg border border-border bg-card p-6 text-center text-xs text-muted-foreground">
+                <div className="rounded-xl border border-border bg-card p-8 text-center text-xs text-muted-foreground">
                   Chưa có dữ liệu đồ thị. Bấm &quot;Thực thi (Execute)&quot; để nạp số liệu từ Live DB.
                 </div>
               )
             ) : (
-              <div className="overflow-hidden rounded-lg border border-border bg-card shadow-xs">
-                <div className="flex items-center justify-between border-b border-border bg-secondary/30 px-4 py-2">
-                  <SectionLabel>COMPILED SQL (READ-ONLY)</SectionLabel>
+              <div className="space-y-4">
+                <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+                  <div className="flex items-center justify-between border-b border-border bg-secondary/40 px-4 py-2.5">
+                    <SectionLabel>COMPILED SQL (READ-ONLY)</SectionLabel>
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      Dialect-aware AST compiled
+                    </span>
+                  </div>
+                  <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-foreground bg-secondary/10">
+                    {output.sql}
+                  </pre>
                 </div>
-                <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-foreground">
-                  {output.sql}
-                </pre>
               </div>
             )}
           </div>
         </div>
       </div>
-
-      <AIQueryModal
-        isOpen={isAiModalOpen}
-        onClose={() => setIsAiModalOpen(false)}
-        dbId={dbId || 0}
-        theme={theme || 'dark'}
-        onResolved={handleAiResolved}
-      />
     </div>
   );
 }
 
-function ChartViewer({
+function formatCellValue(val: unknown): string {
+  if (val === null || val === undefined) return '—';
+  if (typeof val === 'number') {
+    return val.toLocaleString();
+  }
+  if (typeof val === 'string' && !isNaN(Number(val)) && val.trim() !== '') {
+    const num = Number(val);
+    return num.toLocaleString();
+  }
+  return String(val);
+}
+
+function RechartsInteractiveStudio({
   rows,
   columns,
+  metadata,
+  catalog,
+  metrics,
+  chartType,
+  onChartTypeChange,
 }: {
   rows: unknown[][];
   columns: string[];
+  metadata?: Record<string, any>;
+  catalog?: SemanticCatalog | null;
+  metrics?: MetricRecord[];
+  chartType: ChartType;
+  onChartTypeChange: (t: ChartType) => void;
 }) {
-  const numericIdx = columns.findIndex((_, idx) =>
-    rows.some((r) => typeof r[idx] === 'number' || (!isNaN(Number(r[idx])) && r[idx] !== '')),
+  const numericColIndices = useMemo(() => {
+    const indices: number[] = [];
+    columns.forEach((_, idx) => {
+      const hasNumbers = rows.some(
+        (r) =>
+          typeof r[idx] === 'number' ||
+          (!isNaN(Number(r[idx])) && r[idx] !== '' && r[idx] !== null),
+      );
+      if (hasNumbers) indices.push(idx);
+    });
+    return indices;
+  }, [rows, columns]);
+
+  const labelColIdx = useMemo(() => {
+    const nonNumeric = columns.findIndex((_, idx) => !numericColIndices.includes(idx));
+    return nonNumeric >= 0 ? nonNumeric : 0;
+  }, [columns, numericColIndices]);
+
+  const primaryNumericIdx = numericColIndices[0] ?? (columns.length > 1 ? 1 : 0);
+
+  // Formatted names for dimension and metric
+  const primaryMetricRaw = columns[primaryNumericIdx] || 'Chỉ số';
+  const labelColRaw = columns[labelColIdx] || 'Chiều phân tích';
+
+  const primaryMetricName = useMemo(
+    () => formatColumnTitle(primaryMetricRaw, metadata, catalog, metrics),
+    [primaryMetricRaw, metadata, catalog, metrics],
   );
-  const labelIdx = numericIdx === 0 ? (columns.length > 1 ? 1 : 0) : 0;
-  const numericCol = numericIdx >= 0 ? columns[numericIdx] : null;
-  const labelCol = columns[labelIdx] || columns[0];
 
-  if (numericIdx === -1 || !numericCol) {
-    return (
-      <div className="rounded-lg border border-border bg-card p-6 text-center text-xs text-muted-foreground">
-        Không tìm thấy cột số liệu định lượng để vẽ biểu đồ.
-      </div>
-    );
-  }
+  const labelColName = useMemo(
+    () => formatColumnTitle(labelColRaw, metadata, catalog, metrics),
+    [labelColRaw, metadata, catalog, metrics],
+  );
 
-  const values = rows.map((r) => Number(r[numericIdx]) || 0);
-  const maxVal = Math.max(...values, 1);
+  // Format data for Recharts with smart dimension values
+  const chartData = useMemo(() => {
+    return rows.slice(0, 30).map((r, i) => {
+      const rawLabel = r[labelColIdx];
+      const formattedLabel = formatDimensionValue(rawLabel) || `Mục ${i + 1}`;
+      return {
+        name: formattedLabel,
+        rawName: String(rawLabel ?? ''),
+        value: Number(r[primaryNumericIdx]) || 0,
+      };
+    });
+  }, [rows, labelColIdx, primaryNumericIdx]);
+
+  const values = useMemo(() => chartData.map((d) => d.value), [chartData]);
+  const totalSum = useMemo(() => values.reduce((a, b) => a + b, 0), [values]);
+  const avgVal = useMemo(() => (values.length ? totalSum / values.length : 0), [values, totalSum]);
+  const maxVal = useMemo(() => (values.length ? Math.max(...values) : 1), [values]);
+  const minVal = useMemo(() => (values.length ? Math.min(...values) : 0), [values]);
 
   return (
-    <div className="rounded-lg border border-border bg-card p-6 shadow-xs space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-foreground text-sm">
-          Biểu đồ phân tích: {numericCol} theo {labelCol}
-        </h3>
-        <span className="font-mono text-xs text-muted-foreground">
-          {rows.length} điểm dữ liệu
-        </span>
+    <div className="space-y-6">
+      {/* KPI Metric Summary Cards */}
+      <div className="grid grid-cols-4 gap-3">
+        <div className="rounded-xl border border-border bg-card p-4 shadow-2xs">
+          <span className="text-[11px] font-medium text-muted-foreground block truncate">
+            Tổng {primaryMetricName}
+          </span>
+          <span className="mt-1 text-lg font-bold font-mono text-foreground block tabular-nums">
+            {totalSum.toLocaleString()}
+          </span>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4 shadow-2xs">
+          <span className="text-[11px] font-medium text-muted-foreground block truncate">
+            Trung bình mỗi {labelColName}
+          </span>
+          <span className="mt-1 text-lg font-bold font-mono text-foreground block tabular-nums">
+            {avgVal.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+          </span>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4 shadow-2xs">
+          <span className="text-[11px] font-medium text-muted-foreground block truncate">
+            Cao nhất / Thấp nhất
+          </span>
+          <span className="mt-1 text-sm font-bold font-mono text-foreground block tabular-nums">
+            {maxVal.toLocaleString()} / {minVal.toLocaleString()}
+          </span>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4 shadow-2xs">
+          <span className="text-[11px] font-medium text-muted-foreground block truncate">
+            Số điểm dữ liệu ({labelColName})
+          </span>
+          <span className="mt-1 text-lg font-bold font-mono text-foreground block tabular-nums">
+            {rows.length}
+          </span>
+        </div>
       </div>
 
-      <div className="space-y-3 pt-2">
-        {rows.slice(0, 15).map((r, i) => {
-          const val = Number(r[numericIdx]) || 0;
-          const pct = Math.min(100, Math.max(2, (val / maxVal) * 100));
-          return (
-            <div key={i} className="space-y-1">
-              <div className="flex justify-between text-xs font-mono">
-                <span className="text-foreground truncate max-w-xs">
-                  {String(r[labelIdx] ?? '—')}
-                </span>
-                <span className="text-muted-foreground font-semibold tabular-nums">
-                  {val.toLocaleString()}
-                </span>
-              </div>
-              <div className="h-3 w-full rounded-full bg-secondary overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-primary transition-all"
-                  style={{ width: `${pct}%` }}
+      {/* Chart Canvas & Controls */}
+      <div className="rounded-xl border border-border bg-card p-6 shadow-xs space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">
+              Biểu đồ trực quan: {primaryMetricName} theo {labelColName}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Phân tích xu hướng và tương quan dữ liệu
+            </p>
+          </div>
+
+          {/* Chart Type Selector */}
+          <div className="flex rounded-lg border border-border bg-background p-1 text-xs">
+            {([
+              { key: 'bar' as const, label: 'Cột', icon: BarChart3 },
+              { key: 'line' as const, label: 'Đường', icon: LineChartIcon },
+              { key: 'area' as const, label: 'Vùng', icon: AreaChartIcon },
+              { key: 'pie' as const, label: 'Biểu đồ Tròn (Donut)', icon: PieChartIcon },
+            ]).map((c) => {
+              const Icon = c.icon;
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => onChartTypeChange(c.key)}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-colors cursor-pointer',
+                    chartType === c.key
+                      ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  <span>{c.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="h-[340px] w-full pt-2">
+          {chartType === 'bar' && (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 30 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/40" />
+                <XAxis
+                  dataKey="name"
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] fill-muted-foreground font-medium"
+                  interval={0}
+                  angle={-25}
+                  textAnchor="end"
                 />
-              </div>
-            </div>
-          );
-        })}
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] font-mono fill-muted-foreground"
+                  tickFormatter={formatShortNumber}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const item = payload[0];
+                    return (
+                      <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
+                        <p className="font-semibold text-popover-foreground">{item.payload.name}</p>
+                        <p className="font-mono text-primary font-medium mt-0.5">
+                          {primaryMetricName}: {Number(item.value).toLocaleString()}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Bar dataKey="value" fill="var(--color-primary, #6366f1)" radius={[6, 6, 0, 0]} maxBarSize={48} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+
+          {chartType === 'line' && (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 30 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/40" />
+                <XAxis
+                  dataKey="name"
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] fill-muted-foreground font-medium"
+                  interval={0}
+                  angle={-25}
+                  textAnchor="end"
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] font-mono fill-muted-foreground"
+                  tickFormatter={formatShortNumber}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const item = payload[0];
+                    return (
+                      <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
+                        <p className="font-semibold text-popover-foreground">{item.payload.name}</p>
+                        <p className="font-mono text-primary font-medium mt-0.5">
+                          {primaryMetricName}: {Number(item.value).toLocaleString()}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke="var(--color-primary, #6366f1)"
+                  strokeWidth={3}
+                  dot={{ r: 4, fill: 'var(--color-primary, #6366f1)' }}
+                  activeDot={{ r: 6 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+
+          {chartType === 'area' && (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 30 }}>
+                <defs>
+                  <linearGradient id="areaGradientRecharts" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--color-primary, #6366f1)" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="var(--color-primary, #6366f1)" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/40" />
+                <XAxis
+                  dataKey="name"
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] fill-muted-foreground font-medium"
+                  interval={0}
+                  angle={-25}
+                  textAnchor="end"
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] font-mono fill-muted-foreground"
+                  tickFormatter={formatShortNumber}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const item = payload[0];
+                    return (
+                      <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
+                        <p className="font-semibold text-popover-foreground">{item.payload.name}</p>
+                        <p className="font-mono text-primary font-medium mt-0.5">
+                          {primaryMetricName}: {Number(item.value).toLocaleString()}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke="var(--color-primary, #6366f1)"
+                  strokeWidth={2.5}
+                  fillOpacity={1}
+                  fill="url(#areaGradientRecharts)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+
+          {chartType === 'pie' && (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart margin={{ top: 10, right: 20, left: 20, bottom: 10 }}>
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const item = payload[0];
+                    const val = Number(item.value) || 0;
+                    const pct = totalSum > 0 ? ((val / totalSum) * 100).toFixed(1) : '0';
+                    return (
+                      <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
+                        <p className="font-semibold text-popover-foreground">{item.name}</p>
+                        <p className="font-mono text-primary font-medium mt-0.5">
+                          {primaryMetricName}: {val.toLocaleString()} ({pct}%)
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Legend
+                  verticalAlign="bottom"
+                  height={36}
+                  formatter={(value) => (
+                    <span className="text-xs font-medium text-foreground">{value}</span>
+                  )}
+                />
+                <Pie
+                  data={chartData.slice(0, 10)}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="45%"
+                  innerRadius={65}
+                  outerRadius={105}
+                  paddingAngle={3}
+                  stroke="var(--color-background, #fff)"
+                  strokeWidth={2}
+                >
+                  {chartData.slice(0, 10).map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </div>
       </div>
     </div>
   );
-}
-
-function getReachableTableIds(
-  metricIds: number[],
-  approvedMetrics: MetricRecord[],
-  catalog: SemanticCatalog,
-): Set<number> {
-  const reachable = new Set<number>();
-  const selectedMetrics = approvedMetrics.filter((m) => metricIds.includes(m.metric_id));
-
-  if (!selectedMetrics.length) {
-    catalog.tables.forEach((t) => reachable.add(t.table_id));
-    return reachable;
-  }
-
-  const baseEntities = selectedMetrics
-    .map((m) => m.definition?.metric.base_entity)
-    .filter((entity): entity is string => Boolean(entity));
-
-  const baseTables = catalog.tables.filter((t) => baseEntities.includes(t.table_name));
-  baseTables.forEach((t) => reachable.add(t.table_id));
-
-  // BFS over catalog relationships to mark reachable tables
-  const queue = [...reachable];
-  while (queue.length > 0) {
-    const currentTableId = queue.shift()!;
-    for (const rel of catalog.relationships) {
-      const fromId = (rel as unknown as { from_table_id?: number; from_entity_id?: number }).from_table_id ?? rel.from_entity_id;
-      const toId = (rel as unknown as { to_table_id?: number; to_entity_id?: number }).to_table_id ?? rel.to_entity_id;
-      if (fromId === currentTableId && !reachable.has(toId)) {
-        reachable.add(toId);
-        queue.push(toId);
-      }
-      if (toId === currentTableId && !reachable.has(fromId)) {
-        reachable.add(fromId);
-        queue.push(fromId);
-      }
-    }
-  }
-
-  return reachable;
 }
 
 function isQueryResult(
   output: SemanticQueryResult | SemanticQueryPreview | null,
 ): output is SemanticQueryResult {
-  return Boolean(output && 'rows' in output && Array.isArray((output as SemanticQueryResult).rows));
+  return Boolean(
+    output && 'rows' in output && Array.isArray((output as SemanticQueryResult).rows),
+  );
 }
-

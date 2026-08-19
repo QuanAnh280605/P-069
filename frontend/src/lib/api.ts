@@ -7,7 +7,6 @@ export interface SemanticColumn {
   description?: string;
   sample_value?: string;
 }
-
 export interface SemanticTable {
   table_name: string;
   business_name: string;
@@ -45,13 +44,18 @@ export interface MetricDefinition {
 
 export interface MetricRecord {
   metric_id: number;
+  db_id?: number;
   name: string;
+  description?: string;
+  sql_template?: string;
   definition: MetricDefinition | null;
   source: 'ai' | 'manual';
-  version: number;
+  version?: number;
   status: MetricStatus;
   approved_by?: number | null;
+  created_by?: number | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface SemanticLayerData {
@@ -92,6 +96,8 @@ export interface CatalogColumn {
   business_name: string;
   data_type: string;
   is_time_dimension: boolean;
+  is_primary_key?: boolean;
+  is_foreign_key?: boolean;
   allowed_values: unknown;
 }
 
@@ -118,7 +124,8 @@ export interface SemanticQueryFilter {
 
 export interface SemanticQueryRequest {
   metric_ids: number[];
-  dimensions: DimensionSelection[];
+  dimensions?: DimensionSelection[];
+  dimension_ids?: number[];
   filters: SemanticQueryFilter[];
   limit: number;
 }
@@ -140,9 +147,11 @@ export interface SemanticQueryPreview {
 export interface SemanticQueryResult {
   sql: string;
   parameters: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   columns: string[];
   rows: unknown[][];
   row_count: number;
+  execution_time_ms?: number;
 }
 
 const LEGACY_INITIAL_LAYERS: unknown[] = [
@@ -1059,3 +1068,62 @@ export async function advanceWizardApi(
     body: JSON.stringify({ session_id: sessionId, option_id: optionId }),
   });
 }
+
+export interface RecommendedDimensionItem {
+  column_id: number;
+  column_name: string;
+  business_name: string;
+  table_id: number;
+  table_name: string;
+  table_business_name: string;
+  tier: 'A' | 'B' | 'C' | 'D';
+  tier_label: string;
+  is_safe_join: boolean;
+  requires_reaggregation: boolean;
+  data_type: string;
+  cardinality_hint?: number | null;
+}
+
+export interface MetricDimensionsResponse {
+  metric_id: number;
+  metric_name: string;
+  base_table: string;
+  dimensions: RecommendedDimensionItem[];
+}
+
+export async function getMetricRecommendedDimensionsApi(
+  dbId: number | string,
+  metricId: number | string
+): Promise<MetricDimensionsResponse> {
+  return semanticRequest<MetricDimensionsResponse>(
+    `/api/v1/semantic/${dbId}/metric/${metricId}/dimensions`
+  );
+}
+export interface FilterColumnItem {
+  column_id: number;
+  column_name: string;
+  business_name: string;
+  table_id: number;
+  table_name: string;
+  table_business_name: string;
+  group_type: 'base' | 'related';
+  data_type: string;
+  is_time_dimension: boolean;
+}
+
+export interface MetricFilterColumnsResponse {
+  metric_id: number;
+  metric_name: string;
+  base_table: string;
+  columns: FilterColumnItem[];
+}
+
+export async function getMetricFilterColumnsApi(
+  dbId: number | string,
+  metricId: number | string
+): Promise<MetricFilterColumnsResponse> {
+  return semanticRequest<MetricFilterColumnsResponse>(
+    `/api/v1/semantic/${dbId}/metric/${metricId}/filter-columns`
+  );
+}
+

@@ -62,3 +62,19 @@ async def test_create_metric_requires_fields(client):
     headers = get_test_headers()
     response = await client.post("/api/v1/semantic/1/metric", json={"name": "test"}, headers=headers)
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_metric_dimensions_not_found(client):
+    """GET dimensions cho metric không tồn tại phải trả về 404."""
+    headers = get_test_headers()
+    response = await client.get("/api/v1/semantic/999/metric/999/dimensions", headers=headers)
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_metric_filter_columns_not_found(client):
+    """GET filter-columns cho metric không tồn tại phải trả về 404."""
+    headers = get_test_headers()
+    response = await client.get("/api/v1/semantic/999/metric/999/filter-columns", headers=headers)
+    assert response.status_code == 404
