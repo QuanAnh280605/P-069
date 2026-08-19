@@ -3,6 +3,10 @@
 Includes tables:
   - users
   - user_sessions
+  - organizations
+  - organization_members
+  - organization_invitations
+  - organization_audit_logs
   - semantic_databases
   - semantic_tables
   - semantic_columns
@@ -40,6 +44,107 @@ class Base(DeclarativeBase):
 def utc_now() -> datetime:
     """Return current UTC time."""
     return datetime.now(UTC)
+
+
+class OrganizationModel(Base):
+    """Company Workspace that owns semantic-layer resources."""
+
+    __tablename__ = "organizations"
+    __table_args__ = (Index("idx_organizations_slug", "slug", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    slug: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    created_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    creator: Mapped["UserModel | None"] = relationship("UserModel", foreign_keys=[created_by])
+    members: Mapped[list["OrganizationMemberModel"]] = relationship(
+        "OrganizationMemberModel", back_populates="organization", cascade="all, delete-orphan"
+    )
+    invitations: Mapped[list["OrganizationInvitationModel"]] = relationship(
+        "OrganizationInvitationModel", back_populates="organization", cascade="all, delete-orphan"
+    )
+    semantic_databases: Mapped[list["SemanticDatabaseModel"]] = relationship(
+        "SemanticDatabaseModel", back_populates="organization"
+    )
+
+
+class OrganizationMemberModel(Base):
+    """User membership and role inside a Workspace."""
+
+    __tablename__ = "organization_members"
+    __table_args__ = (
+        UniqueConstraint("org_id", "user_id", name="uq_organization_members_org_user"),
+        Index("idx_organization_members_org_role", "org_id", "role"),
+        Index("idx_organization_members_user_org", "user_id", "org_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    org_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="member")
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    organization: Mapped["OrganizationModel"] = relationship("OrganizationModel", back_populates="members")
+    user: Mapped["UserModel"] = relationship("UserModel", back_populates="organization_memberships")
+
+
+class OrganizationInvitationModel(Base):
+    """One-time Workspace invitation represented by a hashed token."""
+
+    __tablename__ = "organization_invitations"
+    __table_args__ = (
+        Index("idx_organization_invitations_org_status", "org_id", "status"),
+        Index("idx_organization_invitations_token_hash", "token_hash", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    org_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    inviter_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    invitee_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="member")
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    accepted_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    organization: Mapped["OrganizationModel"] = relationship("OrganizationModel", back_populates="invitations")
+
+
+class OrganizationAuditLogModel(Base):
+    """Audit trail for Workspace membership and invitation mutations."""
+
+    __tablename__ = "organization_audit_logs"
+    __table_args__ = (Index("idx_organization_audit_logs_org_created", "org_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    org_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    target_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    target_invitation_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("organization_invitations.id", ondelete="SET NULL")
+    )
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
 class UserModel(Base):
@@ -82,6 +187,9 @@ class UserModel(Base):
     created_tables: Mapped[list["SemanticTableModel"]] = relationship("SemanticTableModel", back_populates="creator")
     approved_metrics: Mapped[list["SemanticMetricModel"]] = relationship(
         "SemanticMetricModel", back_populates="approver", foreign_keys="SemanticMetricModel.approved_by"
+    )
+    organization_memberships: Mapped[list["OrganizationMemberModel"]] = relationship(
+        "OrganizationMemberModel", back_populates="user", cascade="all, delete-orphan"
     )
 
 
@@ -159,6 +267,9 @@ class SemanticDatabaseModel(Base):
     __tablename__ = "semantic_databases"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    org_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True
+    )
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     db_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -170,6 +281,9 @@ class SemanticDatabaseModel(Base):
     )
 
     creator: Mapped["UserModel | None"] = relationship("UserModel", back_populates="databases")
+    organization: Mapped["OrganizationModel | None"] = relationship(
+        "OrganizationModel", back_populates="semantic_databases"
+    )
     tables: Mapped[list["SemanticTableModel"]] = relationship(
         "SemanticTableModel", back_populates="database", cascade="all, delete-orphan"
     )

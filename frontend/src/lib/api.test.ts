@@ -32,9 +32,9 @@ describe('semantic adapter', () => {
     const response = { sql: 'SELECT COUNT(*) FROM orders LIMIT 100', parameters: {}, columns: ['count'], rows: [[2]], row_count: 1 };
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
-    await executeSemanticQueryApi('5', { metric_ids: [7], dimension_ids: [11], filters: [], limit: 100 });
+    await executeSemanticQueryApi('5', { metric_ids: [7], dimensions: [{ column_id: 11 }], filters: [], limit: 100 });
     const payload = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
-    expect(payload).toEqual({ metric_ids: [7], dimension_ids: [11], filters: [], limit: 100 });
+    expect(payload).toEqual({ metric_ids: [7], dimensions: [{ column_id: 11 }], filters: [], limit: 100 });
     expect(payload).not.toHaveProperty('sql');
   });
 });

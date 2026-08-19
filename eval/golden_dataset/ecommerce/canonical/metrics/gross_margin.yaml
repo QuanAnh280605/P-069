@@ -1,0 +1,21 @@
+metric: gross_margin
+business_name: "Biên lợi nhuận gộp"
+domain: ecommerce
+metric_type: derived
+target_entity: order
+source_table: fact_orders
+aggregation: ratio
+field: null
+business_formula: "(Net Sales - COGS) / Net Sales"
+sql_expression: "(SUM(gross_amount - discount_amount - return_amount) - SUM(cogs_amount)) / SUM(gross_amount - discount_amount - return_amount)"
+dependencies: [net_revenue]
+description: "Tỷ lệ phần trăm lợi nhuận gộp trên doanh thu thuần, sau khi trừ giá vốn hàng bán (COGS)."
+default_filters:
+  - condition: "is_test_order = FALSE"
+allowed_dimensions: [order.order_date, order.channel, order.store_id]
+default_time_grain: month
+reference_source: "Shopify Analytics Fields"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#gross_margin"
+synonyms: ["biên lợi nhuận gộp", "gross margin", "gross profit margin"]

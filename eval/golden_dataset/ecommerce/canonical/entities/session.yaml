@@ -1,0 +1,41 @@
+entity: session
+table_mapping: fact_sessions
+business_name: "Phiên truy cập"
+description: "Fact phiên truy cập dùng để tính tỷ lệ chuyển đổi."
+synonyms: ["session", "visit", "lượt truy cập"]
+accepted_business_names: ["Phiên truy cập", "Lượt truy cập"]
+dimensions:
+  - name: session_id
+    business_name: "Mã phiên"
+    type: number
+    field: session_id
+    primary_key: true
+  - name: order_id
+    business_name: "Mã đơn hàng chuyển đổi"
+    type: number
+    field: order_id
+  - name: store_id
+    business_name: "Mã cửa hàng"
+    type: number
+    field: store_id
+  - name: channel
+    business_name: "Kênh truy cập"
+    type: string
+    field: channel
+  - name: device_type
+    business_name: "Loại thiết bị"
+    type: string
+    field: device_type
+  - name: is_bot_traffic
+    business_name: "Lưu lượng bot"
+    type: boolean
+    field: is_bot_traffic
+  - name: session_date
+    business_name: "Ngày truy cập"
+    type: time
+    field: session_date
+relationships:
+  - target_entity: order
+    relation_type: BELONGS_TO
+    join_condition: "fact_sessions.order_id = fact_orders.order_id"
+    inferred: false

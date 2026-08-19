@@ -300,6 +300,7 @@ async def create_live_target_db(
     display_name: str,
     dialect: str | SchemaDialect | None,
     conn_url: str,
+    org_id: int | None = None,
 ) -> LiveDbResponse:
     """Introspect live database, encrypt connection URL, and save record."""
     logger.info("Connecting and introspecting live target DB '%s'...", display_name)
@@ -332,6 +333,7 @@ async def create_live_target_db(
             user_id=user_id,
             display_name=display_name,
             dialect=resolved_dialect.value,
+            org_id=org_id,
         )
         model.semantic_db_id = semantic_db_id
         await db.commit()
@@ -358,13 +360,18 @@ async def create_live_target_db(
     return _model_to_response(model, raw_schema)
 
 
-async def list_live_target_dbs(db: AsyncSession, user_id: int) -> list[LiveDbSummaryResponse]:
+async def list_live_target_dbs(db: AsyncSession, user_id: int, org_id: int | None = None) -> list[LiveDbSummaryResponse]:
     """List live target databases owned by a user."""
-    stmt = (
-        select(LiveTargetDbModel)
-        .where(LiveTargetDbModel.created_by == user_id)
-        .order_by(LiveTargetDbModel.updated_at.desc())
-    )
+    stmt = select(LiveTargetDbModel).order_by(LiveTargetDbModel.updated_at.desc())
+    if org_id is None:
+        stmt = stmt.where(LiveTargetDbModel.created_by == user_id)
+    else:
+        stmt = stmt.outerjoin(
+            SemanticDatabaseModel, LiveTargetDbModel.semantic_db_id == SemanticDatabaseModel.id
+        ).where(
+            (SemanticDatabaseModel.org_id == org_id)
+            | ((SemanticDatabaseModel.org_id.is_(None)) & (LiveTargetDbModel.created_by == user_id))
+        )
     result = await db.execute(stmt)
     records = result.scalars().all()
     return [_model_to_summary(record) for record in records]
@@ -434,12 +441,20 @@ def _model_to_response(model: LiveTargetDbModel, raw_schema: RawSchemaMetadata) 
     )
 
 
-async def get_live_target_db(db: AsyncSession, user_id: int, db_id: int) -> LiveDbResponse | None:
+async def get_live_target_db(
+    db: AsyncSession, user_id: int, db_id: int, org_id: int | None = None
+) -> LiveDbResponse | None:
     """Retrieve one user-owned live target database by ID."""
-    stmt = select(LiveTargetDbModel).where(
-        LiveTargetDbModel.id == db_id,
-        LiveTargetDbModel.created_by == user_id,
-    )
+    stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.id == db_id)
+    if org_id is None:
+        stmt = stmt.where(LiveTargetDbModel.created_by == user_id)
+    else:
+        stmt = stmt.outerjoin(
+            SemanticDatabaseModel, LiveTargetDbModel.semantic_db_id == SemanticDatabaseModel.id
+        ).where(
+            (SemanticDatabaseModel.org_id == org_id)
+            | ((SemanticDatabaseModel.org_id.is_(None)) & (LiveTargetDbModel.created_by == user_id))
+        )
     result = await db.execute(stmt)
     record = result.scalar_one_or_none()
     if not record:
@@ -448,12 +463,20 @@ async def get_live_target_db(db: AsyncSession, user_id: int, db_id: int) -> Live
     return _model_to_response(record, raw_schema)
 
 
-async def delete_live_target_db(db: AsyncSession, user_id: int, db_id: int) -> bool:
+async def delete_live_target_db(
+    db: AsyncSession, user_id: int, db_id: int, org_id: int | None = None
+) -> bool:
     """Delete a user-owned live target database record and all related semantic layer metadata."""
-    stmt = select(LiveTargetDbModel).where(
-        LiveTargetDbModel.id == db_id,
-        LiveTargetDbModel.created_by == user_id,
-    )
+    stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.id == db_id)
+    if org_id is None:
+        stmt = stmt.where(LiveTargetDbModel.created_by == user_id)
+    else:
+        stmt = stmt.outerjoin(
+            SemanticDatabaseModel, LiveTargetDbModel.semantic_db_id == SemanticDatabaseModel.id
+        ).where(
+            (SemanticDatabaseModel.org_id == org_id)
+            | ((SemanticDatabaseModel.org_id.is_(None)) & (LiveTargetDbModel.created_by == user_id))
+        )
     result = await db.execute(stmt)
     record = result.scalar_one_or_none()
     if not record:

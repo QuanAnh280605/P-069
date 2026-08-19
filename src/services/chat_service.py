@@ -14,8 +14,10 @@ from src.models.db import (
     ChatMessageModel,
     ChatSessionModel,
     LiveTargetDbModel,
+    OrganizationMemberModel,
     SemanticDatabaseModel,
 )
+from src.services.organization_service import require_permission
 
 DEFAULT_SESSION_TITLE = "Cuộc trò chuyện mới"
 ALLOWED_SENDERS = {"user", "assistant", "system"}
@@ -26,16 +28,38 @@ class ChatAuthorizationError(Exception):
 
 
 async def get_chat_database(
-    db: AsyncSession, user_id: int, db_id: int, require_live: bool = True
+    db: AsyncSession, user_id: int, db_id: int, require_live: bool = True, org_id: int | None = None
 ) -> SemanticDatabaseModel:
     """Return an owned semantic database and optionally require a live source."""
-    stmt = select(SemanticDatabaseModel).where(
-        SemanticDatabaseModel.id == db_id,
-        SemanticDatabaseModel.created_by == user_id,
+    stmt = (
+        select(SemanticDatabaseModel)
+        .outerjoin(OrganizationMemberModel, OrganizationMemberModel.org_id == SemanticDatabaseModel.org_id)
+        .where(SemanticDatabaseModel.id == db_id)
     )
+    if org_id is not None:
+        stmt = stmt.where(
+            SemanticDatabaseModel.org_id == org_id,
+            OrganizationMemberModel.user_id == user_id,
+        )
+    else:
+        stmt = stmt.where(
+            (OrganizationMemberModel.user_id == user_id)
+            | ((SemanticDatabaseModel.org_id.is_(None)) & (SemanticDatabaseModel.created_by == user_id))
+        )
     database = (await db.execute(stmt)).scalar_one_or_none()
     if database is None:
         raise ChatAuthorizationError("Chat database not found")
+    membership = await db.scalar(
+        select(OrganizationMemberModel).where(
+            OrganizationMemberModel.org_id == database.org_id,
+            OrganizationMemberModel.user_id == user_id,
+        )
+    )
+    if membership is not None:
+        try:
+            require_permission(membership, "can_use_chat")
+        except PermissionError as exc:
+            raise ChatAuthorizationError("Workspace role cannot use AI Chat") from exc
     if require_live and not await _has_live_source(db, db_id):
         raise ChatAuthorizationError("Chat is only supported for live databases")
     return database
@@ -47,9 +71,11 @@ async def _has_live_source(db: AsyncSession, db_id: int) -> bool:
     return (await db.execute(stmt)).scalar_one_or_none() is not None
 
 
-async def create_chat_session(db: AsyncSession, user_id: int, db_id: int, title: str | None = None) -> ChatSessionModel:
+async def create_chat_session(
+    db: AsyncSession, user_id: int, db_id: int, title: str | None = None, org_id: int | None = None
+) -> ChatSessionModel:
     """Create a chat session after validating database ownership."""
-    await get_chat_database(db, user_id, db_id)
+    await get_chat_database(db, user_id, db_id, org_id=org_id)
     session = ChatSessionModel(
         id=str(uuid.uuid4()),
         user_id=user_id,
@@ -62,9 +88,11 @@ async def create_chat_session(db: AsyncSession, user_id: int, db_id: int, title:
     return session
 
 
-async def list_chat_sessions(db: AsyncSession, user_id: int, db_id: int, limit: int = 50) -> list[ChatSessionModel]:
+async def list_chat_sessions(
+    db: AsyncSession, user_id: int, db_id: int, limit: int = 50, org_id: int | None = None
+) -> list[ChatSessionModel]:
     """List owned sessions by most recently updated first."""
-    await get_chat_database(db, user_id, db_id)
+    await get_chat_database(db, user_id, db_id, org_id=org_id)
     safe_limit = min(max(limit, 1), 100)
     stmt = (
         select(ChatSessionModel)

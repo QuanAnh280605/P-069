@@ -1,0 +1,21 @@
+metric: cart_abandonment_rate
+business_name: "Tỷ lệ bỏ giỏ hàng"
+domain: ecommerce
+metric_type: derived
+target_entity: cart
+source_table: fact_carts
+aggregation: ratio
+field: null
+business_formula: "1 - (Completed Checkouts / Total Carts Created)"
+sql_expression: "1 - (COUNT(DISTINCT CASE WHEN checkout_completed = TRUE THEN cart_id END) / COUNT(DISTINCT cart_id))"
+dependencies: []
+description: "Tỷ lệ phần trăm giỏ hàng được tạo nhưng không hoàn tất thanh toán trên tổng số giỏ hàng."
+default_filters:
+  - condition: "is_test_order = FALSE"
+allowed_dimensions: [cart.cart_date, cart.channel, cart.device_type, cart.store_id]
+default_time_grain: day
+reference_source: "Shopify Analytics Fields"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#cart_abandonment_rate"
+synonyms: ["tỷ lệ bỏ giỏ", "cart abandonment rate"]

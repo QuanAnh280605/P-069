@@ -69,7 +69,13 @@ class AgentState(TypedDict, total=False):
 
     # Chat Orchestrator — Router output
     intent: str
-    """Kết quả phân loại intent: 'chitchat' hoặc 'metric_query'."""
+    """Intent: 'chitchat', 'data_question', or 'metric_query'."""
+
+    can_generate_metrics: bool
+    """Server-derived capability controlling metric-authoring routing."""
+
+    approved_metrics: list[dict[str, Any]]
+    """Approved metric context available to the read-only data assistant."""
 
     # Chitchat Agent — Output
     chat_response: str

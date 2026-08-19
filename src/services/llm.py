@@ -140,8 +140,62 @@ def _is_local_endpoint(base_url: str) -> bool:
     return hostname in _LOCAL_HOSTS if hostname else False
 
 
+def _required_judge_values(settings: Settings) -> tuple[str, str, str]:
+    """Return mandatory Judge provider, key, and model settings."""
+    values = (
+        (settings.judge_llm_provider.strip(), "JUDGE_LLM_PROVIDER is required"),
+        (settings.judge_api_key.strip(), "JUDGE_API_KEY is required"),
+        (settings.judge_model_name.strip(), "JUDGE_MODEL_NAME is required"),
+    )
+    for value, message in values:
+        if not value:
+            raise ValueError(message)
+    return values[0][0], values[1][0], values[2][0]
+
+
+def _resolve_judge_protocol(settings: Settings, provider: str) -> str:
+    """Resolve the dedicated Judge wire protocol."""
+    protocol = settings.judge_llm_protocol.lower().strip() or _PROTOCOL_BY_PROVIDER.get(provider, "openai")
+    if protocol not in _CLIENT_BUILDERS:
+        supported = ", ".join(sorted(_CLIENT_BUILDERS))
+        raise ValueError(f"JUDGE_LLM_PROTOCOL='{protocol}' is not supported. Supported protocols: {supported}.")
+    return protocol
+
+
+def _validate_judge_isolation(agent: LLMConfig, judge: LLMConfig) -> None:
+    """Reject a Judge that shares provider, model, or API key with the Agent."""
+    if judge.provider.casefold() == agent.provider.casefold():
+        raise ValueError("Judge provider must differ from Agent provider")
+    if judge.model.casefold() == agent.model.casefold():
+        raise ValueError("Judge model must differ from Agent model")
+    if judge.api_key == agent.api_key:
+        raise ValueError("Judge API key must differ from Agent API key")
+
+
+def _resolve_judge_config(settings: Settings) -> LLMConfig:
+    """Resolve the isolated Judge configuration without Agent fallback."""
+    raw_provider, api_key, model = _required_judge_values(settings)
+    provider = _PROVIDER_ALIASES.get(raw_provider.lower(), raw_provider.lower())
+    base_url = settings.judge_api_base or _provider_base_urls(settings).get(provider, "")
+    base_url = base_url.strip().rstrip("/")
+    if not base_url:
+        raise ValueError("JUDGE_API_BASE is required for an unknown Judge provider")
+    judge = LLMConfig(
+        provider=provider,
+        protocol=_resolve_judge_protocol(settings, provider),
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        temperature=0.0,
+    )
+    _validate_judge_isolation(_resolve_llm_config(settings), judge)
+    return judge
+
+
 def _resolve_llm_config(settings: Settings, role: str | None = None) -> LLMConfig:
-    """Resolve provider config with generic LLM_* overrides taking priority."""
+    """Resolve provider config with generic overrides or isolated Judge settings."""
+    if role == "judge":
+        return _resolve_judge_config(settings)
     provider = _resolve_provider(settings)
     base_url = _resolve_base_url(settings, provider)
     api_key = _resolve_api_key(settings, provider)
@@ -243,8 +297,9 @@ def get_llm(role: str | None = None) -> BaseChatModel:
     """Return a chat model client for the given role, reusing cached clients.
 
     Args:
-        role: Optional call-site role ("enrich" | "metric") selecting the
-            LLM_MODEL_<ROLE> override. None uses the global model config.
+        role: Optional call-site role. "enrich" and "metric" select their
+            model override; "judge" uses the isolated Judge configuration.
+            None uses the global Agent model configuration.
     """
     settings = _settings_with_hot_reload()
     config = _resolve_llm_config(settings, role=role)

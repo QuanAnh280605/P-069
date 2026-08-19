@@ -1,0 +1,24 @@
+{
+  "dataset_version": "2.0.1",
+  "contract_version": "2.0.0",
+  "domain": "ecommerce",
+  "language": "vi",
+  "supported_dialects": [
+    "postgresql",
+    "mysql",
+    "sqlite"
+  ],
+  "execution_dialect": "sqlite",
+  "review_status": "pending",
+  "approved_by": [],
+  "reviewed_at": null,
+  "frozen_evaluation_date": "2026-08-01T00:00:00Z",
+  "ground_truth_source": "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx",
+  "ground_truth_metric_count": 10,
+  "case_files": {
+    "discovery": "cases/discovery_cases.json",
+    "metric_definition": "cases/metric_definition_cases.json",
+    "query": "cases/query_cases.json",
+    "guardrail": "cases/guardrail_cases.json"
+  }
+}

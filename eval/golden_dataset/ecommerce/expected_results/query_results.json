@@ -1,0 +1,320 @@
+{
+  "ecommerce_query_001": [
+    {
+      "net_revenue": 3400
+    }
+  ],
+  "ecommerce_query_002": [
+    {
+      "channel": "marketplace",
+      "net_revenue": 550
+    },
+    {
+      "channel": "mobile",
+      "net_revenue": 1130
+    },
+    {
+      "channel": "web",
+      "net_revenue": 1720
+    }
+  ],
+  "ecommerce_query_003": [
+    {
+      "store_id": 1,
+      "net_revenue": 2450
+    },
+    {
+      "store_id": 2,
+      "net_revenue": 950
+    }
+  ],
+  "ecommerce_query_004": [
+    {
+      "month": "2026-07",
+      "net_revenue": 250
+    },
+    {
+      "month": "2026-08",
+      "net_revenue": 2070
+    },
+    {
+      "month": "2026-09",
+      "net_revenue": 1080
+    }
+  ],
+  "ecommerce_query_005": [
+    {
+      "order_count": 8
+    }
+  ],
+  "ecommerce_query_006": [
+    {
+      "channel": "marketplace",
+      "order_count": 3
+    },
+    {
+      "channel": "mobile",
+      "order_count": 2
+    },
+    {
+      "channel": "web",
+      "order_count": 3
+    }
+  ],
+  "ecommerce_query_007": [
+    {
+      "month": "2026-07",
+      "order_count": 1
+    },
+    {
+      "month": "2026-08",
+      "order_count": 4
+    },
+    {
+      "month": "2026-09",
+      "order_count": 3
+    }
+  ],
+  "ecommerce_query_008": [
+    {
+      "average_order_value": 377.77777777777777
+    }
+  ],
+  "ecommerce_query_009": [
+    {
+      "channel": "marketplace",
+      "average_order_value": 183.33333333333334
+    },
+    {
+      "channel": "mobile",
+      "average_order_value": 565.0
+    },
+    {
+      "channel": "web",
+      "average_order_value": 430.0
+    }
+  ],
+  "ecommerce_query_010": [
+    {
+      "month": "2026-07",
+      "average_order_value": 250.0
+    },
+    {
+      "month": "2026-08",
+      "average_order_value": 414.0
+    },
+    {
+      "month": "2026-09",
+      "average_order_value": 360.0
+    }
+  ],
+  "ecommerce_query_011": [
+    {
+      "conversion_rate": 0.6666666666666666
+    }
+  ],
+  "ecommerce_query_012": [
+    {
+      "channel": "marketplace",
+      "conversion_rate": 0.75
+    },
+    {
+      "channel": "mobile",
+      "conversion_rate": 0.6666666666666666
+    },
+    {
+      "channel": "web",
+      "conversion_rate": 0.6
+    }
+  ],
+  "ecommerce_query_013": [
+    {
+      "device_type": "desktop",
+      "conversion_rate": 0.6666666666666666
+    },
+    {
+      "device_type": "mobile",
+      "conversion_rate": 0.6666666666666666
+    }
+  ],
+  "ecommerce_query_014": [
+    {
+      "return_rate": 0.2222222222222222
+    }
+  ],
+  "ecommerce_query_015": [
+    {
+      "channel": "marketplace",
+      "return_rate": 0.6666666666666666
+    },
+    {
+      "channel": "mobile",
+      "return_rate": 0.0
+    },
+    {
+      "channel": "web",
+      "return_rate": 0.0
+    }
+  ],
+  "ecommerce_query_016": [
+    {
+      "month": "2026-07",
+      "return_rate": 0.0
+    },
+    {
+      "month": "2026-08",
+      "return_rate": 0.2
+    },
+    {
+      "month": "2026-09",
+      "return_rate": 0.3333333333333333
+    }
+  ],
+  "ecommerce_query_017": [
+    {
+      "units_sold": 24
+    }
+  ],
+  "ecommerce_query_018": [
+    {
+      "product_id": 101,
+      "units_sold": 6
+    },
+    {
+      "product_id": 102,
+      "units_sold": 8
+    },
+    {
+      "product_id": 103,
+      "units_sold": 6
+    },
+    {
+      "product_id": 104,
+      "units_sold": 4
+    }
+  ],
+  "ecommerce_query_019": [
+    {
+      "channel": "marketplace",
+      "units_sold": 6
+    },
+    {
+      "channel": "mobile",
+      "units_sold": 8
+    },
+    {
+      "channel": "web",
+      "units_sold": 10
+    }
+  ],
+  "ecommerce_query_020": [
+    {
+      "customer_count": 5
+    }
+  ],
+  "ecommerce_query_021": [
+    {
+      "channel": "marketplace",
+      "customer_count": 2
+    },
+    {
+      "channel": "mobile",
+      "customer_count": 1
+    },
+    {
+      "channel": "web",
+      "customer_count": 2
+    }
+  ],
+  "ecommerce_query_022": [
+    {
+      "store_id": 1,
+      "customer_count": 2
+    },
+    {
+      "store_id": 2,
+      "customer_count": 3
+    }
+  ],
+  "ecommerce_query_023": [
+    {
+      "returning_customer_rate": 0.6
+    }
+  ],
+  "ecommerce_query_024": [
+    {
+      "channel": "marketplace",
+      "returning_customer_rate": 0.5
+    },
+    {
+      "channel": "mobile",
+      "returning_customer_rate": 1.0
+    },
+    {
+      "channel": "web",
+      "returning_customer_rate": 0.5
+    }
+  ],
+  "ecommerce_query_025": [
+    {
+      "month": "2026-07",
+      "returning_customer_rate": 0.0
+    },
+    {
+      "month": "2026-08",
+      "returning_customer_rate": 0.25
+    },
+    {
+      "month": "2026-09",
+      "returning_customer_rate": 1.0
+    }
+  ],
+  "ecommerce_query_026": [
+    {
+      "cart_abandonment_rate": 0.4
+    }
+  ],
+  "ecommerce_query_027": [
+    {
+      "channel": "marketplace",
+      "cart_abandonment_rate": 0.33333333333333337
+    },
+    {
+      "channel": "mobile",
+      "cart_abandonment_rate": 0.33333333333333337
+    },
+    {
+      "channel": "web",
+      "cart_abandonment_rate": 0.5
+    }
+  ],
+  "ecommerce_query_028": [
+    {
+      "device_type": "desktop",
+      "cart_abandonment_rate": 0.6
+    },
+    {
+      "device_type": "mobile",
+      "cart_abandonment_rate": 0.19999999999999996
+    }
+  ],
+  "ecommerce_query_029": [
+    {
+      "gross_margin": 0.3588235294117647
+    }
+  ],
+  "ecommerce_query_030": [
+    {
+      "channel": "marketplace",
+      "gross_margin": 0.2727272727272727
+    },
+    {
+      "channel": "mobile",
+      "gross_margin": 0.3805309734513274
+    },
+    {
+      "channel": "web",
+      "gross_margin": 0.37209302325581395
+    }
+  ]
+}

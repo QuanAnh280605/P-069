@@ -99,6 +99,7 @@ async def ensure_semantic_database(
     user_id: int,
     display_name: str,
     dialect: str,
+    org_id: int | None = None,
 ) -> int:
     """Create or retrieve a SemanticDatabaseModel for a given source.
 
@@ -109,9 +110,13 @@ async def ensure_semantic_database(
     stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.conn_url_enc == conn_key)
     existing = (await db.execute(stmt)).scalar_one_or_none()
     if existing is not None:
+        if org_id is not None and existing.org_id is None:
+            existing.org_id = org_id
+            await db.flush()
         return existing.id
 
     record = SemanticDatabaseModel(
+        org_id=org_id,
         created_by=user_id,
         display_name=display_name,
         db_type=dialect,

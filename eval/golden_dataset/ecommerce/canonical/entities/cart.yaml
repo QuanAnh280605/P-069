@@ -1,0 +1,41 @@
+entity: cart
+table_mapping: fact_carts
+business_name: "Giỏ hàng"
+description: "Fact giỏ hàng dùng để tính tỷ lệ bỏ giỏ."
+synonyms: ["cart", "shopping cart", "giỏ mua hàng"]
+accepted_business_names: ["Giỏ hàng", "Giỏ mua hàng"]
+dimensions:
+  - name: cart_id
+    business_name: "Mã giỏ hàng"
+    type: number
+    field: cart_id
+    primary_key: true
+  - name: customer_id
+    business_name: "Mã khách hàng"
+    type: number
+    field: customer_id
+  - name: store_id
+    business_name: "Mã cửa hàng"
+    type: number
+    field: store_id
+  - name: channel
+    business_name: "Kênh tạo giỏ"
+    type: string
+    field: channel
+  - name: device_type
+    business_name: "Loại thiết bị"
+    type: string
+    field: device_type
+  - name: checkout_completed
+    business_name: "Đã hoàn tất checkout"
+    type: boolean
+    field: checkout_completed
+  - name: is_test_order
+    business_name: "Giỏ hàng test"
+    type: boolean
+    field: is_test_order
+  - name: cart_date
+    business_name: "Ngày tạo giỏ"
+    type: time
+    field: cart_date
+relationships: []

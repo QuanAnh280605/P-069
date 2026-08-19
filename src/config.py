@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     secret_key: str = "dev-secret-key-change-in-prod-semantic-layer-2026"
 
+    # Rate Limiting Guardrails
+    rate_limit_enabled: bool = False  # Enabled if True or if app_env == "production"
+    rate_limit_rpm: int = Field(default=15, ge=1, le=10000)
+
     # LLM Provider — any OpenAI-compatible endpoint name is accepted.
     # Known presets: openai | gemini | groq | mimo | anthropic.
     # Aliases: google -> gemini, claude -> anthropic.
@@ -49,6 +53,13 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     model_name: str = ""  # empty -> per-provider default in services/llm.py
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 0.0 for deterministic output
+
+    # AI Judge identity is mandatory and isolated when role="judge" is requested.
+    judge_llm_provider: str = ""
+    judge_llm_protocol: str = ""
+    judge_api_key: str = ""
+    judge_model_name: str = ""
+    judge_api_base: str = ""
 
     # LLM per-provider base URLs (used when LLM_API_BASE is empty)
     openai_api_base: str = "https://api.openai.com/v1"

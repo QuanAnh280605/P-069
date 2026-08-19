@@ -1,0 +1,73 @@
+entity: order
+table_mapping: fact_orders
+business_name: "Đơn hàng"
+description: "Fact đơn hàng dùng cho các metric doanh thu, khách hàng và hoàn trả."
+synonyms: ["order", "đơn mua", "giao dịch"]
+accepted_business_names: ["Đơn hàng", "Giao dịch bán hàng"]
+dimensions:
+  - name: order_id
+    business_name: "Mã đơn hàng"
+    type: number
+    field: order_id
+    primary_key: true
+  - name: customer_id
+    business_name: "Mã khách hàng"
+    type: number
+    field: customer_id
+  - name: store_id
+    business_name: "Mã cửa hàng"
+    type: number
+    field: store_id
+  - name: gross_amount
+    business_name: "Doanh thu gộp"
+    type: number
+    field: gross_amount
+  - name: discount_amount
+    business_name: "Giảm giá"
+    type: number
+    field: discount_amount
+  - name: return_amount
+    business_name: "Giá trị hoàn trả"
+    type: number
+    field: return_amount
+  - name: cogs_amount
+    business_name: "Giá vốn hàng bán"
+    type: number
+    field: cogs_amount
+  - name: order_status
+    business_name: "Trạng thái đơn hàng"
+    type: string
+    field: order_status
+  - name: is_test_order
+    business_name: "Đơn hàng test"
+    type: boolean
+    field: is_test_order
+  - name: channel
+    business_name: "Kênh bán hàng"
+    type: string
+    field: channel
+  - name: order_date
+    business_name: "Ngày đặt hàng"
+    type: time
+    field: order_date
+  - name: customer_order_seq
+    business_name: "Thứ tự đơn của khách"
+    type: number
+    field: customer_order_seq
+relationships:
+  - target_entity: customer
+    relation_type: BELONGS_TO
+    join_condition: "fact_orders.customer_id = customers.id"
+    inferred: false
+  - target_entity: order_item
+    relation_type: HAS_MANY
+    join_condition: "fact_orders.order_id = fact_order_items.order_id"
+    inferred: false
+  - target_entity: session
+    relation_type: HAS_MANY
+    join_condition: "fact_orders.order_id = fact_sessions.order_id"
+    inferred: false
+  - target_entity: payment
+    relation_type: HAS_MANY
+    join_condition: "fact_orders.order_id = payments.order_id"
+    inferred: false

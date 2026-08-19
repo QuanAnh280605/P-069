@@ -2,1373 +2,1439 @@
 
 import {
   AlertTriangle,
+  AreaChart as AreaChartIcon,
   BarChart3,
-  Box,
   Calendar,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
+  Check,
   Code2,
-  Database,
+  Copy,
+  Download,
   Eye,
   Filter,
   Layers,
+  LineChart as LineChartIcon,
   Loader2,
-  Lock,
-  MapPin,
+  PieChart as PieChartIcon,
   Play,
   Plus,
   RotateCcw,
-  Sparkles,
+  Search,
+  ShieldCheck,
   Table as TableIcon,
-  Tag,
-  Trash2,
-  User,
+  Table2,
+  TrendingUp,
   X,
+  Zap,
 } from 'lucide-react';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
-import { SqlCodeViewer } from '@/components/studio/SqlCodeViewer';
-import { AIQueryModal } from '@/components/explorer/AIQueryModal';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+
 import {
   CatalogColumn,
   CatalogTable,
   compileSemanticQueryApi,
   DimensionSelection,
   executeSemanticQueryApi,
-  FilterOperator,
+  getMetricRecommendedDimensionsApi,
+  MetricDimensionsResponse,
   MetricRecord,
+  RecommendedDimensionItem,
   SemanticApiError,
   SemanticCatalog,
-  SemanticQueryFilter,
   SemanticQueryPreview,
   SemanticQueryRequest,
   SemanticQueryResult,
-  SemanticQuerySpec,
   TimeGrain,
 } from '@/lib/api';
-import { coerceFilterValue, metricName } from '@/lib/metrics';
+import { cn } from '@/lib/utils';
+import { metricName } from '@/lib/metrics';
+import {
+  getDimensionCategory,
+  getDimensionCategoryBadge,
+  isBusinessDimension,
+  isTimeDimension,
+} from '@/lib/dimensions';
+import { SectionLabel, StatusPill, type WorkspaceDatabase } from '@/components/workspace/shared';
+import { ViewHeader } from '@/components/workspace/ViewHeader';
 
 interface Props {
   dbId?: number | null;
   metrics: MetricRecord[];
   catalog: SemanticCatalog | null;
   theme: 'light' | 'dark';
+  database?: WorkspaceDatabase | null;
 }
 
-interface DraftFilter {
-  column_id: number;
-  operator: FilterOperator;
-  raw: string;
+const TIME_GRAIN_OPTIONS: { label: string; value: TimeGrain; enLabel: string }[] = [
+  { label: 'Ngày', value: 'day', enLabel: 'Day' },
+  { label: 'Tuần', value: 'week', enLabel: 'Week' },
+  { label: 'Tháng', value: 'month', enLabel: 'Month' },
+  { label: 'Quý', value: 'quarter', enLabel: 'Quarter' },
+  { label: 'Năm', value: 'year', enLabel: 'Year' },
+];
+
+type ChartType = 'bar' | 'line' | 'area' | 'pie';
+
+const PIE_COLORS = [
+  '#3b82f6', // blue
+  '#10b981', // emerald
+  '#8b5cf6', // violet
+  '#f59e0b', // amber
+  '#ec4899', // pink
+  '#06b6d4', // cyan
+  '#6366f1', // indigo
+  '#14b8a6', // teal
+  '#f97316', // orange
+  '#84cc16', // lime
+];
+
+/**
+ * Format raw column aliases / keys into friendly Vietnamese business names.
+ */
+function formatColumnTitle(
+  colKey: string,
+  metadata?: Record<string, any>,
+  catalog?: SemanticCatalog | null,
+  metrics?: MetricRecord[],
+): string {
+  if (!colKey) return '';
+
+  // 1. Check compiler metadata map (e.g. metadata.dimensions['dimension_101'])
+  if (metadata?.dimensions && metadata.dimensions[colKey]) {
+    return metadata.dimensions[colKey];
+  }
+  if (metadata?.metrics && metadata.metrics[colKey]) {
+    return metadata.metrics[colKey];
+  }
+
+  // 2. Check pattern dimension_{id} or metric_{id}
+  const dimMatch = colKey.match(/^dimension_(\d+)$/i);
+  if (dimMatch && catalog) {
+    const colId = Number(dimMatch[1]);
+    for (const table of catalog.tables) {
+      const found = table.columns.find((c) => c.column_id === colId);
+      if (found) return found.business_name || found.column_name;
+    }
+  }
+
+  const metricMatch = colKey.match(/^metric_(\d+)$/i);
+  if (metricMatch && metrics) {
+    const mId = Number(metricMatch[1]);
+    const found = metrics.find((m) => m.metric_id === mId);
+    if (found) return found.name;
+  }
+
+  // 3. Check direct column match in catalog
+  if (catalog) {
+    for (const table of catalog.tables) {
+      const found = table.columns.find(
+        (c) => c.column_name.toLowerCase() === colKey.toLowerCase(),
+      );
+      if (found && found.business_name) return found.business_name;
+    }
+  }
+
+  // 4. Check direct metric match
+  if (metrics) {
+    const found = metrics.find(
+      (m) => m.name.toLowerCase() === colKey.toLowerCase(),
+    );
+    if (found) return found.name;
+  }
+
+  // 5. Clean up SQL aggregation names
+  if (/^SUM\((.+)\)$/i.test(colKey)) {
+    return `Tổng ${colKey.replace(/^SUM\((.+)\)$/i, '$1')}`;
+  }
+  if (/^AVG\((.+)\)$/i.test(colKey)) {
+    return `Trung bình ${colKey.replace(/^AVG\((.+)\)$/i, '$1')}`;
+  }
+  if (/^COUNT\((.+)\)$/i.test(colKey)) {
+    return `Số lượng ${colKey.replace(/^COUNT\((.+)\)$/i, '$1')}`;
+  }
+
+  return colKey;
 }
 
-const OPERATORS: { label: string; value: FilterOperator }[] = [
-  { label: '= (Bằng)', value: 'eq' },
-  { label: '≠ (Khác)', value: 'neq' },
-  { label: '> (Lớn hơn)', value: 'gt' },
-  { label: '≥ (Lớn hơn hoặc bằng)', value: 'gte' },
-  { label: '< (Nhỏ hơn)', value: 'lt' },
-  { label: '≤ (Nhỏ hơn hoặc bằng)', value: 'lte' },
-  { label: 'IN (Trong danh sách)', value: 'in' },
-  { label: 'NOT IN (Ngoài danh sách)', value: 'not_in' },
-  { label: 'IS NULL (Rỗng)', value: 'is_null' },
-  { label: 'IS NOT NULL (Không rỗng)', value: 'is_not_null' },
-];
+/**
+ * Format categorical / date dimension values according to data types.
+ */
+function formatDimensionValue(val: unknown): string {
+  if (val === null || val === undefined || val === '') return '(Trống)';
+  const str = String(val).trim();
 
-const TIME_GRAIN_OPTIONS: { label: string; value: TimeGrain | '' }[] = [
-  { label: 'Ngày', value: 'day' },
-  { label: 'Tuần', value: 'week' },
-  { label: 'Tháng', value: 'month' },
-  { label: 'Quý', value: 'quarter' },
-  { label: 'Năm', value: 'year' },
-  { label: 'Gốc', value: '' },
-];
+  // Boolean
+  if (val === true || str.toLowerCase() === 'true') return 'Có';
+  if (val === false || str.toLowerCase() === 'false') return 'Không';
 
-export function MetricExplorerView({ dbId, metrics, catalog, theme }: Props) {
+  // Date format: YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    const parts = str.split('T')[0].split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+  }
+
+  // Month format: YYYY-MM
+  if (/^\d{4}-\d{2}$/.test(str)) {
+    const [year, month] = str.split('-');
+    return `Tháng ${month}/${year}`;
+  }
+
+  // Week format: YYYY-Www or YYYY-ww
+  if (/^\d{4}-W?(\d{1,2})$/i.test(str)) {
+    const match = str.match(/^(\d{4})-W?(\d{1,2})$/i);
+    if (match) return `Tuần ${match[2]}/${match[1]}`;
+  }
+
+  // Quarter format: YYYY-Qx
+  if (/^\d{4}-Q(\d)$/i.test(str)) {
+    const match = str.match(/^(\d{4})-Q(\d)$/i);
+    if (match) return `Quý ${match[2]}/${match[1]}`;
+  }
+
+  // Year format: YYYY
+  if (/^\d{4}$/.test(str) && Number(str) >= 1990 && Number(str) <= 2100) {
+    return `Năm ${str}`;
+  }
+
+  return str;
+}
+
+/**
+ * Format metric numeric values for charts and axes.
+ */
+function formatShortNumber(num: number): string {
+  if (Math.abs(num) >= 1_000_000_000) {
+    return `${(num / 1_000_000_000).toFixed(1).replace(/\.0$/, '')} Tỷ`;
+  }
+  if (Math.abs(num) >= 1_000_000) {
+    return `${(num / 1_000_000).toFixed(1).replace(/\.0$/, '')} Tr`;
+  }
+  if (Math.abs(num) >= 1_000) {
+    return `${(num / 1_000).toFixed(1).replace(/\.0$/, '')} K`;
+  }
+  return num.toLocaleString();
+}
+
+export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: Props) {
   const [metricIds, setMetricIds] = useState<number[]>([]);
   const [dimensions, setDimensions] = useState<DimensionSelection[]>([]);
-  const [filters, setFilters] = useState<DraftFilter[]>([]);
   const [limit, setLimit] = useState(100);
   const [output, setOutput] = useState<SemanticQueryResult | SemanticQueryPreview | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [viewTab, setViewTab] = useState<'table' | 'chart' | 'sql'>('table');
-  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [chartType, setChartType] = useState<ChartType>('bar');
+  const [dimSearch, setDimSearch] = useState('');
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [recommendedDims, setRecommendedDims] = useState<RecommendedDimensionItem[]>([]);
+  const [loadingDims, setLoadingDims] = useState(false);
 
-  const handleAiResolved = (spec: SemanticQuerySpec) => {
-    if (spec.metric_ids && spec.metric_ids.length > 0) {
-      setMetricIds(spec.metric_ids);
-    }
-    if (spec.dimensions) {
-      setDimensions(spec.dimensions);
-    }
-    if (spec.filters && spec.filters.length > 0) {
-      setFilters(
-        spec.filters.map((f: SemanticQueryFilter) => ({
-          column_id: f.column_id,
-          operator: f.operator,
-          raw: String(f.value ?? ''),
-        }))
-      );
-    }
-  };
+  const approved = useMemo(
+    () => metrics.filter((item) => item.status === 'approved' && item.definition),
+    [metrics],
+  );
 
-  if (!catalog) return <State message="Đang tải semantic catalog..." />;
-  if (!catalog.query_supported) {
+  const selectedMetric = useMemo(
+    () => approved.find((m) => metricIds.includes(m.metric_id)),
+    [approved, metricIds],
+  );
+
+  const baseTable = useMemo(() => {
+    if (!catalog || !selectedMetric?.definition?.metric.base_entity) return null;
     return (
-      <State
-        warning
-        message="SQL Dump chỉ chứa metadata DDL và không hỗ trợ query. Hãy chọn Live DB."
-      />
+      catalog.tables.find(
+        (t) =>
+          t.table_name === selectedMetric.definition?.metric.base_entity ||
+          t.table_id === selectedMetric.definition?.metric.base_entity_id,
+      ) || null
+    );
+  }, [catalog, selectedMetric]);
+
+  const allColumns = useMemo(
+    () => (catalog ? catalog.tables.flatMap((table) => table.columns) : []),
+    [catalog],
+  );
+
+  // Time columns available contextually for the selected metric
+  const availableTimeColumns = useMemo(() => {
+    if (!catalog) return [];
+    if (baseTable) {
+      const baseTimeCols = baseTable.columns.filter((col) => isTimeDimension(col));
+      if (baseTimeCols.length > 0) return baseTimeCols;
+    }
+    return allColumns.filter((col) => isTimeDimension(col));
+  }, [catalog, baseTable, allColumns]);
+
+  // Fetch backend-recommended dimensions whenever selected metric changes
+  useEffect(() => {
+    if (!dbId || metricIds.length === 0) {
+      setRecommendedDims([]);
+      return;
+    }
+    const primaryMetricId = metricIds[0];
+    let isMounted = true;
+    setLoadingDims(true);
+
+    getMetricRecommendedDimensionsApi(dbId, primaryMetricId)
+      .then((res) => {
+        if (isMounted && res && Array.isArray(res.dimensions)) {
+          setRecommendedDims(res.dimensions);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load recommended dimensions from backend:', err);
+      })
+      .finally(() => {
+        if (isMounted) setLoadingDims(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [dbId, metricIds]);
+
+  const displayedDimensions = useMemo(() => {
+    if (!catalog || metricIds.length === 0) return [];
+
+    if (recommendedDims.length > 0 && !dimSearch.trim()) {
+      return recommendedDims;
+    }
+
+    if (dimSearch.trim()) {
+      const q = dimSearch.toLowerCase();
+      const list: RecommendedDimensionItem[] = [];
+      catalog.tables.forEach((t) => {
+        t.columns.forEach((c) => {
+          if (isBusinessDimension(c)) {
+            const matches =
+              c.column_name.toLowerCase().includes(q) ||
+              (c.business_name && c.business_name.toLowerCase().includes(q)) ||
+              t.table_name.toLowerCase().includes(q);
+            if (matches) {
+              list.push({
+                column_id: c.column_id,
+                column_name: c.column_name,
+                business_name: c.business_name || c.column_name,
+                table_id: t.table_id,
+                table_name: t.table_name,
+                table_business_name: t.business_name || t.table_name,
+                tier: 'A',
+                tier_label: 'Tìm kiếm',
+                is_safe_join: true,
+                requires_reaggregation: false,
+                data_type: c.data_type,
+              });
+            }
+          }
+        });
+      });
+      return list;
+    }
+
+    if (!baseTable) return [];
+    return baseTable.columns
+      .filter((c) => isBusinessDimension(c))
+      .map((c) => ({
+        column_id: c.column_id,
+        column_name: c.column_name,
+        business_name: c.business_name || c.column_name,
+        table_id: baseTable.table_id,
+        table_name: baseTable.table_name,
+        table_business_name: baseTable.business_name || baseTable.table_name,
+        tier: 'A' as const,
+        tier_label: 'Trực tiếp',
+        is_safe_join: true,
+        requires_reaggregation: false,
+        data_type: c.data_type,
+      }));
+  }, [metricIds, recommendedDims, dimSearch, catalog, baseTable]);
+
+  if (!catalog) {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-12 text-center text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <p className="text-sm">Đang tải semantic catalog...</p>
+      </div>
     );
   }
 
-  const approved = metrics.filter((item) => item.status === 'approved' && item.definition);
-  const allColumns = catalog.tables.flatMap((table) => table.columns);
-
-  // 🧠 Compute reachable tables based on selected metric's base entity & relationships
-  const reachableTableIds = useMemo(
-    () => getReachableTableIds(metricIds, approved, catalog),
-    [metricIds, approved, catalog]
-  );
-
-  // Auto-deselect dimensions that become unreachable when selected metrics change
-  React.useEffect(() => {
-    if (metricIds.length > 0 && reachableTableIds && catalog) {
-      setDimensions((prev) => {
-        const next = prev.filter((dim) => {
-          const table = catalog.tables.find((t) => t.columns.some((c) => c.column_id === dim.column_id));
-          return table ? reachableTableIds.has(table.table_id) : true;
-        });
-        return next.length === prev.length ? prev : next;
-      });
-    }
-  }, [metricIds, reachableTableIds, catalog]);
+  if (!catalog.query_supported) {
+    return (
+      <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
+        <ViewHeader
+          title="Metric Explorer"
+          description="Compile approved metrics into safe queries — no manual SQL required."
+          database={database}
+        />
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-12 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-500">
+            <AlertTriangle className="h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="font-semibold text-foreground text-sm">Chế độ xem Technical Preview</h2>
+            <p className="mt-1 text-xs text-muted-foreground max-w-md">
+              SQL Dump chỉ chứa metadata DDL và không hỗ trợ query. Hãy chọn Live DB.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const request = (): SemanticQueryRequest => ({
     metric_ids: metricIds,
     dimensions,
-    filters: buildFilters(filters),
+    filters: [],
     limit,
   });
 
-  const submit = async (preview: boolean) => {
-    if (!dbId || !metricIds.length) {
-      return setError('Vui lòng chọn ít nhất một metric đã phê duyệt để thực thi.');
+  const toggleMetric = (id: number) => {
+    setMetricIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
+  };
+
+  const toggleDimension = (columnId: number) => {
+    setDimensions((prev) =>
+      prev.some((item) => item.column_id === columnId)
+        ? prev.filter((item) => item.column_id !== columnId)
+        : [...prev, { column_id: columnId, time_grain: undefined }],
+    );
+  };
+
+  const selectedTimeDimension = dimensions.find((d) => {
+    const col = allColumns.find((c) => c.column_id === d.column_id);
+    return col && isTimeDimension(col);
+  });
+
+  const setTimeDimensionColumn = (columnIdStr: string) => {
+    if (!columnIdStr) {
+      setDimensions((prev) =>
+        prev.filter((d) => {
+          const col = allColumns.find((c) => c.column_id === d.column_id);
+          return !col || !isTimeDimension(col);
+        }),
+      );
+      return;
     }
+    const columnId = Number(columnIdStr);
+    const existingGrain = selectedTimeDimension?.time_grain || 'month';
+    setDimensions((prev) => {
+      const nonTime = prev.filter((d) => {
+        const col = allColumns.find((c) => c.column_id === d.column_id);
+        return !col || !isTimeDimension(col);
+      });
+      return [...nonTime, { column_id: columnId, time_grain: existingGrain }];
+    });
+  };
+
+  const setTimeGrain = (grain: TimeGrain | '') => {
+    if (grain === '') {
+      if (selectedTimeDimension) {
+        setDimensions((prev) =>
+          prev.map((item) =>
+            item.column_id === selectedTimeDimension.column_id
+              ? { ...item, time_grain: undefined }
+              : item,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (!selectedTimeDimension) {
+      const primaryTimeCol =
+        availableTimeColumns[0] || allColumns.find((col) => isTimeDimension(col));
+      if (primaryTimeCol) {
+        const alreadySelected = dimensions.some((d) => d.column_id === primaryTimeCol.column_id);
+        if (alreadySelected) {
+          setDimensions((prev) =>
+            prev.map((d) =>
+              d.column_id === primaryTimeCol.column_id ? { ...d, time_grain: grain } : d,
+            ),
+          );
+        } else {
+          setDimensions((prev) => [
+            ...prev,
+            { column_id: primaryTimeCol.column_id, time_grain: grain },
+          ]);
+        }
+      }
+      return;
+    }
+
+    setDimensions((prev) =>
+      prev.map((item) =>
+        item.column_id === selectedTimeDimension.column_id
+          ? { ...item, time_grain: grain }
+          : item,
+      ),
+    );
+  };
+
+  const handleReset = () => {
+    setMetricIds([]);
+    setDimensions([]);
+    setOutput(null);
+    setError('');
+  };
+
+  const runCompile = async () => {
+    if (!metricIds.length || !dbId) return;
     setLoading(true);
     setError('');
     try {
-      const result = preview
-        ? await compileSemanticQueryApi(String(dbId), request())
-        : await executeSemanticQueryApi(String(dbId), request());
-      setOutput(result);
-      if (preview) setViewTab('sql');
-    } catch (caught) {
-      setError(queryError(caught));
+      const res = await compileSemanticQueryApi(String(dbId), request());
+      setOutput(res);
+      setViewTab('sql');
+    } catch (err) {
+      setError(err instanceof SemanticApiError ? err.message : 'Không thể compile query.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleClearAll = () => {
-    setMetricIds([]);
-    setDimensions([]);
-    setFilters([]);
-    setOutput(null);
+  const runExecute = async () => {
+    if (!metricIds.length || !dbId) return;
+    setLoading(true);
     setError('');
+    try {
+      const res = await executeSemanticQueryApi(String(dbId), request());
+      setOutput(res);
+      setViewTab('table');
+    } catch (err) {
+      setError(err instanceof SemanticApiError ? err.message : 'Lỗi thực thi Live DB.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopySql = () => {
+    if (!output?.sql) return;
+    void navigator.clipboard.writeText(output.sql);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2000);
+  };
+
+  const handleExportCsv = () => {
+    if (!output || !isQueryResult(output)) return;
+    const header = output.columns
+      .map((c) => formatColumnTitle(c, output.metadata, catalog, approved))
+      .join(',');
+    const rowsStr = output.rows.map((row) => row.map((v) => `"${String(v ?? '')}"`).join(','));
+    const csvContent = 'data:text/csv;charset=utf-8,' + [header, ...rowsStr].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `semantic_query_export_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
-    <div className="space-y-4">
-      {/* 🧭 Top Banner: Natural Query Summary Bar */}
-      <QuerySummaryBanner
-        selectedMetrics={approved.filter((m) => metricIds.includes(m.metric_id))}
-        selectedDimensions={dimensions}
-        allColumns={allColumns}
-        filters={filters}
-        onRemoveMetric={(id) => setMetricIds(metricIds.filter((item) => item !== id))}
-        onRemoveDimension={(colId) => setDimensions(dimensions.filter((item) => item.column_id !== colId))}
-        onRemoveFilter={(idx) => setFilters(filters.filter((_, i) => i !== idx))}
-        onClearAll={handleClearAll}
-        onOpenAiModal={() => setIsAiModalOpen(true)}
+    <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
+      <ViewHeader
+        title="Metric Explorer"
+        description="Compile approved metrics into safe queries — no manual SQL required."
+        database={database}
       />
 
-      {/* Main Grid: Left Controls Sidebar & Right Result Panel */}
-      <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
-        {/* Sidebar Controls */}
-        <aside className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4.5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          {/* Section 1: Metrics */}
-          <MetricSelector metrics={approved} selected={metricIds} onChange={setMetricIds} />
-
-          {/* Section 2: Dimensions grouped by Table with Reachability Filter */}
-          <GroupedDimensionSelector
-            tables={catalog.tables}
-            selected={dimensions}
-            reachableTableIds={reachableTableIds}
-            hasSelectedMetrics={metricIds.length > 0}
-            onChange={setDimensions}
-          />
-
-          {/* Section 3: Runtime Filters */}
-          <RuntimeFilters filters={filters} columns={allColumns} onChange={setFilters} />
-
-          {/* Section 4: Limit & Action Buttons */}
-          <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+      <div className="flex min-h-0 flex-1">
+        {/* Left Config Panel */}
+        <div className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border p-4.5 bg-card/40">
+          {/* Question Summary Banner */}
+          <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">
-                Giới hạn dòng (LIMIT)
-              </label>
-              <div className="flex gap-1">
-                {[50, 100, 500, 1000].map((val) => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => setLimit(val)}
-                    className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-all ${
-                      limit === val
-                        ? 'bg-indigo-600 text-white font-bold'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
-                    }`}
-                  >
-                    {val}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => void submit(true)}
-                disabled={loading || !metricIds.length}
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-indigo-500/80 py-2.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50/50 disabled:opacity-40 transition-all dark:text-indigo-400 dark:hover:bg-indigo-950/40 cursor-pointer"
-              >
-                <Eye className="h-4 w-4" />
-                Preview SQL
-              </button>
-
-              <button
-                type="button"
-                onClick={() => void submit(false)}
-                disabled={loading || !metricIds.length}
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 py-2.5 text-xs font-bold text-white shadow-md shadow-indigo-500/20 hover:from-indigo-500 hover:to-indigo-600 disabled:opacity-40 transition-all cursor-pointer"
-              >
-                {loading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Play className="h-4 w-4 fill-white" />
-                )}
-                Thực thi (Execute)
-              </button>
-            </div>
-
-            {error && (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
-                <p className="font-semibold mb-0.5">Lỗi thực thi:</p>
-                {error}
-              </div>
-            )}
-          </div>
-        </aside>
-
-        {/* Main Result Workspace */}
-        <main className="min-w-0">
-          <ResultPanel
-            output={output}
-            theme={theme}
-            metrics={approved}
-            catalog={catalog}
-            viewTab={viewTab}
-            onTabChange={setViewTab}
-          />
-        </main>
-      </div>
-
-      {/* Guided Wizard AI Query Modal */}
-      {dbId && (
-        <AIQueryModal
-          isOpen={isAiModalOpen}
-          dbId={dbId}
-          theme={theme}
-          onClose={() => setIsAiModalOpen(false)}
-          onResolved={handleAiResolved}
-        />
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 🧠 Reachable Tables Logic (Semantic Safe Path Checking)
-// ---------------------------------------------------------------------------
-
-function getReachableTableIds(
-  selectedMetricIds: number[],
-  metrics: MetricRecord[],
-  catalog: SemanticCatalog | null
-): Set<number> | null {
-  if (!catalog || selectedMetricIds.length === 0) return null;
-
-  const selectedMetrics = metrics.filter((m) => selectedMetricIds.includes(m.metric_id));
-  if (selectedMetrics.length === 0) return null;
-
-  const baseTableIds = new Set<number>();
-  for (const m of selectedMetrics) {
-    const metricBaseId =
-      m.definition?.metric.base_entity_id ||
-      (m as { base_entity_id?: number }).base_entity_id;
-    const metricBaseName = (m.definition?.metric.base_entity || '').toLowerCase().trim();
-
-    if (metricBaseId && catalog.tables.some((t) => t.table_id === metricBaseId)) {
-      baseTableIds.add(metricBaseId);
-    } else if (metricBaseName) {
-      const cleanBaseName = metricBaseName.includes('.')
-        ? metricBaseName.split('.').pop()!
-        : metricBaseName;
-      const found = catalog.tables.find((t) => {
-        const cleanTableName = t.table_name.toLowerCase().includes('.')
-          ? t.table_name.toLowerCase().split('.').pop()!
-          : t.table_name.toLowerCase();
-        return (
-          cleanTableName === cleanBaseName ||
-          t.table_name.toLowerCase() === metricBaseName ||
-          t.business_name?.toLowerCase() === metricBaseName
-        );
-      });
-      if (found) baseTableIds.add(found.table_id);
-    }
-  }
-
-  // If no base table could be resolved, return an empty set rather than null, so user is protected
-  if (baseTableIds.size === 0) {
-    return new Set<number>();
-  }
-
-  // Build adjacency graph from relationships (many-to-one links)
-  const graph = new Map<number, number[]>();
-  for (const rel of catalog.relationships || []) {
-    const relType = (rel as { relationship_type?: string }).relationship_type?.toLowerCase() || 'many_to_one';
-    if (relType === 'many_to_one' || relType === 'many-to-one') {
-      const list = graph.get(rel.from_entity_id) || [];
-      list.push(rel.to_entity_id);
-      graph.set(rel.from_entity_id, list);
-    }
-  }
-
-  const reachable = new Set<number>();
-  for (const baseId of baseTableIds) {
-    reachable.add(baseId);
-    const queue = [baseId];
-    const visited = new Set<number>([baseId]);
-
-    while (queue.length > 0) {
-      const curr = queue.shift()!;
-      const neighbors = graph.get(curr) || [];
-      for (const next of neighbors) {
-        if (!visited.has(next)) {
-          visited.add(next);
-          reachable.add(next);
-          queue.push(next);
-        }
-      }
-    }
-  }
-
-  return reachable;
-}
-
-// ---------------------------------------------------------------------------
-// 🧭 Query Summary Banner (Natural Question Builder)
-// ---------------------------------------------------------------------------
-
-function QuerySummaryBanner({
-  selectedMetrics,
-  selectedDimensions,
-  allColumns,
-  filters,
-  onRemoveMetric,
-  onRemoveDimension,
-  onRemoveFilter,
-  onClearAll,
-  onOpenAiModal,
-}: {
-  selectedMetrics: MetricRecord[];
-  selectedDimensions: DimensionSelection[];
-  allColumns: CatalogColumn[];
-  filters: DraftFilter[];
-  onRemoveMetric: (id: number) => void;
-  onRemoveDimension: (colId: number) => void;
-  onRemoveFilter: (idx: number) => void;
-  onClearAll: () => void;
-  onOpenAiModal?: () => void;
-}) {
-  const hasSelections = selectedMetrics.length > 0 || selectedDimensions.length > 0 || filters.length > 0;
-
-  return (
-    <div className="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50/70 via-white to-purple-50/70 p-4 shadow-xs dark:border-indigo-950/50 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/30">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100/60 pb-2.5 dark:border-slate-800">
-        <div className="flex items-center gap-2 text-xs font-bold text-indigo-900 dark:text-indigo-300">
-          <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-          <span>CÂU HỎI PHÂN TÍCH HIỆN TẠI</span>
-        </div>
-        <div className="flex items-center gap-3">
-          {onOpenAiModal && (
-            <button
-              type="button"
-              onClick={onOpenAiModal}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors shadow-xs cursor-pointer"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              ✨ AI Assistant
-            </button>
-          )}
-          {hasSelections && (
-            <button
-              type="button"
-              onClick={onClearAll}
-              className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400 cursor-pointer"
-            >
-              <RotateCcw className="h-3 w-3" />
-              Làm mới bộ chọn
-            </button>
-          )}
-        </div>
-      </div>
-
-      {!hasSelections ? (
-        <p className="mt-2.5 text-xs text-slate-500 italic dark:text-slate-400">
-          👉 Hãy chọn ít nhất một <strong>Metric (Chỉ số)</strong> ở thanh bên trái để bắt đầu tạo câu hỏi phân tích.
-        </p>
-      ) : (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs leading-relaxed">
-          {/* Metrics Chips */}
-          <span className="font-semibold text-slate-600 dark:text-slate-400">Đo lường:</span>
-          {selectedMetrics.length === 0 ? (
-            <span className="rounded-lg border border-dashed border-amber-300 bg-amber-50/80 px-2.5 py-1 text-[11px] font-medium text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
-              Chưa chọn metric
-            </span>
-          ) : (
-            selectedMetrics.map((metric) => (
-              <span
-                key={metric.metric_id}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-100/80 px-2.5 py-1 font-semibold text-indigo-900 shadow-2xs dark:border-indigo-800 dark:bg-indigo-950/80 dark:text-indigo-200"
-              >
-                <Tag className="h-3 w-3 text-indigo-600 dark:text-indigo-400" />
-                {metricName(metric)}
-                <button
-                  type="button"
-                  onClick={() => onRemoveMetric(metric.metric_id)}
-                  className="rounded hover:bg-indigo-200 dark:hover:bg-indigo-800 cursor-pointer p-0.5"
-                  title="Bỏ chọn"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+              <span className="font-mono text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                CÂU HỎI PHÂN TÍCH HIỆN TẠI
               </span>
-            ))
-          )}
-
-          {/* Dimensions Chips */}
-          <span className="ml-2 font-semibold text-slate-600 dark:text-slate-400">➔ Cắt lát theo:</span>
-          {selectedDimensions.length === 0 ? (
-            <span className="text-[11px] text-slate-400 italic">Tổng toàn cục (không gom nhóm)</span>
-          ) : (
-            selectedDimensions.map((dim) => {
-              const col = allColumns.find((c) => c.column_id === dim.column_id);
-              const name = col?.business_name || col?.column_name || `Cột #${dim.column_id}`;
-              const grainText = dim.time_grain ? ` (${translateGrain(dim.time_grain)})` : '';
-              return (
-                <span
-                  key={dim.column_id}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-100/80 px-2.5 py-1 font-semibold text-purple-900 shadow-2xs dark:border-purple-800 dark:bg-purple-950/80 dark:text-purple-200"
+              {(metricIds.length > 0 || dimensions.length > 0) && (
+                <button
+                  onClick={handleReset}
+                  className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
                 >
-                  {col?.is_time_dimension ? (
-                    <Calendar className="h-3 w-3 text-purple-600 dark:text-purple-400" />
-                  ) : (
-                    <MapPin className="h-3 w-3 text-purple-600 dark:text-purple-400" />
-                  )}
-                  {name}
-                  {grainText}
-                  <button
-                    type="button"
-                    onClick={() => onRemoveDimension(dim.column_id)}
-                    className="rounded hover:bg-purple-200 dark:hover:bg-purple-800 cursor-pointer p-0.5"
-                    title="Bỏ chọn"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              );
-            })
-          )}
-
-          {/* Filters Chips */}
-          {filters.length > 0 && (
-            <>
-              <span className="ml-2 font-semibold text-slate-600 dark:text-slate-400">➔ Bộ lọc:</span>
-              {filters.map((flt, idx) => {
-                const col = allColumns.find((c) => c.column_id === flt.column_id);
-                const colName = col?.business_name || col?.column_name || `Cột #${flt.column_id}`;
-                return (
-                  <span
-                    key={idx}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                  >
-                    <Filter className="h-3 w-3 text-slate-500" />
-                    {colName} {flt.operator} {flt.raw ? `"${flt.raw}"` : ''}
-                    <button
-                      type="button"
-                      onClick={() => onRemoveFilter(idx)}
-                      className="rounded hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer p-0.5"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
+                  <RotateCcw className="h-2.5 w-2.5" />
+                  <span>Đặt lại</span>
+                </button>
+              )}
+            </div>
+            <div className="mt-1.5 space-y-1">
+              <p className="font-medium text-foreground leading-relaxed">
+                {metricIds.length > 0 ? (
+                  <span className="text-primary font-semibold">
+                    Xem{' '}
+                    {metricIds
+                      .map((id) => approved.find((m) => m.metric_id === id)?.name || id)
+                      .join(', ')}
                   </span>
+                ) : (
+                  <span className="text-muted-foreground italic">
+                    Chưa chọn chỉ số (Chọn ít nhất 1 metric)
+                  </span>
+                )}
+                {dimensions.length > 0 && (
+                  <span className="text-foreground">
+                    {' '}
+                    theo{' '}
+                    <span className="font-semibold">
+                      {dimensions
+                        .map((d) => {
+                          const col = allColumns.find((c) => c.column_id === d.column_id);
+                          const name = col?.business_name || col?.column_name || d.column_id;
+                          return d.time_grain ? `${name} (${d.time_grain})` : name;
+                        })
+                        .join(', ')}
+                    </span>
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+
+
+          {/* 1. Metrics Selector */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <SectionLabel>1. CHỈ SỐ ĐO LƯỜNG ({approved.length})</SectionLabel>
+              <span className="text-[10px] text-muted-foreground font-mono">Measures</span>
+            </div>
+
+            <div className="space-y-1.5">
+              {approved.map((m) => {
+                const checked = metricIds.includes(m.metric_id);
+                const formulaFn = m.definition?.metric.formula.function || 'SUM';
+                return (
+                  <label
+                    key={m.metric_id}
+                    className={cn(
+                      'flex cursor-pointer items-center justify-between gap-2 rounded-lg border p-2 text-xs transition-all',
+                      checked
+                        ? 'border-primary bg-primary/10 text-foreground shadow-2xs'
+                        : 'border-border bg-card text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+                    )}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleMetric(m.metric_id)}
+                        className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
+                      />
+                      <span className="font-medium truncate">{metricName(m)}</span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="rounded bg-secondary/80 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-primary">
+                        {formulaFn}
+                      </span>
+                      {m.definition?.metric.base_entity && (
+                        <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
+                          {m.definition.metric.base_entity}
+                        </span>
+                      )}
+                    </div>
+                  </label>
                 );
               })}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+              {approved.length === 0 && (
+                <p className="p-2 text-xs text-muted-foreground italic">
+                  Chưa có metric nào được phê duyệt. Hãy duyệt trong Catalog trước.
+                </p>
+              )}
+            </div>
+          </div>
 
-// ---------------------------------------------------------------------------
-// 📦 Section 1: Metric Selector
-// ---------------------------------------------------------------------------
+          {/* 2. Dimensions Selector */}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <SectionLabel>
+                  2. CHIỀU PHÂN TÍCH ({displayedDimensions.length})
+                </SectionLabel>
+                {loadingDims && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
+              </div>
+              <span className="text-[10px] text-muted-foreground font-mono">Dimensions</span>
+            </div>
 
-function MetricSelector({
-  metrics,
-  selected,
-  onChange,
-}: {
-  metrics: MetricRecord[];
-  selected: number[];
-  onChange: (ids: number[]) => void;
-}) {
-  return (
-    <section className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
-          <Tag className="h-3.5 w-3.5 text-indigo-500" />
-          1. CHỈ SỐ ĐO LƯỜNG (METRICS)
-        </h3>
-        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
-          {metrics.length} chỉ số
-        </span>
-      </div>
-
-      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-        {metrics.length === 0 ? (
-          <p className="text-xs text-slate-400 italic p-2 border rounded-xl">
-            Chưa có metric nào được phê duyệt.
-          </p>
-        ) : (
-          metrics.map((metric) => {
-            const isChecked = selected.includes(metric.metric_id);
-            return (
-              <label
-                key={metric.metric_id}
-                className={`group flex cursor-pointer items-start gap-2.5 rounded-xl border p-2.5 text-xs transition-all ${
-                  isChecked
-                    ? 'border-indigo-500 bg-indigo-50/70 shadow-xs dark:border-indigo-500/80 dark:bg-indigo-950/50 dark:hover:bg-indigo-950/70 hover:bg-indigo-50'
-                    : 'border-slate-200 bg-slate-50/50 hover:border-indigo-300 hover:bg-indigo-50/30 dark:border-slate-800 dark:bg-slate-800/40 dark:hover:border-indigo-500/60 dark:hover:bg-slate-800/90'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={isChecked}
-                  onChange={() => onChange(toggle(selected, metric.metric_id))}
-                  className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="font-bold text-slate-800 dark:text-slate-100">
-                      {metricName(metric)}
-                    </span>
-                    {metric.definition?.metric.formula.function && (
-                      <span className="rounded bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-300">
-                        {metric.definition.metric.formula.function}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span className="inline-flex items-center gap-1 font-mono">
-                      <Box className="h-3 w-3" />
-                      {metric.definition?.metric.base_entity}
-                    </span>
-                    {metric.definition?.metric.filters && metric.definition.metric.filters.length > 0 && (
-                      <span className="rounded-sm bg-amber-100 px-1 text-[10px] text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                        {metric.definition.metric.filters.length} bộ lọc
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </label>
-            );
-          })
-        )}
-      </div>
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 🗂️ Section 2: Grouped Dimension Selector by Entity (Table Accordion)
-// ---------------------------------------------------------------------------
-
-function GroupedDimensionSelector({
-  tables,
-  selected,
-  reachableTableIds,
-  hasSelectedMetrics,
-  onChange,
-}: {
-  tables: CatalogTable[];
-  selected: DimensionSelection[];
-  reachableTableIds: Set<number> | null;
-  hasSelectedMetrics: boolean;
-  onChange: (items: DimensionSelection[]) => void;
-}) {
-  const [expandedTables, setExpandedTables] = useState<number[]>(() => {
-    if (!hasSelectedMetrics || !reachableTableIds) {
-      return tables.map((t) => t.table_id);
-    }
-    return tables.filter((t) => reachableTableIds.has(t.table_id)).map((t) => t.table_id);
-  });
-
-  const [onlyShowReachable, setOnlyShowReachable] = useState<boolean>(true);
-
-  // Auto-expand reachable tables and collapse unreachable tables when selected metrics change
-  React.useEffect(() => {
-    if (hasSelectedMetrics && reachableTableIds) {
-      const nextExpanded = tables.filter((t) => reachableTableIds.has(t.table_id)).map((t) => t.table_id);
-      setExpandedTables((prev) => {
-        if (prev.length === nextExpanded.length && prev.every((id, idx) => id === nextExpanded[idx])) {
-          return prev;
-        }
-        return nextExpanded;
-      });
-    }
-  }, [hasSelectedMetrics, reachableTableIds, tables]);
-
-  const toggleTable = (tableId: number) => {
-    setExpandedTables((prev) =>
-      prev.includes(tableId) ? prev.filter((id) => id !== tableId) : [...prev, tableId]
-    );
-  };
-
-  const updateGrain = (columnId: number, grain: string) => {
-    onChange(
-      selected.map((item) =>
-        item.column_id === columnId
-          ? { ...item, time_grain: (grain || null) as TimeGrain | null }
-          : item
-      )
-    );
-  };
-
-  const toggleDimension = (columnId: number) => {
-    const exists = selected.some((item) => item.column_id === columnId);
-    if (exists) {
-      onChange(selected.filter((item) => item.column_id !== columnId));
-    } else {
-      onChange([...selected, { column_id: columnId }]);
-    }
-  };
-
-  // Sort tables: Reachable tables first, unreachable tables at the bottom
-  const sortedTables = useMemo(() => {
-    if (!hasSelectedMetrics || !reachableTableIds) return tables;
-    const reachable = tables.filter((t) => reachableTableIds.has(t.table_id));
-    const unreachable = tables.filter((t) => !reachableTableIds.has(t.table_id));
-    return onlyShowReachable ? reachable : [...reachable, ...unreachable];
-  }, [tables, hasSelectedMetrics, reachableTableIds, onlyShowReachable]);
-
-  const unreachableCount = useMemo(() => {
-    if (!hasSelectedMetrics || !reachableTableIds) return 0;
-    return tables.filter((t) => !reachableTableIds.has(t.table_id)).length;
-  }, [tables, hasSelectedMetrics, reachableTableIds]);
-
-  return (
-    <section className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
-          <Layers className="h-3.5 w-3.5 text-purple-500" />
-          2. CHIỀU PHÂN TÍCH (DIMENSIONS)
-        </h3>
-        <span className="text-[11px] font-medium text-slate-500">
-          Đã chọn: <strong className="text-purple-600 dark:text-purple-400">{selected.length}</strong>
-        </span>
-      </div>
-
-      {/* Filter tabs if unreachable tables exist */}
-      {hasSelectedMetrics && unreachableCount > 0 && (
-        <div className="flex items-center justify-between gap-1 rounded-lg bg-slate-100 p-0.5 text-[10px] font-medium dark:bg-slate-800">
-          <button
-            type="button"
-            onClick={() => setOnlyShowReachable(true)}
-            className={`flex-1 rounded-md py-1 transition-all cursor-pointer text-center ${
-              onlyShowReachable
-                ? 'bg-white font-bold text-purple-600 shadow-2xs dark:bg-slate-900 dark:text-purple-400'
-                : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
-            }`}
-          >
-            Chỉ hiện bảng liên kết ({tables.length - unreachableCount})
-          </button>
-          <button
-            type="button"
-            onClick={() => setOnlyShowReachable(false)}
-            className={`flex-1 rounded-md py-1 transition-all cursor-pointer text-center ${
-              !onlyShowReachable
-                ? 'bg-white font-bold text-slate-800 shadow-2xs dark:bg-slate-900 dark:text-white'
-                : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
-            }`}
-          >
-            Tất cả ({tables.length})
-          </button>
-        </div>
-      )}
-
-      <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
-        {sortedTables.length === 0 ? (
-          <p className="text-xs text-slate-400 italic p-3 text-center border rounded-xl">
-            Không có bảng nào có liên kết với Metric đang chọn.
-          </p>
-        ) : (
-          sortedTables.map((table) => {
-            const isExpanded = expandedTables.includes(table.table_id);
-            const isReachable = !hasSelectedMetrics || !reachableTableIds || reachableTableIds.has(table.table_id);
-
-            const tableSelectedCount = table.columns.filter((c) =>
-              selected.some((s) => s.column_id === c.column_id)
-            ).length;
-
-            return (
-              <div
-                key={table.table_id}
-                className={`rounded-xl border transition-all overflow-hidden ${
-                  isReachable
-                    ? 'border-slate-200/90 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-800/30'
-                    : 'border-slate-200/50 bg-slate-100/40 dark:border-slate-800/50 dark:bg-slate-900/30 opacity-70'
-                }`}
-              >
-                {/* Table Accordion Header */}
+            {/* Quick Search */}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                value={dimSearch}
+                onChange={(e) => setDimSearch(e.target.value)}
+                placeholder="Tìm nhanh chiều phân tích..."
+                className="h-8 pl-8 text-xs bg-background"
+              />
+              {dimSearch && (
                 <button
-                  type="button"
-                  onClick={() => toggleTable(table.table_id)}
-                  className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100/70 dark:text-slate-200 dark:hover:bg-slate-800/60 cursor-pointer"
+                  onClick={() => setDimSearch('')}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    {getTableIcon(table.table_name)}
-                    <span className="truncate">{table.business_name || table.table_name}</span>
-                    <span className="font-mono text-[10px] text-slate-400">({table.table_name})</span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    {!isReachable ? (
-                      <span className="inline-flex items-center gap-1 rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                        <Lock className="h-2.5 w-2.5" /> Chưa liên kết
-                      </span>
-                    ) : tableSelectedCount > 0 ? (
-                      <span className="rounded-full bg-purple-100 px-1.5 py-0.2 text-[10px] font-bold text-purple-700 dark:bg-purple-950 dark:text-purple-300">
-                        {tableSelectedCount}
-                      </span>
-                    ) : null}
-
-                    {isExpanded ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
-                    )}
-                  </div>
+                  <X className="h-3.5 w-3.5" />
                 </button>
+              )}
+            </div>
 
-                {/* Table Columns List */}
-                {isExpanded && (
-                  <div className="divide-y divide-slate-100 bg-white p-1.5 dark:divide-slate-800 dark:bg-slate-900/90">
-                    {table.columns.map((column) => {
-                      const active = selected.find((item) => item.column_id === column.column_id);
+            {/* Selected Chips Tray */}
+            {dimensions.filter((d) => {
+              const col = allColumns.find((c) => c.column_id === d.column_id);
+              return col && !isTimeDimension(col);
+            }).length > 0 && (
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-2 space-y-1.5">
+                <span className="text-[10px] font-semibold text-primary uppercase tracking-wider block">
+                  Đang chọn ({dimensions.filter((d) => {
+                    const col = allColumns.find((c) => c.column_id === d.column_id);
+                    return col && !isTimeDimension(col);
+                  }).length}):
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {dimensions
+                    .filter((d) => {
+                      const col = allColumns.find((c) => c.column_id === d.column_id);
+                      return col && !isTimeDimension(col);
+                    })
+                    .map((dim) => {
+                      const col = allColumns.find((c) => c.column_id === dim.column_id);
                       return (
-                      <div
-                        key={column.column_id}
-                        className={`rounded-lg p-1.5 text-xs transition-colors ${
-                          !isReachable
-                            ? 'opacity-50 cursor-not-allowed'
-                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
-                        }`}
-                        title={
-                          !isReachable
-                            ? 'Bảng này chưa có quan hệ Many-to-One an toàn với Metric đang chọn'
-                            : undefined
-                        }
-                      >
-                        <label
-                          className={`flex items-center justify-between gap-2 ${
-                            isReachable ? 'cursor-pointer' : 'cursor-not-allowed'
-                          }`}
+                        <span
+                          key={dim.column_id}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-primary bg-primary text-primary-foreground px-2.5 py-0.5 text-[11px] font-medium shadow-2xs"
                         >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <input
-                              type="checkbox"
-                              disabled={!isReachable}
-                              checked={Boolean(active)}
-                              onChange={() => isReachable && toggleDimension(column.column_id)}
-                              className={`rounded border-slate-300 text-purple-600 focus:ring-purple-500 dark:border-slate-700 ${
-                                isReachable ? 'cursor-pointer' : 'cursor-not-allowed'
-                              }`}
-                            />
-                            {getColumnIcon(column)}
-                            <span className="truncate text-slate-800 dark:text-slate-200">
-                              {column.business_name || column.column_name}
-                            </span>
-                            <span className="font-mono text-[10px] text-slate-400">
-                              ({column.column_name})
-                            </span>
-                          </div>
+                          <span>{col?.business_name || col?.column_name || dim.column_id}</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleDimension(dim.column_id)}
+                            className="rounded-full hover:bg-primary-foreground/20 p-0.5 cursor-pointer"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
 
-                          {column.is_time_dimension && (
-                            <span className="rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
-                              Thời gian
-                            </span>
-                          )}
-                        </label>
+            {/* Scoped Dimension Pills */}
+            <div className="rounded-xl border border-border bg-card/40 p-3">
+              {metricIds.length === 0 && !dimSearch.trim() ? (
+                <div className="p-3 text-center text-xs text-muted-foreground space-y-1">
+                  <p className="font-medium text-foreground">Chọn ít nhất 1 Chỉ số ở mục 1</p>
+                  <p className="text-[11px]">
+                    Hệ thống sẽ gợi ý các chiều phân tích an toàn (Tier A/B/C) tương ứng với chỉ số.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {displayedDimensions.map((item) => {
+                    const isChecked = dimensions.some((d) => d.column_id === item.column_id);
 
-                        {/* Segmented Time Grain Selector Pills */}
-                        {active && column.is_time_dimension && isReachable && (
-                          <div className="mt-2 pl-6">
-                            <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 mb-1">
-                              <span>Gom nhóm theo:</span>
-                            </div>
-                            <div className="grid grid-cols-6 gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
-                              {TIME_GRAIN_OPTIONS.map((grain) => {
-                                const isCurrentGrain = (active.time_grain || '') === grain.value;
-                                return (
-                                  <button
-                                    key={grain.label}
-                                    type="button"
-                                    onClick={() => updateGrain(column.column_id, grain.value)}
-                                    className={`rounded py-1 text-[10px] font-medium transition-all cursor-pointer ${
-                                      isCurrentGrain
-                                        ? 'bg-purple-600 text-white font-bold shadow-2xs'
-                                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-                                    }`}
-                                  >
-                                    {grain.label}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
+                    return (
+                      <button
+                        key={item.column_id}
+                        type="button"
+                        onClick={() => toggleDimension(item.column_id)}
+                        className={cn(
+                          'group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all cursor-pointer select-none',
+                          isChecked
+                            ? 'border-primary bg-primary text-primary-foreground shadow-2xs font-semibold'
+                            : 'border-border bg-background text-foreground hover:border-primary/60 hover:bg-accent/40',
                         )}
-                      </div>
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}}
+                          aria-label={item.business_name || item.column_name}
+                          className="h-3 w-3 rounded accent-primary pointer-events-none"
+                        />
+                        <span>{item.business_name || item.column_name}</span>
+                        <span
+                          className={cn(
+                            'rounded px-1 py-0.2 font-mono text-[9px]',
+                            isChecked
+                              ? 'bg-primary-foreground/20 text-primary-foreground'
+                              : 'bg-secondary text-muted-foreground',
+                          )}
+                        >
+                          {item.table_business_name}
+                        </span>
+                      </button>
                     );
                   })}
+
+                  {displayedDimensions.length === 0 && (
+                    <p className="p-2 text-xs text-muted-foreground italic w-full text-center">
+                      Không tìm thấy chiều phân tích phù hợp.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
-          );
-        })
-      )}
-    </div>
-  </section>
-);
-}
+          </div>
 
-// ---------------------------------------------------------------------------
-// 🔍 Section 3: Runtime Filters
-// ---------------------------------------------------------------------------
+          {/* 3. Time Dimension & Grain */}
+          <div className="space-y-2 rounded-xl border border-border bg-card/60 p-3.5 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <SectionLabel>3. CHIỀU THỜI GIAN & CHU KỲ</SectionLabel>
+              <Calendar className="h-3.5 w-3.5 text-primary" />
+            </div>
 
-function RuntimeFilters({
-  filters,
-  columns,
-  onChange,
-}: {
-  filters: DraftFilter[];
-  columns: CatalogColumn[];
-  onChange: (filters: DraftFilter[]) => void;
-}) {
-  const update = (index: number, patch: Partial<DraftFilter>) =>
-    onChange(filters.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
-
-  return (
-    <section className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
-          <Filter className="h-3.5 w-3.5 text-slate-500" />
-          3. BỘ LỌC ĐIỀU KIỆN (FILTERS)
-        </h3>
-        <button
-          type="button"
-          disabled={!columns.length}
-          onClick={() =>
-            onChange([
-              ...filters,
-              { column_id: columns[0].column_id, operator: 'eq', raw: '' },
-            ])
-          }
-          className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 cursor-pointer"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Thêm lọc
-        </button>
-      </div>
-
-      {filters.length === 0 ? (
-        <p className="text-[11px] text-slate-400 italic">Không có bộ lọc runtime nào.</p>
-      ) : (
-        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-          {filters.map((filter, index) => (
-            <div
-              key={index}
-              className="rounded-xl border border-slate-200 bg-slate-50/70 p-2 text-xs dark:border-slate-800 dark:bg-slate-800/50 space-y-1.5"
-            >
-              <div className="flex items-center justify-between gap-1">
-                <select
-                  value={filter.column_id}
-                  onChange={(event) => update(index, { column_id: Number(event.target.value) })}
-                  className="form-input flex-1 text-xs"
-                >
-                  {columns.map((column) => (
-                    <option value={column.column_id} key={column.column_id}>
-                      {column.business_name || column.column_name} ({column.column_name})
+            {/* Time Column Picker */}
+            <div>
+              <label className="text-[11px] text-muted-foreground block mb-1">
+                Cột mốc thời gian (Time Dimension):
+              </label>
+              <select
+                value={selectedTimeDimension?.column_id || ''}
+                onChange={(e) => setTimeDimensionColumn(e.target.value)}
+                className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-primary"
+              >
+                <option value="">-- Không chọn mốc thời gian --</option>
+                {availableTimeColumns.map((col) => {
+                  const table = catalog.tables.find((t) =>
+                    t.columns.some((c) => c.column_id === col.column_id),
+                  );
+                  return (
+                    <option key={col.column_id} value={col.column_id}>
+                      {table ? `${table.business_name || table.table_name} · ` : ''}
+                      {col.business_name || col.column_name}
                     </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => onChange(filters.filter((_, itemIndex) => itemIndex !== index))}
-                  className="rounded p-1 text-slate-400 hover:text-red-500 transition-colors cursor-pointer"
-                  title="Xóa bộ lọc"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
+                  );
+                })}
+              </select>
+            </div>
 
-              <div className="grid grid-cols-[130px_1fr] gap-1.5">
-                <select
-                  value={filter.operator}
-                  onChange={(event) =>
-                    update(index, { operator: event.target.value as FilterOperator })
-                  }
-                  className="form-input text-xs"
-                >
-                  {OPERATORS.map((op) => (
-                    <option key={op.value} value={op.value}>
-                      {op.label}
-                    </option>
-                  ))}
-                </select>
-
-                {!filter.operator.startsWith('is_') && (
-                  <input
-                    type="text"
-                    placeholder="Giá trị lọc..."
-                    value={filter.raw}
-                    onChange={(event) => update(index, { raw: event.target.value })}
-                    className="form-input text-xs"
-                  />
-                )}
+            {/* 5-Grain Buttons */}
+            <div>
+              <label className="text-[11px] text-muted-foreground block mb-1">
+                Chu kỳ tổng hợp (Granularity):
+              </label>
+              <div className="grid grid-cols-5 gap-1">
+                {TIME_GRAIN_OPTIONS.map((g) => {
+                  const isActive = selectedTimeDimension?.time_grain === g.value;
+                  return (
+                    <button
+                      key={g.value}
+                      type="button"
+                      onClick={() => setTimeGrain(isActive ? '' : g.value)}
+                      className={cn(
+                        'flex flex-col items-center justify-center rounded-md border py-1.5 text-xs transition-all cursor-pointer',
+                        isActive
+                          ? 'border-primary bg-primary text-primary-foreground font-semibold shadow-2xs'
+                          : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-primary/40',
+                      )}
+                    >
+                      <span className="text-[11px]">{g.label}</span>
+                      <span className="text-[9px] font-mono opacity-70">{g.enLabel}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
-          ))}
+          </div>
+
+
+          {/* Action Buttons */}
+          <div className="mt-auto space-y-2 pt-4 border-t border-border">
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                className="w-full gap-1.5 text-xs font-semibold"
+                onClick={() => void runCompile()}
+                disabled={!metricIds.length || loading}
+              >
+                <Eye className="h-3.5 w-3.5" />
+                <span>Preview SQL</span>
+              </Button>
+              <Button
+                className="w-full gap-1.5 text-xs font-semibold shadow-sm"
+                onClick={() => void runExecute()}
+                disabled={!metricIds.length || loading}
+              >
+                {loading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Play className="h-3.5 w-3.5" />
+                )}
+                <span>Thực thi (Execute)</span>
+              </Button>
+            </div>
+          </div>
         </div>
-      )}
-    </section>
+
+        {/* Right Results Panel */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+          {/* Result Tab Bar & Guardrails Badge */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-2.5 bg-secondary/15">
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 shadow-2xs">
+              {([
+                { key: 'table' as const, label: 'Bảng số liệu', icon: Table2 },
+                { key: 'chart' as const, label: 'Biểu đồ', icon: TrendingUp },
+                { key: 'sql' as const, label: 'SQL Code', icon: Code2 },
+              ]).map((t) => {
+                const Icon = t.icon;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setViewTab(t.key)}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-all cursor-pointer',
+                      viewTab === t.key
+                        ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    <span>{t.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Quick Actions (Copy / Export) */}
+            <div className="flex items-center gap-3">
+              {viewTab === 'table' && output && isQueryResult(output) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 text-[11px]"
+                  onClick={handleExportCsv}
+                >
+                  <Download className="h-3 w-3" />
+                  <span>Xuất CSV</span>
+                </Button>
+              )}
+
+              {viewTab === 'sql' && output?.sql && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 text-[11px]"
+                  onClick={handleCopySql}
+                >
+                  {copiedSql ? (
+                    <Check className="h-3 w-3 text-emerald-500" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                  <span>{copiedSql ? 'Đã sao chép' : 'Sao chép SQL'}</span>
+                </Button>
+              )}
+
+              <div className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground border-l border-border pl-3">
+                <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                <span>Read-only · LIMIT 100 · max 1000 · 15s timeout</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Results Area */}
+          <div className="min-h-0 flex-1 overflow-auto p-6">
+            {loading ? (
+              <div className="flex h-full min-h-[360px] flex-col items-center justify-center gap-3 text-muted-foreground">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-xs font-medium">Đang biên dịch & thực thi truy vấn an toàn...</p>
+              </div>
+            ) : error ? (
+              <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-5 text-xs text-destructive">
+                <div className="flex items-center gap-2 font-semibold text-sm">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span>Lỗi truy vấn Semantic:</span>
+                </div>
+                <p className="mt-2 font-mono leading-relaxed bg-background/50 p-3 rounded-lg border border-destructive/20">
+                  {error}
+                </p>
+              </div>
+            ) : !output ? (
+              <div className="flex h-full min-h-[360px] flex-col items-center justify-center gap-3 text-center text-muted-foreground">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-secondary/50 text-muted-foreground shadow-2xs">
+                  <Play className="h-7 w-7 text-primary" />
+                </div>
+                <div className="max-w-md">
+                  <p className="font-semibold text-foreground text-base">
+                    Sẵn sàng biên dịch & phân tích số liệu
+                  </p>
+                  <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
+                    Chọn các chỉ số (Measures) và chiều phân tích (Dimensions / Time Grain) ở bảng điều khiển bên trái, sau đó nhấn <strong>Preview SQL</strong> hoặc <strong>Thực thi</strong>.
+                  </p>
+                </div>
+              </div>
+            ) : viewTab === 'table' ? (
+              isQueryResult(output) ? (
+                <div className="space-y-4">
+                  <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-border bg-secondary/60">
+                            {output.columns.map((c, idx) => (
+                              <th
+                                key={c}
+                                className={cn(
+                                  'px-4 py-3 font-semibold uppercase tracking-wider text-muted-foreground',
+                                  idx === 0 ? 'text-left' : 'text-right',
+                                )}
+                              >
+                                {formatColumnTitle(c, output.metadata, catalog, approved)}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {output.rows.map((row, i) => (
+                            <tr
+                              key={i}
+                              className="border-b border-border last:border-0 hover:bg-accent/40 transition-colors"
+                            >
+                              {output.columns.map((_, colIdx) => {
+                                const val = row[colIdx];
+                                const isNum =
+                                  typeof val === 'number' ||
+                                  (!isNaN(Number(val)) && val !== '' && val !== null);
+                                return (
+                                  <td
+                                    key={colIdx}
+                                    className={cn(
+                                      'px-4 py-2.5 text-xs tabular-nums',
+                                      colIdx === 0 ? 'text-left text-foreground' : 'text-right',
+                                      isNum && colIdx > 0 ? 'font-medium font-mono text-foreground' : 'text-muted-foreground',
+                                    )}
+                                  >
+                                    {colIdx === 0 ? formatDimensionValue(val) : formatCellValue(val)}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-border bg-secondary/30 px-4 py-2.5 text-xs text-muted-foreground">
+                      <span>Hiển thị <strong>{output.rows.length}</strong> dòng kết quả</span>
+                      <span className="font-mono text-[11px]">LIMIT {limit} applied</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border bg-card p-8 text-center text-xs text-muted-foreground">
+                  <p className="text-sm font-semibold text-foreground mb-1">
+                    Bản xem trước SQL đã sẵn sàng
+                  </p>
+                  <p>Nhấn nút &quot;Thực thi (Execute)&quot; để nạp số liệu thực tế từ Live DB.</p>
+                </div>
+              )
+            ) : viewTab === 'chart' ? (
+              isQueryResult(output) && output.rows.length > 0 ? (
+                <RechartsInteractiveStudio
+                  rows={output.rows}
+                  columns={output.columns}
+                  metadata={output.metadata}
+                  catalog={catalog}
+                  metrics={approved}
+                  chartType={chartType}
+                  onChartTypeChange={setChartType}
+                />
+              ) : (
+                <div className="rounded-xl border border-border bg-card p-8 text-center text-xs text-muted-foreground">
+                  Chưa có dữ liệu đồ thị. Bấm &quot;Thực thi (Execute)&quot; để nạp số liệu từ Live DB.
+                </div>
+              )
+            ) : (
+              <div className="space-y-4">
+                <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+                  <div className="flex items-center justify-between border-b border-border bg-secondary/40 px-4 py-2.5">
+                    <SectionLabel>COMPILED SQL (READ-ONLY)</SectionLabel>
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      Dialect-aware AST compiled
+                    </span>
+                  </div>
+                  <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-foreground bg-secondary/10">
+                    {output.sql}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// 📊 Result Panel (Table View, Chart View, SQL Code View)
-// ---------------------------------------------------------------------------
-
-function ResultPanel({
-  output,
-  theme,
-  metrics,
-  catalog,
-  viewTab,
-  onTabChange,
-}: {
-  output: SemanticQueryResult | SemanticQueryPreview | null;
-  theme: 'light' | 'dark';
-  metrics: MetricRecord[];
-  catalog: SemanticCatalog | null;
-  viewTab: 'table' | 'chart' | 'sql';
-  onTabChange: (tab: 'table' | 'chart' | 'sql') => void;
-}) {
-  if (!output) {
-    return <State message="Hãy chọn ít nhất 1 Metric, sau đó nhấn Preview SQL hoặc Thực thi." />;
+function formatCellValue(val: unknown): string {
+  if (val === null || val === undefined) return '—';
+  if (typeof val === 'number') {
+    return val.toLocaleString();
   }
+  if (typeof val === 'string' && !isNaN(Number(val)) && val.trim() !== '') {
+    const num = Number(val);
+    return num.toLocaleString();
+  }
+  return String(val);
+}
 
-  const isExecutedResult = 'rows' in output;
-  const result = isExecutedResult ? (output as SemanticQueryResult) : null;
+function RechartsInteractiveStudio({
+  rows,
+  columns,
+  metadata,
+  catalog,
+  metrics,
+  chartType,
+  onChartTypeChange,
+}: {
+  rows: unknown[][];
+  columns: string[];
+  metadata?: Record<string, any>;
+  catalog?: SemanticCatalog | null;
+  metrics?: MetricRecord[];
+  chartType: ChartType;
+  onChartTypeChange: (t: ChartType) => void;
+}) {
+  const numericColIndices = useMemo(() => {
+    const indices: number[] = [];
+    columns.forEach((_, idx) => {
+      const hasNumbers = rows.some(
+        (r) =>
+          typeof r[idx] === 'number' ||
+          (!isNaN(Number(r[idx])) && r[idx] !== '' && r[idx] !== null),
+      );
+      if (hasNumbers) indices.push(idx);
+    });
+    return indices;
+  }, [rows, columns]);
+
+  const labelColIdx = useMemo(() => {
+    const nonNumeric = columns.findIndex((_, idx) => !numericColIndices.includes(idx));
+    return nonNumeric >= 0 ? nonNumeric : 0;
+  }, [columns, numericColIndices]);
+
+  const primaryNumericIdx = numericColIndices[0] ?? (columns.length > 1 ? 1 : 0);
+
+  // Formatted names for dimension and metric
+  const primaryMetricRaw = columns[primaryNumericIdx] || 'Chỉ số';
+  const labelColRaw = columns[labelColIdx] || 'Chiều phân tích';
+
+  const primaryMetricName = useMemo(
+    () => formatColumnTitle(primaryMetricRaw, metadata, catalog, metrics),
+    [primaryMetricRaw, metadata, catalog, metrics],
+  );
+
+  const labelColName = useMemo(
+    () => formatColumnTitle(labelColRaw, metadata, catalog, metrics),
+    [labelColRaw, metadata, catalog, metrics],
+  );
+
+  // Format data for Recharts with smart dimension values
+  const chartData = useMemo(() => {
+    return rows.slice(0, 30).map((r, i) => {
+      const rawLabel = r[labelColIdx];
+      const formattedLabel = formatDimensionValue(rawLabel) || `Mục ${i + 1}`;
+      return {
+        name: formattedLabel,
+        rawName: String(rawLabel ?? ''),
+        value: Number(r[primaryNumericIdx]) || 0,
+      };
+    });
+  }, [rows, labelColIdx, primaryNumericIdx]);
+
+  const values = useMemo(() => chartData.map((d) => d.value), [chartData]);
+  const totalSum = useMemo(() => values.reduce((a, b) => a + b, 0), [values]);
+  const avgVal = useMemo(() => (values.length ? totalSum / values.length : 0), [values, totalSum]);
+  const maxVal = useMemo(() => (values.length ? Math.max(...values) : 1), [values]);
+  const minVal = useMemo(() => (values.length ? Math.min(...values) : 0), [values]);
 
   return (
-    <div className="space-y-4">
-      {/* Tab Switcher & Result Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex items-center gap-2">
-          {result ? (
-            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-              <TableIcon className="h-4 w-4 text-indigo-600" />
-              Kết quả truy vấn ({result.row_count} dòng)
-            </h2>
-          ) : (
-            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-              <Eye className="h-4 w-4 text-indigo-600" />
-              Bản xem trước SQL (Preview Mode)
-            </h2>
+    <div className="space-y-6">
+      {/* KPI Metric Summary Cards */}
+      <div className="grid grid-cols-4 gap-3">
+        <div className="rounded-xl border border-border bg-card p-4 shadow-2xs">
+          <span className="text-[11px] font-medium text-muted-foreground block truncate">
+            Tổng {primaryMetricName}
+          </span>
+          <span className="mt-1 text-lg font-bold font-mono text-foreground block tabular-nums">
+            {totalSum.toLocaleString()}
+          </span>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4 shadow-2xs">
+          <span className="text-[11px] font-medium text-muted-foreground block truncate">
+            Trung bình mỗi {labelColName}
+          </span>
+          <span className="mt-1 text-lg font-bold font-mono text-foreground block tabular-nums">
+            {avgVal.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+          </span>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4 shadow-2xs">
+          <span className="text-[11px] font-medium text-muted-foreground block truncate">
+            Cao nhất / Thấp nhất
+          </span>
+          <span className="mt-1 text-sm font-bold font-mono text-foreground block tabular-nums">
+            {maxVal.toLocaleString()} / {minVal.toLocaleString()}
+          </span>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4 shadow-2xs">
+          <span className="text-[11px] font-medium text-muted-foreground block truncate">
+            Số điểm dữ liệu ({labelColName})
+          </span>
+          <span className="mt-1 text-lg font-bold font-mono text-foreground block tabular-nums">
+            {rows.length}
+          </span>
+        </div>
+      </div>
+
+      {/* Chart Canvas & Controls */}
+      <div className="rounded-xl border border-border bg-card p-6 shadow-xs space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">
+              Biểu đồ trực quan: {primaryMetricName} theo {labelColName}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Phân tích xu hướng và tương quan dữ liệu
+            </p>
+          </div>
+
+          {/* Chart Type Selector */}
+          <div className="flex rounded-lg border border-border bg-background p-1 text-xs">
+            {([
+              { key: 'bar' as const, label: 'Cột', icon: BarChart3 },
+              { key: 'line' as const, label: 'Đường', icon: LineChartIcon },
+              { key: 'area' as const, label: 'Vùng', icon: AreaChartIcon },
+              { key: 'pie' as const, label: 'Biểu đồ Tròn (Donut)', icon: PieChartIcon },
+            ]).map((c) => {
+              const Icon = c.icon;
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => onChartTypeChange(c.key)}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-colors cursor-pointer',
+                    chartType === c.key
+                      ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  <span>{c.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="h-[340px] w-full pt-2">
+          {chartType === 'bar' && (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 30 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/40" />
+                <XAxis
+                  dataKey="name"
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] fill-muted-foreground font-medium"
+                  interval={0}
+                  angle={-25}
+                  textAnchor="end"
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] font-mono fill-muted-foreground"
+                  tickFormatter={formatShortNumber}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const item = payload[0];
+                    return (
+                      <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
+                        <p className="font-semibold text-popover-foreground">{item.payload.name}</p>
+                        <p className="font-mono text-primary font-medium mt-0.5">
+                          {primaryMetricName}: {Number(item.value).toLocaleString()}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Bar dataKey="value" fill="var(--color-primary, #6366f1)" radius={[6, 6, 0, 0]} maxBarSize={48} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+
+          {chartType === 'line' && (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 30 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/40" />
+                <XAxis
+                  dataKey="name"
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] fill-muted-foreground font-medium"
+                  interval={0}
+                  angle={-25}
+                  textAnchor="end"
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] font-mono fill-muted-foreground"
+                  tickFormatter={formatShortNumber}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const item = payload[0];
+                    return (
+                      <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
+                        <p className="font-semibold text-popover-foreground">{item.payload.name}</p>
+                        <p className="font-mono text-primary font-medium mt-0.5">
+                          {primaryMetricName}: {Number(item.value).toLocaleString()}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke="var(--color-primary, #6366f1)"
+                  strokeWidth={3}
+                  dot={{ r: 4, fill: 'var(--color-primary, #6366f1)' }}
+                  activeDot={{ r: 6 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+
+          {chartType === 'area' && (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 30 }}>
+                <defs>
+                  <linearGradient id="areaGradientRecharts" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--color-primary, #6366f1)" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="var(--color-primary, #6366f1)" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/40" />
+                <XAxis
+                  dataKey="name"
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] fill-muted-foreground font-medium"
+                  interval={0}
+                  angle={-25}
+                  textAnchor="end"
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  className="text-[11px] font-mono fill-muted-foreground"
+                  tickFormatter={formatShortNumber}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const item = payload[0];
+                    return (
+                      <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
+                        <p className="font-semibold text-popover-foreground">{item.payload.name}</p>
+                        <p className="font-mono text-primary font-medium mt-0.5">
+                          {primaryMetricName}: {Number(item.value).toLocaleString()}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke="var(--color-primary, #6366f1)"
+                  strokeWidth={2.5}
+                  fillOpacity={1}
+                  fill="url(#areaGradientRecharts)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+
+          {chartType === 'pie' && (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart margin={{ top: 10, right: 20, left: 20, bottom: 10 }}>
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const item = payload[0];
+                    const val = Number(item.value) || 0;
+                    const pct = totalSum > 0 ? ((val / totalSum) * 100).toFixed(1) : '0';
+                    return (
+                      <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
+                        <p className="font-semibold text-popover-foreground">{item.name}</p>
+                        <p className="font-mono text-primary font-medium mt-0.5">
+                          {primaryMetricName}: {val.toLocaleString()} ({pct}%)
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Legend
+                  verticalAlign="bottom"
+                  height={36}
+                  formatter={(value) => (
+                    <span className="text-xs font-medium text-foreground">{value}</span>
+                  )}
+                />
+                <Pie
+                  data={chartData.slice(0, 10)}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="45%"
+                  innerRadius={65}
+                  outerRadius={105}
+                  paddingAngle={3}
+                  stroke="var(--color-background, #fff)"
+                  strokeWidth={2}
+                >
+                  {chartData.slice(0, 10).map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
           )}
         </div>
-
-        {/* View Mode Buttons */}
-        <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-          <button
-            type="button"
-            onClick={() => onTabChange('table')}
-            disabled={!result}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${
-              viewTab === 'table' && result
-                ? 'bg-white text-indigo-600 shadow-xs dark:bg-slate-900 dark:text-indigo-400'
-                : 'text-slate-600 hover:text-slate-900 disabled:opacity-40 dark:text-slate-400 dark:hover:text-white'
-            }`}
-          >
-            <TableIcon className="h-3.5 w-3.5" />
-            Bảng số liệu
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onTabChange('chart')}
-            disabled={!result || result.rows.length === 0}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${
-              viewTab === 'chart'
-                ? 'bg-white text-purple-600 shadow-xs dark:bg-slate-900 dark:text-purple-400'
-                : 'text-slate-600 hover:text-slate-900 disabled:opacity-40 dark:text-slate-400 dark:hover:text-white'
-            }`}
-          >
-            <BarChart3 className="h-3.5 w-3.5" />
-            Biểu đồ trực quan
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onTabChange('sql')}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${
-              viewTab === 'sql'
-                ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-            }`}
-          >
-            <Code2 className="h-3.5 w-3.5" />
-            SQL Code
-          </button>
-        </div>
-      </div>
-
-      {/* View Content based on Tab */}
-      {viewTab === 'table' && result && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="overflow-x-auto max-h-96">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800/90 z-10">
-                <tr>
-                  {result.columns.map((column) => (
-                    <th
-                      key={column}
-                      className="border-b border-slate-200 p-2.5 font-bold text-slate-700 dark:border-slate-700 dark:text-slate-200"
-                    >
-                      {resolveColumnHeader(column, output, metrics, catalog)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {result.rows.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={result.columns.length}
-                      className="p-6 text-center text-slate-400 italic"
-                    >
-                      Không có bản ghi nào thỏa mãn điều kiện.
-                    </td>
-                  </tr>
-                ) : (
-                  result.rows.map((row, rowIndex) => (
-                    <tr
-                      key={rowIndex}
-                      className="hover:bg-indigo-50/30 dark:hover:bg-slate-800/50 transition-colors"
-                    >
-                      {row.map((value, colIndex) => (
-                        <td
-                          key={colIndex}
-                          className="p-2.5 font-mono text-slate-800 dark:text-slate-200"
-                        >
-                          {formatCell(value)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {viewTab === 'chart' && result && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <SimpleAnalyticsChart
-            result={result}
-            output={output}
-            metrics={metrics}
-            catalog={catalog}
-          />
-        </div>
-      )}
-
-      {/* SQL Viewer Box */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-3">
-        <SqlCodeViewer
-          sql={output.sql}
-          title="SQL read-only do SemanticQueryCompiler biên dịch"
-          theme={theme}
-        />
-
-        {output.parameters && Object.keys(output.parameters).length > 0 && (
-          <div>
-            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-              Parameters Bound:
-            </span>
-            <pre className="overflow-x-auto rounded-xl bg-slate-950 p-3 text-xs text-cyan-300 font-mono">
-              {JSON.stringify(output.parameters, null, 2)}
-            </pre>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// 📈 Simple Visual Chart Component for Data Explorer
-// ---------------------------------------------------------------------------
-
-function SimpleAnalyticsChart({
-  result,
-  output,
-  metrics,
-  catalog,
-}: {
-  result: SemanticQueryResult;
-  output: SemanticQueryResult | SemanticQueryPreview | null;
-  metrics: MetricRecord[];
-  catalog: SemanticCatalog | null;
-}) {
-  const chartData = useMemo(() => {
-    if (!result || result.rows.length === 0) return null;
-    const isSingleRow = result.rows.length === 1;
-
-    const dimensionColName = result.columns[0];
-    const metricColName = result.columns[result.columns.length - 1];
-
-    const parsedRows = result.rows.map((row) => {
-      const label = formatCell(row[0]);
-      const rawVal = row[row.length - 1];
-      const numVal = typeof rawVal === 'number' ? rawVal : parseFloat(String(rawVal)) || 0;
-      return { label, val: numVal, formatted: formatCell(rawVal) };
-    });
-
-    const maxVal = Math.max(...parsedRows.map((r) => r.val), 1);
-    return {
-      isSingleRow,
-      dimensionTitle: resolveColumnHeader(dimensionColName, output, metrics, catalog),
-      metricTitle: resolveColumnHeader(metricColName, output, metrics, catalog),
-      rows: parsedRows,
-      maxVal,
-    };
-  }, [result, output, metrics, catalog]);
-
-  if (!chartData) {
-    return <p className="text-xs text-slate-400 italic">Không có dữ liệu để vẽ biểu đồ.</p>;
-  }
-
-  if (chartData.isSingleRow) {
-    const single = chartData.rows[0];
-    return (
-      <div className="text-center py-6">
-        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-2">
-          {chartData.metricTitle}
-        </span>
-        <div className="text-3xl font-extrabold text-indigo-600 dark:text-indigo-400 font-mono">
-          {single.formatted}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between border-b border-slate-100 pb-2 dark:border-slate-800">
-        <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300">
-          Phân bố: <span className="text-indigo-600 dark:text-indigo-400">{chartData.metricTitle}</span> theo{' '}
-          <span className="text-purple-600 dark:text-purple-400">{chartData.dimensionTitle}</span>
-        </h4>
-        <span className="text-[11px] text-slate-400">{chartData.rows.length} nhóm</span>
-      </div>
-
-      <div className="space-y-2.5 max-h-72 overflow-y-auto pr-2">
-        {chartData.rows.map((item, idx) => {
-          const percentage = Math.min(100, Math.max(5, (item.val / chartData.maxVal) * 100));
-          return (
-            <div key={idx} className="space-y-1 text-xs">
-              <div className="flex items-center justify-between font-medium">
-                <span className="text-slate-700 dark:text-slate-300 truncate max-w-[240px]">
-                  {item.label}
-                </span>
-                <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                  {item.formatted}
-                </span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 transition-all duration-500"
-                  style={{ width: `${percentage}%` }}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 🛠️ Helper Utilities
-// ---------------------------------------------------------------------------
-
-function State({ message, warning = false }: { message: string; warning?: boolean }) {
-  return (
-    <div
-      className={
-        'rounded-2xl border p-10 text-center text-sm ' +
-        (warning
-          ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300'
-          : 'border-slate-200 bg-white text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400')
-      }
-    >
-      {warning && <AlertTriangle className="mx-auto mb-2 h-6 w-6" />}
-      {message}
-    </div>
-  );
-}
-
-function resolveColumnHeader(
-  col: string,
+function isQueryResult(
   output: SemanticQueryResult | SemanticQueryPreview | null,
-  metrics: MetricRecord[],
-  catalog: SemanticCatalog | null,
-): string {
-  if (output && 'metadata' in output && output.metadata) {
-    const meta = output.metadata as Record<string, Record<string, string>>;
-    if (meta.metrics?.[col]) return meta.metrics[col];
-    if (meta.dimensions?.[col]) return meta.dimensions[col];
-  }
-  if (col.startsWith('metric_')) {
-    const id = Number(col.replace('metric_', ''));
-    const found = metrics.find((item) => item.metric_id === id);
-    if (found) return metricName(found);
-  }
-  if (col.startsWith('dimension_')) {
-    const colId = Number(col.replace('dimension_', ''));
-    const found = catalog?.tables.flatMap((t) => t.columns).find((item) => item.column_id === colId);
-    if (found) return found.business_name || found.column_name;
-  }
-  return col;
-}
-
-function getTableIcon(tableName: string) {
-  const lower = tableName.toLowerCase();
-  if (lower.includes('order') || lower.includes('don_hang')) return <Box className="h-3.5 w-3.5 text-indigo-500" />;
-  if (lower.includes('customer') || lower.includes('khach_hang') || lower.includes('user'))
-    return <User className="h-3.5 w-3.5 text-emerald-500" />;
-  if (lower.includes('item') || lower.includes('product') || lower.includes('san_pham'))
-    return <Tag className="h-3.5 w-3.5 text-purple-500" />;
-  return <Database className="h-3.5 w-3.5 text-slate-400" />;
-}
-
-function getColumnIcon(column: CatalogColumn) {
-  if (column.is_time_dimension) return <Calendar className="h-3 w-3 text-indigo-500" />;
-  const lower = column.column_name.toLowerCase();
-  if (lower.includes('city') || lower.includes('tinh') || lower.includes('dia_chi') || lower.includes('address'))
-    return <MapPin className="h-3 w-3 text-emerald-500" />;
-  return <Tag className="h-3 w-3 text-slate-400" />;
-}
-
-function translateGrain(grain: TimeGrain): string {
-  const map: Record<TimeGrain, string> = {
-    day: 'Theo Ngày',
-    week: 'Theo Tuần',
-    month: 'Theo Tháng',
-    quarter: 'Theo Quý',
-    year: 'Theo Năm',
-  };
-  return map[grain] || grain;
-}
-
-function buildFilters(filters: DraftFilter[]): SemanticQueryFilter[] {
-  return filters.map((item) => ({
-    column_id: item.column_id,
-    operator: item.operator,
-    value: coerceFilterValue(item.operator, item.raw),
-  }));
-}
-
-function queryError(error: unknown): string {
-  if (error instanceof SemanticApiError && error.status === 504) {
-    return 'Query vượt quá thời gian tối đa 15 giây.';
-  }
-  return error instanceof Error ? error.message : 'Không thể compile hoặc thực thi query.';
-}
-
-function toggle(values: number[], value: number): number[] {
-  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
-}
-
-function formatNumber(num: number): string {
-  if (Number.isInteger(num) || Math.abs(num - Math.round(num)) < 1e-6) {
-    return Math.round(num).toLocaleString('vi-VN');
-  }
-  return num.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function formatCell(value: unknown): string {
-  if (value === null || value === undefined) return '—';
-  if (typeof value === 'number') return formatNumber(value);
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    // Numeric string e.g. "228842722125.000"
-    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-      const num = parseFloat(trimmed);
-      if (!isNaN(num)) return formatNumber(num);
-    }
-    // ISO Date string
-    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
-      const date = new Date(trimmed);
-      if (!isNaN(date.getTime())) {
-        if (/^\d{4}-\d{2}$/.test(trimmed)) {
-          return `Tháng ${trimmed.slice(5, 7)}/${trimmed.slice(0, 4)}`;
-        }
-        return date.toLocaleDateString('vi-VN');
-      }
-    }
-    return trimmed;
-  }
-
-  if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
+): output is SemanticQueryResult {
+  return Boolean(
+    output && 'rows' in output && Array.isArray((output as SemanticQueryResult).rows),
+  );
 }

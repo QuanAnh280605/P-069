@@ -1,0 +1,21 @@
+metric: average_order_value
+business_name: "Giá trị đơn hàng trung bình"
+domain: ecommerce
+metric_type: derived
+target_entity: order
+source_table: fact_orders
+aggregation: avg
+field: null
+business_formula: "Net Sales / Total Orders"
+sql_expression: "SUM(gross_amount - discount_amount - return_amount) / COUNT(DISTINCT order_id)"
+dependencies: [net_revenue, order_count]
+description: "Giá trị trung bình mỗi đơn hàng, tính bằng doanh thu thuần chia cho tổng số đơn hàng."
+default_filters:
+  - condition: "is_test_order = FALSE"
+allowed_dimensions: [order.order_date, order.channel, order.store_id]
+default_time_grain: day
+reference_source: "Shopify Analytics Fields"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#average_order_value"
+synonyms: ["AOV", "giá trị đơn hàng TB", "average order value"]
