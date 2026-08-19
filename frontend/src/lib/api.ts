@@ -67,9 +67,29 @@ export interface SemanticLayerData {
   metrics: MetricRecord[];
 }
 
+export interface MetricConflictInfo {
+  proposed_metric_name: string;
+  existing_metric_id: number | null;
+  existing_metric_name: string;
+  existing_metric_status: string | null;
+  suggested_name: string;
+  clarify_question: string;
+}
+
+export interface DuplicateMetricNotice {
+  existing_metric_id: number | null;
+  existing_metric_name: string;
+  existing_metric_status: string | null;
+  user_message: string;
+  similarity_reason: string;
+  existing_definition?: MetricDefinition | null;
+  existing_yaml?: string;
+}
+
 export interface MetricSuggestion {
   definition: MetricDefinition;
   yaml_preview: string;
+  conflict?: MetricConflictInfo | null;
 }
 
 export interface MetricVersion {
@@ -329,11 +349,18 @@ function metricResponseToRecord(data: {
   };
 }
 
+export interface GeneratedMetricsResult {
+  suggestions: MetricSuggestion[];
+  duplicates: DuplicateMetricNotice[];
+  dedupe_performed: boolean;
+  isLiveLLM: boolean;
+}
+
 export async function generateCustomMetricsApi(
   dbId: string,
   prompt: string,
   targetTables: string[] = [],
-): Promise<{ suggestions: MetricSuggestion[]; isLiveLLM: boolean }> {
+): Promise<GeneratedMetricsResult> {
   const res = await fetch(`${API_BASE}/api/v1/semantic/${dbId}/metrics/generate`, {
     method: 'POST',
     headers: {
@@ -353,16 +380,21 @@ export async function generateCustomMetricsApi(
   }
 
   const data = await res.json();
-  if (!data.suggestions || data.suggestions.length === 0) {
+  const suggestions: MetricSuggestion[] = data.suggestions || [];
+  const duplicates: DuplicateMetricNotice[] = data.duplicates || [];
+  // Duplicates-only is a successful result (all proposals matched saved metrics).
+  if (suggestions.length === 0 && duplicates.length === 0) {
     throw new Error('LLM không tìm thấy hoặc không sinh được chỉ số phù hợp với schema');
   }
-  return { suggestions: data.suggestions, isLiveLLM: true };
+  return { suggestions, duplicates, dedupe_performed: data.dedupe_performed !== false, isLiveLLM: true };
 }
 
 export interface ChatOrchestratorResponse {
   intent: 'chitchat' | 'metric_query';
   chat_response?: string | null;
   suggestions?: MetricSuggestion[] | null;
+  duplicates?: DuplicateMetricNotice[];
+  dedupe_performed?: boolean;
 }
 
 export async function sendChatOrchestratorApi(

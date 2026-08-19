@@ -3,17 +3,29 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TypeVar
 
 import sqlglot
+from pydantic import BaseModel
 from sqlglot import exp
 
 from src.models.metric_definition import MetricDefinition
-from src.models.schemas import MetricSuggestionItem, MetricSuggestions
+from src.models.schemas import (
+    DuplicateMetricNotice,
+    MetricConflictInfo,
+    MetricSuggestionItem,
+    MetricSuggestions,
+    MetricSuggestionsV2,
+)
 from src.services.llm import get_llm
 from src.services.llm_json import ainvoke_json, extract_json
+from src.services.metric_dedupe import format_existing_metrics_context, merge_dedupe
 
 logger = logging.getLogger(__name__)
+
+_NoticeT = TypeVar("_NoticeT", bound=BaseModel)
+
+_ParsedSuggestions = tuple[list[MetricDefinition], list[DuplicateMetricNotice], list[MetricConflictInfo]]
 
 
 def normalize_prompt(prompt: str) -> str:
@@ -80,42 +92,99 @@ def _format_columns(columns: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def build_metric_system_prompt(schema_text: str) -> str:
-    """Construct the structured-output prompt in Vietnamese."""
-    return f"""Bạn là chuyên gia phân tích dữ liệu (Data Analyst).
-Nhiệm vụ: Đề xuất 1-3 Business Metrics bằng tiếng Việt dựa trên schema cơ sở dữ liệu.
+_PROMPT_HEADER = """Bạn là chuyên gia phân tích dữ liệu (Data Analyst).
+Nhiệm vụ: Đề xuất 1-3 Business Metrics bằng tiếng Việt dựa trên schema cơ sở dữ liệu."""
 
-Trả về kết quả ở định dạng JSON thuần túy có cấu trúc như sau:
-{{
+_V1_OUTPUT_FORMAT = """Trả về kết quả ở định dạng JSON thuần túy có cấu trúc như sau:
+{
   "metrics": [
-    {{
-      "metric": {{
+    {
+      "metric": {
         "name": "Tên metric tiếng Việt",
-        "formula": {{
+        "formula": {
           "function": "SUM",
           "expression": "cột_tính_toán"
-        }},
+        },
         "base_entity": "tên_bảng_chính",
         "filters": [],
         "status": "pending_approval",
         "confidence": "high",
         "excluded_notes": "Ghi chú nếu có"
-      }}
-    }}
+      }
+    }
   ]
-}}
+}"""
 
-Quy tắc BẮT BUỘC:
+_V2_OUTPUT_FORMAT = """Trả về kết quả ở định dạng JSON thuần túy có cấu trúc như sau:
+{
+  "metrics": [
+    {
+      "metric": {
+        "name": "Tên metric tiếng Việt",
+        "formula": {
+          "function": "SUM",
+          "expression": "cột_tính_toán"
+        },
+        "base_entity": "tên_bảng_chính",
+        "filters": [],
+        "status": "pending_approval",
+        "confidence": "high",
+        "excluded_notes": "Ghi chú nếu có"
+      }
+    }
+  ],
+  "duplicates": [
+    {
+      "proposed_metric_name": "Tên metric đề xuất bị coi là trùng",
+      "existing_metric_id": 12,
+      "existing_metric_name": "Tên metric đã tồn tại",
+      "existing_metric_status": "approved",
+      "user_message": "Thông báo tiếng Việt giải thích cho người dùng",
+      "similarity_reason": "Điểm giống nhau về ý nghĩa nghiệp vụ và công thức"
+    }
+  ],
+  "conflicts": [
+    {
+      "proposed_metric_name": "Tên metric đề xuất",
+      "existing_metric_id": 12,
+      "existing_metric_name": "Tên metric đã tồn tại",
+      "existing_metric_status": "approved",
+      "suggested_name": "Tên thay thế gợi ý tiếng Việt",
+      "clarify_question": "Câu hỏi làm rõ tiếng Việt cho người dùng"
+    }
+  ]
+}
+
+Cả hai mảng "duplicates" và "conflicts" đều được phép rỗng [] nếu không có mục nào."""
+
+_BASE_RULES = """Quy tắc BẮT BUỘC:
 1. formula.function chỉ dùng: SUM, COUNT, COUNT_DISTINCT, AVG, MIN, MAX.
 2. formula.expression chỉ gồm cột của base_entity, số và các toán tử (+, -, *, /). Không viết SQL, subquery, alias.
 3. base_entity và các cột phải tồn tại chính xác trong Schema dưới đây.
 4. Ưu tiên base_entity có PK/grain rõ ràng; không giả định quan hệ hoặc ý nghĩa không có trong schema.
 5. Filter chỉ dùng cột của base_entity và giá trị được người dùng nêu rõ hoặc có ý nghĩa chắc chắn.
 6. Khi dùng filter trên cột có values: [...] trong Schema, PHẢI dùng đúng 1 giá trị trong danh sách values. Không tự tạo giá trị mới.
-7. Với các cột cờ nhị phân (is_*, has_*, flag) kiểu VARCHAR(1)/CHAR(1)/INT mà KHÔNG có danh sách values trong schema: mặc định dùng giá trị "1" cho trạng thái Hoàn thành / Kích hoạt / Bật, và "0" cho Chưa xong / Tắt. TUYỆT ĐỐI KHÔNG tự bịa ra 'Y', 'N', 'TRUE', 'true'.
+7. Với các cột cờ nhị phân (is_*, has_*, flag) kiểu VARCHAR(1)/CHAR(1)/INT mà KHÔNG có danh sách values trong schema: mặc định dùng giá trị "1" cho trạng thái Hoàn thành / Kích hoạt / Bật, và "0" cho Chưa xong / Tắt. TUYỆT ĐỐI KHÔNG tự bịa ra 'Y', 'N', 'TRUE', 'true'."""
 
-Schema database:
-{schema_text}"""
+_DEDUPE_RULES = """8. Trước khi trả về, so sánh mỗi metric đề xuất với danh sách metric đang tồn tại. Nếu một metric đề xuất **cùng ý nghĩa nghiệp vụ và cùng logic tính toán ≥90%** với một metric đã có (bỏ qua hoa/thường, khoảng trắng, khác biệt cú pháp SQL vô nghĩa): KHÔNG đưa metric đó vào `metrics`; thêm mục vào `duplicates` với `proposed_metric_name` đúng bằng tên metric đề xuất bị coi là trùng (để hệ thống tự loại nếu vẫn lọt vào `metrics`), `user_message` tiếng Việt giải thích và `similarity_reason` nêu điểm giống. Nếu metric đã có ở trạng thái `approved`, nhấn mạnh rằng đã có metric chuẩn và không cần tạo mới.
+9. Nếu metric đề xuất **trùng tên** (sau khi bỏ qua hoa/thường và khoảng trắng) với metric đã có nhưng **khác logic tính toán**: vẫn đưa vào `metrics`, đồng thời thêm mục vào `conflicts` với `proposed_metric_name` đúng bằng tên đã đề xuất, `suggested_name` là tên thay thế gợi ý (tiếng Việt, tự nhiên, chưa trùng metric nào), và `clarify_question` là câu hỏi tiếng Việt cho người dùng. TUYỆT ĐỐI KHÔNG bịa metric đã có không nằm trong danh sách được cung cấp."""
+
+
+def build_metric_system_prompt(schema_text: str, existing_metrics_text: str | None = None) -> str:
+    """Build the metric-generation system prompt, optionally with dedupe context."""
+    if existing_metrics_text is None:
+        return _render_prompt(_V1_OUTPUT_FORMAT, _BASE_RULES, "", schema_text)
+    rules = f"{_BASE_RULES}\n{_DEDUPE_RULES}"
+    return _render_prompt(_V2_OUTPUT_FORMAT, rules, existing_metrics_text, schema_text)
+
+
+def _render_prompt(output_format: str, rules: str, existing_block: str, schema_text: str) -> str:
+    """Assemble prompt sections: header, output format, rules, existing metrics, schema."""
+    sections = [_PROMPT_HEADER, output_format, rules]
+    if existing_block:
+        sections.append(existing_block)
+    sections.append(f"Schema database:\n{schema_text}")
+    return "\n\n".join(sections)
 
 
 def _extract_json_from_text(text: str) -> Any:
@@ -145,29 +214,62 @@ def _parse_metric_payload(payload: Any) -> list[MetricDefinition]:
     return definitions
 
 
-async def _invoke_llm(prompt: str, schema_text: str) -> list[MetricDefinition]:
-    """Invoke LLM with structured output or fallback to raw text parsing."""
-    sys_prompt = build_metric_system_prompt(schema_text)
-    messages = [
-        {"role": "system", "content": sys_prompt},
-        {"role": "user", "content": prompt},
-    ]
+def _collect_models(items: Any, model: type[_NoticeT]) -> list[_NoticeT]:
+    """Validate dedupe list entries against a model, dropping malformed ones."""
+    if not isinstance(items, list):
+        return []
+    collected: list[_NoticeT] = []
+    for item in items:
+        try:
+            collected.append(model.model_validate(item))
+        except Exception as exc:
+            logger.debug("Dropping malformed %s entry: %s (%s)", model.__name__, item, exc)
+    return collected
+
+
+def _parse_v2_payload(payload: Any) -> _ParsedSuggestions:
+    """Parse an LLM payload into definitions plus dedupe judgments.
+
+    Missing keys yield empty lists; malformed dedupe entries are dropped so a
+    bad notice never crashes generation.
+    """
+    if isinstance(payload, MetricSuggestionsV2):
+        return list(payload.metrics), list(payload.duplicates), list(payload.conflicts)
+    definitions = _parse_metric_payload(payload)
+    raw = payload if isinstance(payload, dict) else {}
+    duplicates = _collect_models(raw.get("duplicates"), DuplicateMetricNotice)
+    conflicts = _collect_models(raw.get("conflicts"), MetricConflictInfo)
+    return definitions, duplicates, conflicts
+
+
+async def generate_definitions_v2(
+    messages: list[Any],
+    use_v2: bool,
+) -> _ParsedSuggestions:
+    """Invoke the LLM with structured output; V2 schema when use_v2 else V1.
+
+    Follows the legacy invocation pattern: structured output first, then an
+    ainvoke_json raw-text fallback with its built-in corrective retry.
+    """
     raw_llm = get_llm(role="metric")
+    structured_cls: type[MetricSuggestionsV2] | type[MetricSuggestions] = (
+        MetricSuggestionsV2 if use_v2 else MetricSuggestions
+    )
     try:
-        structured = raw_llm.with_structured_output(MetricSuggestions)
+        structured = raw_llm.with_structured_output(structured_cls)
         response = await structured.ainvoke(messages)
-        definitions = _parse_metric_payload(response)
-        if definitions:
-            return definitions
+        parsed = _parse_v2_payload(response)
+        if any(parsed):
+            return parsed
     except Exception as exc:
         logger.info("Structured output fallback triggered: %s", exc)
 
     try:
-        parsed = await ainvoke_json(raw_llm, messages)
-        return _parse_metric_payload(parsed)
+        payload = await ainvoke_json(raw_llm, messages)
+        return _parse_v2_payload(payload)
     except Exception as exc:
         logger.error("LLM metric extraction failed: %s", exc)
-        return []
+        return [], [], []
 
 
 def _references_schema(definition: MetricDefinition, valid: dict[str, set[str]]) -> bool:
@@ -189,6 +291,21 @@ def _references_schema(definition: MetricDefinition, valid: dict[str, set[str]])
         return False
 
 
+def validate_metric_definitions(
+    definitions: list[MetricDefinition],
+    dialect: str,
+    schema_dict: dict[str, Any] | None = None,
+    target_tables: list[str] | None = None,
+) -> list[MetricDefinition]:
+    """Filter definitions whose expressions reference schema-known columns."""
+    del dialect
+    schema = schema_dict or {}
+    if target_tables:
+        schema = {name: value for name, value in schema.items() if name in target_tables}
+    valid, _ = extract_schema_summary(schema)
+    return [item for item in definitions if _references_schema(item, valid)]
+
+
 async def generate_metrics_from_prompt(
     prompt: str,
     dialect: str = "postgres",
@@ -196,19 +313,24 @@ async def generate_metrics_from_prompt(
     schema_context: dict[str, Any] | None = None,
     target_tables: list[str] | None = None,
     max_retries: int = 1,
-) -> list[MetricSuggestionItem]:
-    """Generate validated metric definitions and YAML previews."""
-    del dialect, max_retries
+    existing_metrics: list[dict[str, Any]] | None = None,
+) -> tuple[list[MetricSuggestionItem], list[DuplicateMetricNotice]]:
+    """Generate validated metric suggestions merged with dedupe notices."""
+    del max_retries
     schema = schema_dict or schema_context or {}
     if target_tables:
         schema = {name: value for name, value in schema.items() if name in target_tables}
-    valid, schema_text = extract_schema_summary(schema)
-    definitions = await _invoke_llm(normalize_prompt(prompt), schema_text)
-    suggestions = [
-        MetricSuggestionItem(definition=item, yaml_preview=item.to_yaml())
-        for item in definitions
-        if _references_schema(item, valid)
+    use_v2 = bool(existing_metrics)
+    existing_text = format_existing_metrics_context(existing_metrics) if use_v2 else None
+    _, schema_text = extract_schema_summary(schema)
+    messages = [
+        {"role": "system", "content": build_metric_system_prompt(schema_text, existing_text)},
+        {"role": "user", "content": normalize_prompt(prompt)},
     ]
-    if not suggestions:
+    definitions, llm_duplicates, llm_conflicts = await generate_definitions_v2(messages, use_v2)
+    valid_defs = validate_metric_definitions(definitions, dialect, schema, target_tables)
+    items = [MetricSuggestionItem(definition=item, yaml_preview=item.to_yaml()) for item in valid_defs]
+    kept, notices = merge_dedupe(items, llm_duplicates, llm_conflicts, existing_metrics)
+    if not kept and not notices:
         raise ValueError("LLM failed to generate valid metric definitions")
-    return suggestions[:3]
+    return kept[:3], notices

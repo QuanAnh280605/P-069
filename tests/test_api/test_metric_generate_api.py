@@ -1,6 +1,6 @@
 """API tests for YAML preview and JSON metric persistence."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.auth import create_access_token
 from src.models.db import SemanticColumnModel, SemanticDatabaseModel, SemanticMetricModel, SemanticTableModel, UserModel
 from src.models.metric_definition import MetricDefinition
-from src.models.schemas import MetricSuggestionItem
+from src.models.schemas import DuplicateMetricNotice, MetricSuggestionItem
 
 
 @pytest.fixture
@@ -59,19 +59,75 @@ async def _seed(async_session: AsyncSession, db_id: int) -> None:
 @pytest.mark.asyncio
 @patch("src.api.routes.generate_metrics_from_prompt")
 async def test_generate_returns_yaml_without_persisting(
-    mock_generate: object, client: AsyncClient, async_session: AsyncSession, auth_headers: dict[str, str]
+    mock_generate: AsyncMock, client: AsyncClient, async_session: AsyncSession, auth_headers: dict[str, str]
 ) -> None:
     await _seed(async_session, 10)
     definition = _definition()
-    mock_generate.return_value = [MetricSuggestionItem(definition=definition, yaml_preview=definition.to_yaml())]
+    mock_generate.return_value = (
+        [MetricSuggestionItem(definition=definition, yaml_preview=definition.to_yaml())],
+        [],
+    )
     response = await client.post(
         "/api/v1/semantic/10/metrics/generate", json={"prompt": "Tính doanh thu"}, headers=auth_headers
     )
     assert response.status_code == 200
-    suggestion = response.json()["suggestions"][0]
+    body = response.json()
+    suggestion = body["suggestions"][0]
     assert suggestion["definition"]["metric"]["name"] == "Doanh thu"
     assert "metric:" in suggestion["yaml_preview"]
+    assert body["duplicates"] == []
+    assert body["dedupe_performed"] is True
     assert (await async_session.get(SemanticMetricModel, 1)) is None
+
+
+@pytest.mark.asyncio
+@patch("src.api.routes.generate_metrics_from_prompt")
+async def test_generate_returns_duplicates_in_response(
+    mock_generate: AsyncMock, client: AsyncClient, async_session: AsyncSession, auth_headers: dict[str, str]
+) -> None:
+    await _seed(async_session, 10)
+    mock_generate.return_value = (
+        [],
+        [
+            DuplicateMetricNotice(
+                existing_metric_id=12,
+                existing_metric_name="Doanh thu",
+                existing_metric_status="approved",
+                user_message="Đã tồn tại metric chuẩn",
+            )
+        ],
+    )
+    response = await client.post(
+        "/api/v1/semantic/10/metrics/generate", json={"prompt": "Tính doanh thu"}, headers=auth_headers
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["duplicates"]) == 1
+    assert body["duplicates"][0]["user_message"] == "Đã tồn tại metric chuẩn"
+    assert body["dedupe_performed"] is True
+    assert body["suggestions"] == []
+
+
+@pytest.mark.asyncio
+@patch("src.api.routes.generate_metrics_from_prompt")
+@patch("src.api.routes.load_existing_for_dedupe", new_callable=AsyncMock)
+async def test_generate_dedupe_unavailable_flag(
+    mock_load: AsyncMock,
+    mock_generate: AsyncMock,
+    client: AsyncClient,
+    async_session: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    await _seed(async_session, 10)
+    mock_load.return_value = ([], False)
+    mock_generate.return_value = ([], [])
+    response = await client.post(
+        "/api/v1/semantic/10/metrics/generate", json={"prompt": "Tính doanh thu"}, headers=auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["dedupe_performed"] is False
+    mock_generate.assert_awaited_once()
+    assert mock_generate.call_args.kwargs.get("existing_metrics") is None
 
 
 @pytest.mark.asyncio

@@ -46,10 +46,19 @@ class AgentState(TypedDict, total=False):
     """Pass 1 global table glossary — business_name + description for all tables."""
 
     # Flow 1 — MetricSuggest Node output
+    existing_metrics: list[dict[str, Any]]
+    """Tóm tắt các metric đã lưu (từ Metadata Store) dùng để đối chiếu trùng lặp."""
+
+    dedupe_performed: bool
+    """True nếu dedupe đã chạy; False khi không tải được existing metrics (lỗi DB)."""
+
     suggested_metrics: list[dict[str, Any]]
     """Danh sách Business Metrics do LLM đề xuất.
     Mỗi metric là một MetricDefinition JSON, không chứa SQL.
     """
+
+    duplicate_notices: list[dict[str, Any]]
+    """Advisory notices: metric đề xuất trùng metric đã lưu (không chặn lưu)."""
 
     # Flow 1 — HITL Interrupt (user review & edit)
     hitl_approved: bool

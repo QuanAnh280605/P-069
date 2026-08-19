@@ -1,5 +1,12 @@
 import YAML from 'yaml';
-import { FilterOperator, MetricDefinition, MetricFilter, MetricRecord, MetricStatus } from '@/lib/api';
+import {
+  FilterOperator,
+  MetricDefinition,
+  MetricFilter,
+  MetricRecord,
+  MetricSuggestion,
+  MetricStatus,
+} from '@/lib/api';
 
 export function createMetricDefinition(baseEntity: string = ''): MetricDefinition {
   return {
@@ -93,5 +100,16 @@ export function renderMetricYaml(definition?: MetricDefinition | null): string {
   } catch {
     return JSON.stringify(clone, null, 2);
   }
+}
+
+export function applySuggestedName(suggestion: MetricSuggestion): MetricSuggestion {
+  const newName = suggestion.conflict?.suggested_name?.trim();
+  if (!newName) return suggestion;
+  const definition: MetricDefinition = {
+    ...suggestion.definition,
+    metric: { ...suggestion.definition.metric, name: newName },
+  };
+  // The returned copy intentionally drops `conflict` — the clarify flow is resolved.
+  return { definition, yaml_preview: renderMetricYaml(definition) };
 }
 

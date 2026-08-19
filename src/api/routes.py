@@ -69,6 +69,7 @@ from src.services.live_db_service import (
     get_live_target_db,
     list_live_target_dbs,
 )
+from src.services.metric_dedupe import load_existing_for_dedupe
 from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
 from src.services.query_compiler import SemanticQueryCompiler
 from src.services.query_execution import execute_compiled_query
@@ -653,14 +654,20 @@ async def generate_custom_metrics(
         pass
 
     schema_context = await _load_schema_context_for_db(db, db_id)
+    existing, dedupe_performed = await load_existing_for_dedupe(db, db_id)
 
     try:
-        suggestions = await generate_metrics_from_prompt(
+        suggestions, duplicates = await generate_metrics_from_prompt(
             prompt=clean_prompt,
             schema_context=schema_context,
             target_tables=body.target_tables,
+            existing_metrics=existing or None,
         )
-        return CustomMetricGenerateResponse(suggestions=suggestions)
+        return CustomMetricGenerateResponse(
+            suggestions=suggestions,
+            duplicates=duplicates,
+            dedupe_performed=dedupe_performed,
+        )
     except Exception as exc:
         logger.error(f"Lỗi khi sinh metrics từ prompt: {exc}", exc_info=True)
         raise HTTPException(
@@ -1094,10 +1101,13 @@ async def chat_orchestrator(
     from src.agents.chat_graph import chat_agent
 
     schema_context = await _load_schema_context_for_db(db, db_id)
+    existing, dedupe_performed = await load_existing_for_dedupe(db, db_id)
 
     initial_state: dict = {
         "user_message": body.message,
         "enriched_schema": schema_context,
+        "existing_metrics": existing,
+        "dedupe_performed": dedupe_performed,
     }
 
     try:
@@ -1113,7 +1123,14 @@ async def chat_orchestrator(
 
     if intent == "metric_query":
         raw_metrics = final_state.get("suggested_metrics") or []
-        return ChatResponse(intent=intent, suggestions=raw_metrics)
+        notices = final_state.get("duplicate_notices") or []
+        performed = final_state.get("dedupe_performed", True)
+        return ChatResponse(
+            intent=intent,
+            suggestions=raw_metrics,
+            duplicates=notices,
+            dedupe_performed=performed,
+        )
 
     return ChatResponse(
         intent=intent,

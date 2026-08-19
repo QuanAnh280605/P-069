@@ -27,6 +27,7 @@ import {
 import React, { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import { MetricSuggestion } from '@/lib/api';
+import { ChatDuplicateNotice, ConflictWarningStrip, DuplicateNoticeCard } from '@/components/studio/DedupeWarnings';
 import { YamlCodeViewer } from '@/components/studio/YamlCodeViewer';
 
 export interface ChatMessage {
@@ -34,9 +35,13 @@ export interface ChatMessage {
   sender: 'user' | 'assistant';
   text: string;
   suggestions?: MetricSuggestion[];
+  duplicates?: ChatDuplicateNotice[];
+  dedupeSkipped?: boolean;
   timestamp: string;
   isError?: boolean;
 }
+
+type SuggestionActionHandler = (messageId: string, index: number) => void;
 
 interface StudioChatStreamProps {
   messages: ChatMessage[];
@@ -46,6 +51,11 @@ interface StudioChatStreamProps {
   onAddMetric?: (suggestion: MetricSuggestion) => Promise<void> | void;
   onEditMetric?: (suggestion: MetricSuggestion) => void;
   onRefineWithAI?: (suggestion: MetricSuggestion) => void;
+  onRenameSuggestion?: SuggestionActionHandler;
+  onDiscardSuggestion?: SuggestionActionHandler;
+  onKeepName?: SuggestionActionHandler;
+  onDismissDuplicate?: SuggestionActionHandler;
+  onUseExistingDuplicate?: SuggestionActionHandler;
   activePromptText?: string;
   theme?: 'light' | 'dark';
 }
@@ -199,6 +209,11 @@ export function StudioChatStream(props: StudioChatStreamProps) {
             onSave={save}
             onEdit={props.onEditMetric}
             onRefine={props.onRefineWithAI}
+            onRenameSuggestion={props.onRenameSuggestion}
+            onDiscardSuggestion={props.onDiscardSuggestion}
+            onKeepName={props.onKeepName}
+            onDismissDuplicate={props.onDismissDuplicate}
+            onUseExistingDuplicate={props.onUseExistingDuplicate}
           />
         ))}
 
@@ -320,12 +335,22 @@ function MessageBubble({
   onSave,
   onEdit,
   onRefine,
+  onRenameSuggestion,
+  onDiscardSuggestion,
+  onKeepName,
+  onDismissDuplicate,
+  onUseExistingDuplicate,
 }: {
   message: ChatMessage;
   saved: string[];
   onSave: (item: MetricSuggestion) => Promise<void>;
   onEdit?: (item: MetricSuggestion) => void;
   onRefine?: (item: MetricSuggestion) => void;
+  onRenameSuggestion?: SuggestionActionHandler;
+  onDiscardSuggestion?: SuggestionActionHandler;
+  onKeepName?: SuggestionActionHandler;
+  onDismissDuplicate?: SuggestionActionHandler;
+  onUseExistingDuplicate?: SuggestionActionHandler;
 }) {
   const user = message.sender === 'user';
   return (
@@ -360,7 +385,7 @@ function MessageBubble({
           </p>
         )}
 
-        <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p>
+        {message.text ? <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p> : null}
 
         {message.suggestions && message.suggestions.length > 0 && (
           <div className="mt-3.5 space-y-3.5">
@@ -368,10 +393,34 @@ function MessageBubble({
               <SuggestionCard
                 key={`${message.id}-${index}`}
                 suggestion={suggestion}
+                messageId={message.id}
+                index={index}
                 saved={saved.includes(suggestion.definition.metric.name)}
                 onSave={onSave}
                 onEdit={onEdit}
                 onRefine={onRefine}
+                onRename={onRenameSuggestion}
+                onDiscard={onDiscardSuggestion}
+                onKeepName={onKeepName}
+              />
+            ))}
+          </div>
+        )}
+
+        {message.dedupeSkipped && (
+          <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-[11px] leading-relaxed text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
+            ⚠️ Không kiểm tra được trùng lặp (dedupe unavailable) — danh sách chưa so với metric đã lưu.
+          </p>
+        )}
+
+        {message.duplicates && message.duplicates.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {message.duplicates.map((notice, index) => (
+              <DuplicateNoticeCard
+                key={`${message.id}-duplicate-${index}`}
+                notice={notice}
+                onDismiss={() => onDismissDuplicate?.(message.id, index)}
+                onUseExisting={() => onUseExistingDuplicate?.(message.id, index)}
               />
             ))}
           </div>
@@ -387,16 +436,26 @@ function MessageBubble({
 
 function SuggestionCard({
   suggestion,
+  messageId,
+  index,
   saved,
   onSave,
   onEdit,
   onRefine,
+  onRename,
+  onDiscard,
+  onKeepName,
 }: {
   suggestion: MetricSuggestion;
+  messageId: string;
+  index: number;
   saved: boolean;
   onSave: (item: MetricSuggestion) => Promise<void>;
   onEdit?: (item: MetricSuggestion) => void;
   onRefine?: (item: MetricSuggestion) => void;
+  onRename?: SuggestionActionHandler;
+  onDiscard?: SuggestionActionHandler;
+  onKeepName?: SuggestionActionHandler;
 }) {
   const metric = suggestion.definition.metric;
   const [showYaml, setShowYaml] = useState(false);
@@ -452,6 +511,16 @@ function SuggestionCard({
 
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-4.5 shadow-sm dark:border-slate-800 dark:bg-slate-950/60 space-y-4">
+      {/* ⚠️ 0. Conflict clarify strip (trùng tên với metric đã lưu, khác công thức) */}
+      {suggestion.conflict && (
+        <ConflictWarningStrip
+          conflict={suggestion.conflict}
+          onRename={() => onRename?.(messageId, index)}
+          onUseExisting={() => onDiscard?.(messageId, index)}
+          onKeepName={() => onKeepName?.(messageId, index)}
+        />
+      )}
+
       {/* 🌟 1. Metric Header */}
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3 dark:border-slate-800/80">
         <div className="space-y-1">
@@ -615,28 +684,31 @@ function SuggestionCard({
           </button>
         </div>
 
-        <button
-          type="button"
-          disabled={saved}
-          onClick={() => void onSave(suggestion)}
-          className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold text-white shadow-xs transition-all ${
-            saved
-              ? 'bg-emerald-600 opacity-90 cursor-default'
-              : 'bg-indigo-600 hover:bg-indigo-700 active:scale-95 cursor-pointer shadow-indigo-500/20'
-          }`}
-        >
-          {saved ? (
-            <>
-              <CheckCircle2 className="h-4 w-4" />
-              Đã lưu vào Semantic Layer
-            </>
-          ) : (
-            <>
-              <PlusCircle className="h-4 w-4" />
-              Lưu vào Semantic Layer
-            </>
-          )}
-        </button>
+        {/* ⛔ No Save while the conflict strip is unresolved — user must clarify first */}
+        {!suggestion.conflict && (
+          <button
+            type="button"
+            disabled={saved}
+            onClick={() => void onSave(suggestion)}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold text-white shadow-xs transition-all ${
+              saved
+                ? 'bg-emerald-600 opacity-90 cursor-default'
+                : 'bg-indigo-600 hover:bg-indigo-700 active:scale-95 cursor-pointer shadow-indigo-500/20'
+            }`}
+          >
+            {saved ? (
+              <>
+                <CheckCircle2 className="h-4 w-4" />
+                Đã lưu vào Semantic Layer
+              </>
+            ) : (
+              <>
+                <PlusCircle className="h-4 w-4" />
+                Lưu vào Semantic Layer
+              </>
+            )}
+          </button>
+        )}
       </div>
     </article>
   );
