@@ -1,164 +1,185 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { MessageSquare, Plus } from 'lucide-react';
 
 import {
   ChatMessageItem,
   ChatSessionItem,
-  createChatSessionApi,
   createMetricApi,
-  deleteChatSessionApi,
+  generateCustomMetricsApi,
   getChatSessionDetailApi,
-  listChatSessionsApi,
   MetricSuggestion,
   SemanticLayerData,
   sendChatOrchestratorApi,
-  updateChatSessionTitleApi,
 } from '@/lib/api';
 import { ChatMessage, StudioChatStream } from '@/components/studio/StudioChatStream';
+import { ViewHeader } from '@/components/workspace/ViewHeader';
 
 interface AIStudioViewProps {
   layer: SemanticLayerData;
   theme: 'light' | 'dark';
+  sessions?: ChatSessionItem[];
+  setSessions?: React.Dispatch<React.SetStateAction<ChatSessionItem[]>>;
+  activeSessionId?: string | null;
+  setActiveSessionId?: React.Dispatch<React.SetStateAction<string | null>>;
+  loadingSessions?: boolean;
+  onSelectSession?: (id: string) => void;
+  onNewChat?: () => void;
   onMetricsChanged: () => Promise<void> | void;
   onEditMetricRequest: (metric: MetricSuggestion) => void;
+  onOpenCatalog?: () => void;
 }
 
-export function AIStudioView({ layer, theme, onMetricsChanged, onEditMetricRequest }: AIStudioViewProps) {
+export function AIStudioView({
+  layer,
+  theme,
+  sessions = [],
+  setSessions,
+  activeSessionId = null,
+  setActiveSessionId,
+  loadingSessions = false,
+  onNewChat,
+  onMetricsChanged,
+  onEditMetricRequest,
+  onOpenCatalog,
+}: AIStudioViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [sessions, setSessions] = useState<ChatSessionItem[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [loadingSessions, setLoadingSessions] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activePrompt, setActivePrompt] = useState('');
   const semanticDbId = layer.semantic_db_id;
   const requestVersion = useRef(0);
 
-  useEffect(() => {
-    requestVersion.current += 1;
-    setActiveSessionId(null);
-    setMessages([]);
-    if (!semanticDbId || layer.source_type !== 'live') return;
-    void loadSessions(String(semanticDbId));
-  }, [layer.db_name, layer.source_type, semanticDbId]);
-
-  const loadSessions = async (dbId: string) => {
-    setLoadingSessions(true);
-    try {
-      const items = await listChatSessionsApi(dbId);
-      setSessions(items);
-      const fromUrl = new URLSearchParams(window.location.search).get('chat');
-      const selected = items.find((item) => item.id === fromUrl) || items[0];
-      if (selected) await selectSession(dbId, selected.id);
-      else showWelcome();
-    } catch (error) {
-      showWelcome(error instanceof Error ? error.message : 'Không thể tải lịch sử chat.');
-    } finally {
-      setLoadingSessions(false);
-    }
-  };
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.id === activeSessionId) || null,
+    [sessions, activeSessionId],
+  );
 
   const showWelcome = (error?: string) => {
     setMessages([
       {
         id: 'welcome',
         sender: 'assistant',
-        text: error || `Xin chào! Tôi có thể trả lời thắc mắc hoặc giúp bạn sinh chỉ số (Business Metrics) cho ${layer.db_name}.`,
+        text:
+          error ||
+          `Xin chào! Tôi đã quét schema cho database ${layer.db_name} (${layer.tables.length} bảng). Bạn có thể hỏi bất kỳ câu hỏi nào để tôi tự động đề xuất và định nghĩa các chỉ số kinh doanh (Business Metrics).`,
         timestamp: now(),
         isError: Boolean(error),
       },
     ]);
   };
 
-  const updateUrl = (sessionId: string | null) => {
-    const url = new URL(window.location.href);
-    if (sessionId) url.searchParams.set('chat', sessionId);
-    else url.searchParams.delete('chat');
-    window.history.replaceState({}, '', url);
-  };
-
-  const selectSession = async (dbId: string, sessionId: string) => {
+  useEffect(() => {
     const version = ++requestVersion.current;
-    setActiveSessionId(sessionId);
-    updateUrl(sessionId);
-    setLoadingSessions(true);
-    try {
-      const detail = await getChatSessionDetailApi(dbId, sessionId);
-      if (version !== requestVersion.current) return;
-      setMessages(detail.messages.filter((item) => item.sender !== 'system').map(toChatMessage));
-    } catch (error) {
-      if (version === requestVersion.current) appendError(setMessages, error instanceof Error ? error.message : 'Không thể tải lịch sử chat.');
-    } finally {
-      if (version === requestVersion.current) setLoadingSessions(false);
+    if (!semanticDbId || layer.source_type !== 'live') {
+      showWelcome();
+      return;
     }
-  };
 
-  const newChat = async () => {
-    if (!semanticDbId || layer.source_type !== 'live') return;
-    try {
-      const session = await createChatSessionApi(String(semanticDbId));
-      setSessions((current) => [session, ...current]);
-      setActiveSessionId(session.id);
-      setMessages([]);
-      updateUrl(session.id);
-    } catch (error) {
-      appendError(setMessages, error instanceof Error ? error.message : 'Không thể tạo cuộc trò chuyện mới.');
+    if (!activeSessionId) {
+      showWelcome();
+      return;
     }
-  };
 
-  const handleRenameSession = async (sessionId: string, newTitle: string) => {
-    if (!semanticDbId) return;
-    try {
-      const updated = await updateChatSessionTitleApi(String(semanticDbId), sessionId, newTitle);
-      setSessions((current) =>
-        current.map((item) => (item.id === sessionId ? { ...item, title: updated.title } : item))
-      );
-    } catch (error) {
-      appendError(setMessages, error instanceof Error ? error.message : 'Không thể đổi tên cuộc trò chuyện.');
-    }
-  };
-
-  const removeSession = async (sessionId: string) => {
-    if (!semanticDbId) return;
-    try {
-      await deleteChatSessionApi(String(semanticDbId), sessionId);
-      const remaining = sessions.filter((item) => item.id !== sessionId);
-      setSessions(remaining);
-      if (activeSessionId === sessionId) {
-        const next = remaining[0];
-        if (next) await selectSession(String(semanticDbId), next.id);
-        else {
-          setActiveSessionId(null);
-          setMessages([]);
-          updateUrl(null);
+    const loadDetail = async () => {
+      try {
+        const detail = await getChatSessionDetailApi(String(semanticDbId), activeSessionId);
+        if (version !== requestVersion.current) return;
+        setMessages(detail.messages.filter((item) => item.sender !== 'system').map(toChatMessage));
+      } catch (error) {
+        if (version === requestVersion.current) {
+          appendError(
+            setMessages,
+            error instanceof Error ? error.message : 'Không thể tải lịch sử cuộc trò chuyện.',
+          );
         }
       }
-    } catch (error) {
-      appendError(setMessages, error instanceof Error ? error.message : 'Không thể xóa cuộc trò chuyện.');
-    }
-  };
+    };
+
+    void loadDetail();
+  }, [activeSessionId, layer.db_name, layer.source_type, semanticDbId]);
 
   const send = async (prompt: string, _targetTables: string[]) => {
     const clientMessageId = crypto.randomUUID();
     const requestSessionId = activeSessionId;
-    setMessages((current) => [...current, { id: clientMessageId, sender: 'user', text: prompt, timestamp: now() }]);
-    if (!semanticDbId) return appendError(setMessages, 'Semantic Layer đang được khởi tạo. Vui lòng tải lại sau khi enrichment hoàn tất.');
+
+    setMessages((current) => [
+      ...current,
+      { id: clientMessageId, sender: 'user', text: prompt, timestamp: now() },
+    ]);
+    if (!semanticDbId) {
+      return appendError(
+        setMessages,
+        'Semantic Layer đang được khởi tạo. Vui lòng tải lại sau khi enrichment hoàn tất.',
+      );
+    }
     setLoading(true);
     try {
-      const response = await sendChatOrchestratorApi(String(semanticDbId), prompt, requestSessionId, clientMessageId);
-      if (requestSessionId && activeSessionId !== requestSessionId) return;
-      setActiveSessionId(response.session_id);
-      updateUrl(response.session_id);
-      const suggestions = response.suggestions || [];
-      setMessages((current) => [...current, {
-        id: response.assistant_message_id,
-        sender: 'assistant',
-        text: response.chat_response || (suggestions.length ? `Đã đề xuất ${suggestions.length} Metric Definition.` : 'Không sinh được metric phù hợp từ schema.'),
-        suggestions,
-        timestamp: now(),
-      }]);
-      if (response.session) {
-        setSessions((current) => [response.session!, ...current.filter((item) => item.id !== response.session!.id)]);
+      let suggestions: MetricSuggestion[] = [];
+      try {
+        const response = await sendChatOrchestratorApi(
+          String(semanticDbId),
+          prompt,
+          requestSessionId,
+          clientMessageId,
+        );
+        if (requestSessionId && activeSessionId !== requestSessionId) return;
+        if (response.session_id) {
+          setActiveSessionId?.(response.session_id);
+          if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.set('chat', response.session_id);
+            window.history.replaceState({}, '', url);
+          }
+        }
+        if (response.session) {
+          setSessions?.((current) => [
+            response.session!,
+            ...current.filter((item) => item.id !== response.session!.id),
+          ]);
+        }
+        if (response.intent === 'chitchat') {
+          setMessages((current) => [
+            ...current,
+            {
+              id: response.assistant_message_id || crypto.randomUUID(),
+              sender: 'assistant',
+              text: response.chat_response || 'Xin chào! Tôi có thể giúp gì cho bạn?',
+              timestamp: now(),
+            },
+          ]);
+          return;
+        }
+        suggestions = response.suggestions || [];
+        setMessages((current) => [
+          ...current,
+          {
+            id: response.assistant_message_id || crypto.randomUUID(),
+            sender: 'assistant',
+            text:
+              response.chat_response ||
+              (suggestions.length
+                ? `Dựa trên schema của bạn, tôi đề xuất ${suggestions.length} Metric Definition dưới đây. Bạn có thể xem trước YAML và lưu vào catalog để duyệt:`
+                : 'Không sinh được metric phù hợp từ schema.'),
+            suggestions,
+            timestamp: now(),
+          },
+        ]);
+      } catch {
+        const res = await generateCustomMetricsApi(String(semanticDbId), prompt, _targetTables);
+        suggestions = res.suggestions || [];
+        setMessages((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            sender: 'assistant',
+            text: suggestions.length
+              ? `Dựa trên schema của bạn, tôi đề xuất ${suggestions.length} Metric Definition dưới đây. Bạn có thể xem trước YAML và lưu vào catalog để duyệt:`
+              : 'Không sinh được metric phù hợp từ schema.',
+            suggestions,
+            timestamp: now(),
+          },
+        ]);
       }
     } catch (error) {
       appendError(setMessages, error instanceof Error ? error.message : 'Không thể xử lý yêu cầu');
@@ -169,24 +190,77 @@ export function AIStudioView({ layer, theme, onMetricsChanged, onEditMetricReque
 
   const save = async (suggestion: MetricSuggestion) => {
     if (!semanticDbId) {
-      appendError(setMessages, 'Semantic database chưa sẵn sàng hoặc đã bị xóa. Vui lòng tải lại trang.');
+      appendError(
+        setMessages,
+        'Semantic database chưa sẵn sàng hoặc đã bị xóa. Vui lòng tải lại trang.',
+      );
       return;
     }
     try {
-      await createMetricApi(String(semanticDbId), { definition: suggestion.definition, source: 'ai' });
+      await createMetricApi(String(semanticDbId), {
+        definition: suggestion.definition,
+        source: 'ai',
+      });
       await onMetricsChanged();
     } catch (error) {
       appendError(
         setMessages,
-        `Không thể lưu chỉ số "${suggestion.definition.metric.name}": ${error instanceof Error ? error.message : 'Lỗi không xác định'}`
+        `Không thể lưu chỉ số "${suggestion.definition.metric.name}": ${
+          error instanceof Error ? error.message : 'Lỗi không xác định'
+        }`,
       );
       throw error;
     }
   };
 
+  const dbProp = {
+    id: layer.id,
+    name: layer.db_name,
+    engine: layer.db_type === 'auto' ? ('dump' as const) : layer.db_type,
+    status: 'connected' as const,
+    tables: layer.tables.length,
+  };
+
   return (
-    <div className="flex h-[calc(100vh-130px)] min-h-[620px] w-full">
-      <div className="min-w-0 flex-1 h-full">
+    <div className="flex h-full w-full flex-col overflow-hidden">
+      <ViewHeader
+        eyebrow="Generate"
+        title="AI Studio"
+        description="Chat with the assistant to explore your schema and auto-generate business metric definitions."
+        database={dbProp}
+        actions={
+          activeSession ? (
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary px-3 py-1 font-sans text-xs text-secondary-foreground">
+                <MessageSquare className="h-3.5 w-3.5 text-primary" />
+                <span className="max-w-[200px] truncate">{activeSession.title}</span>
+              </span>
+              {onNewChat && (
+                <button
+                  type="button"
+                  onClick={onNewChat}
+                  className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1 font-sans text-xs font-medium text-foreground transition-colors hover:bg-accent cursor-pointer"
+                  title="Tạo cuộc trò chuyện mới"
+                >
+                  <Plus className="h-3 w-3" />
+                  <span>Đoạn chat mới</span>
+                </button>
+              )}
+            </div>
+          ) : onNewChat && layer.source_type === 'live' && semanticDbId ? (
+            <button
+              type="button"
+              onClick={onNewChat}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1 font-sans text-xs font-medium text-foreground transition-colors hover:bg-accent cursor-pointer"
+              title="Tạo cuộc trò chuyện mới"
+            >
+              <Plus className="h-3 w-3" />
+              <span>Đoạn chat mới</span>
+            </button>
+          ) : undefined
+        }
+      />
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <StudioChatStream
           messages={messages}
           onSendMessage={send}
@@ -194,16 +268,12 @@ export function AIStudioView({ layer, theme, onMetricsChanged, onEditMetricReque
           tableNames={layer.tables.map((table) => table.table_name)}
           onAddMetric={save}
           onEditMetric={onEditMetricRequest}
-          onRefineWithAI={(suggestion) => setActivePrompt(`Hãy điều chỉnh chỉ số ${suggestion.definition.metric.name}: `)}
+          onRefineWithAI={(suggestion) =>
+            setActivePrompt(`Hãy điều chỉnh chỉ số ${suggestion.definition.metric.name}: `)
+          }
           activePromptText={activePrompt}
           theme={theme}
-          sessions={layer.source_type === 'live' ? sessions : undefined}
-          activeSessionId={activeSessionId}
-          loadingSessions={loadingSessions}
-          onSelectSession={(id) => void selectSession(String(semanticDbId), id)}
-          onNewChat={() => void newChat()}
-          onDeleteSession={(id) => void removeSession(id)}
-          onRenameSession={handleRenameSession}
+          onOpenCatalog={onOpenCatalog}
         />
       </div>
     </div>
@@ -216,13 +286,22 @@ function toChatMessage(message: ChatMessageItem): ChatMessage {
     sender: message.sender === 'user' ? 'user' : 'assistant',
     text: message.content,
     suggestions: message.metadata_json?.suggestions,
-    timestamp: new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    timestamp: new Date(message.created_at).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
     isError: message.metadata_json?.status === 'error',
   };
 }
 
-function appendError(setter: React.Dispatch<React.SetStateAction<ChatMessage[]>>, text: string): void {
-  setter((current) => [...current, { id: crypto.randomUUID(), sender: 'assistant', text, timestamp: now(), isError: true }]);
+function appendError(
+  setter: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
+  text: string,
+): void {
+  setter((current) => [
+    ...current,
+    { id: crypto.randomUUID(), sender: 'assistant', text, timestamp: now(), isError: true },
+  ]);
 }
 
 function now(): string {

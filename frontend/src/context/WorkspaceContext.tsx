@@ -17,6 +17,16 @@ interface WorkspaceContextValue {
 
 const WorkspaceContext = createContext<WorkspaceContextValue | undefined>(undefined);
 
+const defaultWorkspaceContext: WorkspaceContextValue = {
+  workspaces: [],
+  currentWorkspace: null,
+  role: null,
+  permissions: {},
+  isLoading: false,
+  switchWorkspace: () => {},
+  reloadWorkspaces: async () => {},
+};
+
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
@@ -76,6 +86,5 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
 export function useWorkspace() {
   const context = useContext(WorkspaceContext);
-  if (!context) throw new Error('useWorkspace must be used within a WorkspaceProvider');
-  return context;
+  return context || defaultWorkspaceContext;
 }

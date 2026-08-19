@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ConnectDbModal } from '@/components/modals/ConnectDbModal';
 
@@ -16,6 +16,8 @@ vi.mock('@/lib/api', () => ({
 }));
 
 describe('ConnectDbModal authentication', () => {
+  afterEach(() => cleanup());
+
   beforeEach(() => {
     connectMock.mockReset();
     connectMock.mockResolvedValue({ id: 9, display_name: 'Sales', dialect: 'postgresql', raw_schema: { tables: [] }, updated_at: '', semantic_db_id: 12 });
@@ -28,5 +30,18 @@ describe('ConnectDbModal authentication', () => {
     fireEvent.click(screen.getByText('Bắt Đầu Kết Nối & Introspect'));
     await waitFor(() => expect(connectMock).toHaveBeenCalledWith('Sales', 'auto', 'postgresql+asyncpg://user:pass@localhost/sales', 'stored-access-token'));
     expect(screen.queryByText(/Vui lòng đăng nhập/)).not.toBeInTheDocument();
+  });
+});
+
+describe('ConnectDbModal guardrail copy', () => {
+  afterEach(() => cleanup());
+
+  it('renders the exact guardrail safety constraints', () => {
+    render(<ConnectDbModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+    expect(screen.getByText(/Chỉ dành cho Live DB/)).toBeInTheDocument();
+    expect(screen.getByText(/SELECT-only/)).toBeInTheDocument();
+    expect(screen.getByText(/Mặc định 100 dòng/)).toBeInTheDocument();
+    expect(screen.getByText(/Tối đa 1\.000 dòng/)).toBeInTheDocument();
+    expect(screen.getByText(/Timeout 15 giây/)).toBeInTheDocument();
   });
 });
