@@ -5,7 +5,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.auth import auth_router
-from src.api.query_clarify_routes import query_clarify_router
 from src.api.routes import router
 from src.config import get_settings
 from src.models.db import Base
@@ -40,6 +39,7 @@ app = FastAPI(
 )
 
 settings = get_settings()
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins.split(","),
@@ -47,10 +47,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(RateLimitMiddleware)
 
 app.include_router(auth_router, prefix="/api/v1")
-app.include_router(query_clarify_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1")
 
 

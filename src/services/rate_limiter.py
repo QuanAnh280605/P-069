@@ -20,8 +20,6 @@ AI_POST_SUFFIXES = (
     "/semantic/generate",
     "/chat",
     "/metrics/generate",
-    "/query/clarify/start",
-    "/query/clarify/step",
     "/semantic/import/saved",
     "/semantic/db/connect",
 )

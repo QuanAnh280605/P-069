@@ -20,7 +20,6 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
-  Sparkles,
   Table as TableIcon,
   Table2,
   TrendingUp,
@@ -48,7 +47,6 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { AIQueryModal } from '@/components/explorer/AIQueryModal';
 
 import {
   CatalogColumn,
@@ -65,7 +63,6 @@ import {
   SemanticQueryPreview,
   SemanticQueryRequest,
   SemanticQueryResult,
-  SemanticQuerySpec,
   TimeGrain,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -248,9 +245,7 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
   const [loading, setLoading] = useState(false);
   const [viewTab, setViewTab] = useState<'table' | 'chart' | 'sql'>('table');
   const [chartType, setChartType] = useState<ChartType>('bar');
-  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [dimSearch, setDimSearch] = useState('');
-  const [nlQuery, setNlQuery] = useState('');
   const [copiedSql, setCopiedSql] = useState(false);
   const [recommendedDims, setRecommendedDims] = useState<RecommendedDimensionItem[]>([]);
   const [loadingDims, setLoadingDims] = useState(false);
@@ -450,12 +445,6 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
     setError('');
   };
 
-  const handleAiResolved = (spec: SemanticQuerySpec) => {
-    if (spec.metric_ids && spec.metric_ids.length > 0) setMetricIds(spec.metric_ids);
-    if (spec.dimensions) setDimensions(spec.dimensions);
-    if (spec.limit) setLimit(spec.limit);
-  };
-
   const runCompile = async () => {
     if (!metricIds.length || !dbId) return;
     setLoading(true);
@@ -576,32 +565,6 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
       <div className="flex min-h-0 flex-1">
         {/* Left Config Panel */}
         <div className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border p-4.5 bg-card/40">
-          {/* Ask in natural language */}
-          <div className="rounded-xl border border-border bg-card p-3.5 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <SectionLabel>Hỏi bằng ngôn ngữ tự nhiên</SectionLabel>
-              <Sparkles className="h-3.5 w-3.5 text-primary animate-pulse" />
-            </div>
-            <div className="mt-2 rounded-lg border border-border bg-background p-2 focus-within:border-primary/60 transition-colors">
-              <textarea
-                value={nlQuery}
-                onChange={(e) => setNlQuery(e.target.value)}
-                rows={2}
-                placeholder="VD: Doanh thu và đơn hàng theo từng tháng năm nay..."
-                className="w-full resize-none bg-transparent text-xs outline-none placeholder:text-muted-foreground"
-              />
-            </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="mt-2 w-full gap-1.5 text-xs font-medium"
-              onClick={() => setIsAiModalOpen(true)}
-            >
-              <Sparkles className="h-3.5 w-3.5 text-primary" />
-              <span>AI Tự Động Thiết Lập Truy Vấn</span>
-            </Button>
-          </div>
-
           {/* Question Summary Banner */}
           <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs">
             <div className="flex items-center justify-between">
@@ -1118,14 +1081,6 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
           </div>
         </div>
       </div>
-
-      <AIQueryModal
-        isOpen={isAiModalOpen}
-        onClose={() => setIsAiModalOpen(false)}
-        dbId={dbId || 0}
-        theme={theme || 'dark'}
-        onResolved={handleAiResolved}
-      />
     </div>
   );
 }

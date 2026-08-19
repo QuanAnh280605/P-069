@@ -54,8 +54,6 @@ def test_is_ai_request() -> None:
     assert is_ai_request("/api/v1/semantic/generate", "POST") is True
     assert is_ai_request("/api/v1/semantic/1/chat", "POST") is True
     assert is_ai_request("/api/v1/semantic/1/metrics/generate", "POST") is True
-    assert is_ai_request("/api/v1/query/clarify/start", "POST") is True
-    assert is_ai_request("/api/v1/query/clarify/step", "POST") is True
     assert is_ai_request("/api/v1/semantic/import/saved", "POST") is True
     assert is_ai_request("/api/v1/semantic/db/connect", "POST") is True
 
@@ -148,3 +146,27 @@ def test_middleware_enforces_rate_limit_on_ai_only(monkeypatch) -> None:
 
     resp_catalog = client.get("/api/v1/semantic/nonexistent/catalog", headers=headers)
     assert resp_catalog.status_code != 429
+
+
+def test_middleware_cors_headers_on_429(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "src.services.rate_limiter.get_settings",
+        lambda: Settings(
+            app_env="production",
+            rate_limit_enabled=True,
+            rate_limit_rpm=1,
+            encryption_key="",
+            cors_origins="http://localhost:3000",
+        ),
+    )
+    get_rate_limiter().reset()
+    client = TestClient(app)
+    headers = {"X-Forwarded-For": "5.6.7.8", "Origin": "http://localhost:3000"}
+
+    # First request consumes quota
+    client.post("/api/v1/semantic/generate", json={"db_id": 1}, headers=headers)
+
+    # Second request hits 429 rate limit and MUST retain CORS headers
+    resp = client.post("/api/v1/semantic/generate", json={"db_id": 1}, headers=headers)
+    assert resp.status_code == 429
+    assert resp.headers.get("access-control-allow-origin") == "http://localhost:3000"
