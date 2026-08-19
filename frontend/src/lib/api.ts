@@ -45,13 +45,18 @@ export interface MetricDefinition {
 
 export interface MetricRecord {
   metric_id: number;
+  db_id?: number;
   name: string;
+  description?: string;
+  sql_template?: string;
   definition: MetricDefinition | null;
   source: 'ai' | 'manual';
-  version: number;
+  version?: number;
   status: MetricStatus;
   approved_by?: number | null;
+  created_by?: number | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface SemanticLayerData {
@@ -120,7 +125,8 @@ export interface SemanticQueryFilter {
 
 export interface SemanticQueryRequest {
   metric_ids: number[];
-  dimensions: DimensionSelection[];
+  dimensions?: DimensionSelection[];
+  dimension_ids?: number[];
   filters: SemanticQueryFilter[];
   limit: number;
 }
@@ -142,9 +148,11 @@ export interface SemanticQueryPreview {
 export interface SemanticQueryResult {
   sql: string;
   parameters: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   columns: string[];
   rows: unknown[][];
   row_count: number;
+  execution_time_ms?: number;
 }
 
 const LEGACY_INITIAL_LAYERS: unknown[] = [
