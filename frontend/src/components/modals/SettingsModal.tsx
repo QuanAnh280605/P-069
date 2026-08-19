@@ -65,7 +65,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {user?.name || 'Guest User'}
               </p>
               <p className="truncate font-mono text-[11px] text-muted-foreground">
-                {user?.email || 'guest@optimus.io'} · Semantic Admin
+                {user?.email || 'guest@optimus.io'} · Workspace member
               </p>
             </div>
             <span className="rounded-full border border-border bg-secondary px-2.5 py-0.5 font-mono text-[10px] text-secondary-foreground">

@@ -290,7 +290,7 @@ const API_BASE_URL =
   'http://localhost:8000';
 const API_BASE = API_BASE_URL;
 
-export type WorkspaceRole = 'admin' | 'data_lead' | 'member';
+export type WorkspaceRole = 'data_lead' | 'member';
 
 export interface WorkspaceSummary {
   id: number;
@@ -531,13 +531,6 @@ async function chatRequest<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function listChatSessionsApi(dbId: string): Promise<ChatSessionItem[]> {
   return chatRequest<ChatSessionItem[]>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions`);
-}
-
-export async function createChatSessionApi(dbId: string, title?: string): Promise<ChatSessionItem> {
-  return chatRequest<ChatSessionItem>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions`, {
-    method: 'POST',
-    body: JSON.stringify(title ? { title } : {}),
-  });
 }
 
 export async function getChatSessionDetailApi(

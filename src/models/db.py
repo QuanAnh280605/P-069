@@ -24,6 +24,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -80,6 +81,7 @@ class OrganizationMemberModel(Base):
 
     __tablename__ = "organization_members"
     __table_args__ = (
+        CheckConstraint("role IN ('data_lead', 'member')", name="ck_organization_members_role"),
         UniqueConstraint("org_id", "user_id", name="uq_organization_members_org_user"),
         Index("idx_organization_members_org_role", "org_id", "role"),
         Index("idx_organization_members_user_org", "user_id", "org_id"),
@@ -105,6 +107,7 @@ class OrganizationInvitationModel(Base):
 
     __tablename__ = "organization_invitations"
     __table_args__ = (
+        CheckConstraint("role IN ('data_lead', 'member')", name="ck_organization_invitations_role"),
         Index("idx_organization_invitations_org_status", "org_id", "status"),
         Index("idx_organization_invitations_token_hash", "token_hash", unique=True),
     )

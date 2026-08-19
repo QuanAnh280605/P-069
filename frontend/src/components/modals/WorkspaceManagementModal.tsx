@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
-import { Check, Copy, Link2, Shield, UserPlus, X } from 'lucide-react';
+import { CalendarClock, Check, ChevronDown, Copy, Link2, Shield, UserPlus, X } from 'lucide-react';
 
 import {
   createWorkspaceInviteApi,
@@ -23,6 +23,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
+const inviteRoleLabels: Record<WorkspaceInvite['role'], string> = {
+  member: 'Member',
+  data_lead: 'Data Lead',
+};
+
 export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
@@ -33,6 +38,8 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
   const [inviting, setInviting] = useState(false);
   const [revokingId, setRevokingId] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [membersExpanded, setMembersExpanded] = useState(true);
+  const [invitesExpanded, setInvitesExpanded] = useState(true);
 
   const load = async () => {
     setLoading(true);
@@ -193,61 +200,114 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
         </section>
 
         <section>
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="flex items-center gap-2 text-sm font-semibold"><Shield className="h-4 w-4" /> Thành viên</h3>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <button
+              type="button"
+              aria-expanded={membersExpanded}
+              aria-controls="workspace-members-panel"
+              onClick={() => setMembersExpanded((expanded) => !expanded)}
+              className="group flex min-w-0 items-center gap-2 text-left text-sm font-semibold"
+            >
+              <Shield className="h-4 w-4" />
+              <span>Thành viên</span>
+              <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${membersExpanded ? 'rotate-180' : ''}`} />
+            </button>
             {loading && <span className="text-xs text-muted-foreground">Đang tải...</span>}
           </div>
-          <div className="divide-y divide-border rounded-xl border border-border bg-card">
-            {members.map((member) => (
-              <div key={member.user_id} className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm">
-                <div className="min-w-0">
-                  <p className="truncate font-semibold">{member.full_name || member.username}</p>
-                  <p className="truncate text-xs text-muted-foreground">{member.email}</p>
+          {membersExpanded && (
+            <div id="workspace-members-panel" className="divide-y divide-border rounded-xl border border-border bg-card">
+              {members.map((member) => (
+                <div key={member.user_id} className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">{member.full_name || member.username}</p>
+                    <p className="truncate text-xs text-muted-foreground">{member.email}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      aria-label={`Vai trò của ${member.email}`}
+                      value={member.role}
+                      onChange={(event) => void changeRole(member, event.target.value as WorkspaceRole)}
+                      className="border-input bg-background text-foreground h-8 rounded-md border px-2 text-xs"
+                    >
+                      <option value="data_lead">Data Lead</option>
+                      <option value="member">Member</option>
+                    </select>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => void remove(member)} className="text-destructive hover:text-destructive">
+                      <X className="h-3.5 w-3.5" /> Xóa
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <select
-                    aria-label={`Vai trò của ${member.email}`}
-                    value={member.role}
-                    onChange={(event) => void changeRole(member, event.target.value as WorkspaceRole)}
-                    className="border-input bg-background text-foreground h-8 rounded-md border px-2 text-xs"
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="data_lead">Data Lead</option>
-                    <option value="member">Member</option>
-                  </select>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => void remove(member)} className="text-destructive hover:text-destructive">
-                    <X className="h-3.5 w-3.5" /> Xóa
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {!loading && members.length === 0 && <p className="p-4 text-xs text-muted-foreground">Chưa có thành viên.</p>}
-          </div>
+              ))}
+              {!loading && members.length === 0 && <p className="p-4 text-xs text-muted-foreground">Chưa có thành viên.</p>}
+            </div>
+          )}
         </section>
 
         <section>
-          <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold"><Link2 className="h-4 w-4" /> Invitation đang mở</h3>
-          <div className="divide-y divide-border rounded-xl border border-border bg-card">
-            {invites.map((item) => (
-              <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 p-3 text-xs">
-                <div>
-                  <p className="font-medium">Invitation · {item.role}</p>
-                  <p className="mt-1 text-muted-foreground">Hết hạn {new Date(item.expires_at).toLocaleDateString('vi-VN')}</p>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={revokingId === item.id}
-                  onClick={() => void revoke(item.id)}
-                  className="text-destructive hover:text-destructive"
-                >
-                  {revokingId === item.id ? 'Đang thu hồi...' : 'Thu hồi'}
-                </Button>
-              </div>
-            ))}
-            {!loading && invites.length === 0 && <p className="p-4 text-xs text-muted-foreground">Không có invitation đang mở.</p>}
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <button
+              type="button"
+              aria-expanded={invitesExpanded}
+              aria-controls="workspace-invites-panel"
+              onClick={() => setInvitesExpanded((expanded) => !expanded)}
+              className="group flex min-w-0 items-center gap-2 text-left"
+            >
+              <h3 className="flex items-center gap-2 text-sm font-semibold">
+                <Link2 className="h-4 w-4" /> Invitation
+              </h3>
+              <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${invitesExpanded ? 'rotate-180' : ''}`} />
+            </button>
+            <div className="flex items-center gap-2">
+              <p className="mt-1 text-xs text-muted-foreground">
+                Link chưa sử dụng sẽ tự hết hạn sau 7 ngày.
+              </p>
+              <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground">
+                {invites.length}
+              </span>
+            </div>
           </div>
+
+          {invitesExpanded && <div id="workspace-invites-panel" className="overflow-hidden rounded-xl border border-border bg-card">
+            <div className="hidden grid-cols-[1fr_auto_auto] items-center gap-4 border-b border-border bg-secondary/30 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground sm:grid">
+              <span>Vai trò</span>
+              <span>Hết hạn</span>
+              <span className="text-right">Thao tác</span>
+            </div>
+            <div className="divide-y divide-border">
+              {invites.map((item) => (
+                <div key={item.id} className="grid gap-2 px-4 py-3 text-xs sm:grid-cols-[1fr_auto_auto] sm:items-center sm:gap-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <Link2 className="h-3.5 w-3.5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-semibold">{inviteRoleLabels[item.role]}</p>
+                      <p className="truncate font-mono text-[10px] text-muted-foreground">Link mời #{item.id}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-muted-foreground sm:justify-self-end">
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    <span>Hết hạn {new Date(item.expires_at).toLocaleDateString('vi-VN')}</span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={revokingId === item.id}
+                    onClick={() => void revoke(item.id)}
+                    className="justify-self-start px-2 text-destructive hover:text-destructive sm:justify-self-end"
+                  >
+                    {revokingId === item.id ? 'Đang thu hồi...' : 'Thu hồi'}
+                  </Button>
+                </div>
+              ))}
+              {!loading && invites.length === 0 && (
+                <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                  Chưa có invitation đang mở.
+                </div>
+              )}
+            </div>
+          </div>}
         </section>
       </DialogContent>
     </Dialog>

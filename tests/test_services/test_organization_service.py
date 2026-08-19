@@ -9,6 +9,7 @@ from src.models.db import OrganizationInvitationModel, OrganizationMemberModel, 
 from src.services.organization_service import (
     ROLE_PERMISSIONS,
     accept_invitation,
+    change_member_role,
     create_invitation,
     create_organization,
     get_membership,
@@ -17,17 +18,13 @@ from src.services.organization_service import (
 )
 
 
-def test_admin_is_not_a_semantic_data_approver():
-    assert ROLE_PERMISSIONS["admin"]["can_manage_members"] is True
-    assert ROLE_PERMISSIONS["admin"]["can_manage_invitations"] is True
-    assert ROLE_PERMISSIONS["admin"]["can_manage_schema"] is False
-    assert ROLE_PERMISSIONS["admin"]["can_create_metrics"] is False
-    assert ROLE_PERMISSIONS["admin"]["can_approve_metrics"] is False
-    assert ROLE_PERMISSIONS["admin"]["can_use_chat"] is True
-    assert ROLE_PERMISSIONS["admin"]["can_use_data_assistant"] is True
-    assert ROLE_PERMISSIONS["admin"]["can_use_metric_studio"] is False
+def test_data_lead_has_workspace_and_semantic_permissions():
+    assert "admin" not in ROLE_PERMISSIONS
+    assert ROLE_PERMISSIONS["data_lead"]["can_manage_members"] is True
+    assert ROLE_PERMISSIONS["data_lead"]["can_manage_invitations"] is True
+    assert ROLE_PERMISSIONS["data_lead"]["can_manage_schema"] is True
+    assert ROLE_PERMISSIONS["data_lead"]["can_create_metrics"] is True
     assert ROLE_PERMISSIONS["data_lead"]["can_approve_metrics"] is True
-    assert ROLE_PERMISSIONS["data_lead"]["can_manage_invitations"] is False
     assert ROLE_PERMISSIONS["data_lead"]["can_use_metric_studio"] is True
     assert ROLE_PERMISSIONS["member"]["can_use_data_assistant"] is True
     assert ROLE_PERMISSIONS["member"]["can_use_metric_studio"] is False
@@ -49,13 +46,13 @@ async def _add_user(async_session, user_id: int, email: str) -> UserModel:
 
 
 @pytest.mark.asyncio
-async def test_create_workspace_makes_creator_admin(async_session):
+async def test_create_workspace_makes_creator_data_lead(async_session):
     organization = await create_organization(async_session, 1, "Acme Analytics", None)
 
     membership = await get_membership(async_session, 1, organization.id)
     assert organization.slug == "acme-analytics"
     assert membership is not None
-    assert membership.role == "admin"
+    assert membership.role == "data_lead"
 
 
 @pytest.mark.asyncio
@@ -75,11 +72,33 @@ async def test_invitation_accept_creates_scoped_membership(async_session):
 
 
 @pytest.mark.asyncio
-async def test_last_admin_cannot_be_removed(async_session):
+async def test_last_data_lead_cannot_be_removed(async_session):
     organization = await create_organization(async_session, 1, "Acme", "acme")
 
-    with pytest.raises(ValueError, match="last Workspace Admin"):
+    with pytest.raises(ValueError, match="last Workspace Data Lead"):
         await remove_member(async_session, organization.id, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_data_lead_can_promote_member(async_session):
+    member = await _add_user(async_session, 2, "member@company.com")
+    organization = await create_organization(async_session, 1, "Acme", "acme")
+    async_session.add(OrganizationMemberModel(org_id=organization.id, user_id=member.id, role="member"))
+    await async_session.commit()
+
+    await change_member_role(async_session, organization.id, 1, member.id, "data_lead")
+
+    promoted = await get_membership(async_session, member.id, organization.id)
+    assert promoted is not None
+    assert promoted.role == "data_lead"
+
+
+@pytest.mark.asyncio
+async def test_invalid_workspace_role_is_rejected_by_service(async_session):
+    organization = await create_organization(async_session, 1, "Acme", "acme")
+
+    with pytest.raises(ValueError, match="Invalid Workspace role"):
+        await change_member_role(async_session, organization.id, 1, 1, "admin")
 
 
 @pytest.mark.asyncio

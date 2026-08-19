@@ -27,7 +27,6 @@ import {
   approveSingleMetricApi,
   ChatSessionItem,
   convertRawSchemaToLayer,
-  createChatSessionApi,
   createMetricApi,
   deleteChatSessionApi,
   deleteDatabaseApi,
@@ -139,14 +138,6 @@ export default function WorkspacePage() {
     window.setTimeout(() => setToast(''), 3000);
   }, []);
 
-  const updateChatUrl = (sessionId: string | null) => {
-    if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    if (sessionId) url.searchParams.set('chat', sessionId);
-    else url.searchParams.delete('chat');
-    window.history.replaceState({}, '', url);
-  };
-
 
   useEffect(() => {
     if (!canChat && tab === 'studio') setTab('metrics');
@@ -215,16 +206,15 @@ export default function WorkspacePage() {
     [],
   );
 
-  const newChat = useCallback(async () => {
-    if (!semanticDbId) return;
-    try {
-      const created = await createChatSessionApi(String(semanticDbId), 'Cuộc trò chuyện mới');
-      setSessions((current) => [created, ...current.filter((item) => item.id !== created.id)]);
-      selectSession(created.id);
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'Không thể tạo cuộc trò chuyện mới');
+  const newChat = useCallback(() => {
+    setActiveSessionId(null);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('chat');
+      window.history.replaceState({}, '', url);
     }
-  }, [notify, selectSession, semanticDbId]);
+    setTab('studio');
+  }, []);
 
   const removeSession = useCallback(
     async (sessionId: string) => {

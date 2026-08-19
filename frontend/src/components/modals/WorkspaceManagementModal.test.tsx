@@ -24,7 +24,7 @@ vi.mock('@/lib/api', () => ({
 describe('WorkspaceManagementModal', () => {
   beforeEach(() => {
     listMembers.mockResolvedValue([
-      { user_id: 1, email: 'owner@example.com', username: 'owner', full_name: 'Owner', role: 'admin', joined_at: '2026-01-01' },
+      { user_id: 1, email: 'owner@example.com', username: 'owner', full_name: 'Owner', role: 'data_lead', joined_at: '2026-01-01' },
     ]);
     listInvites.mockResolvedValue([]);
     createInvite.mockResolvedValue({
@@ -67,10 +67,29 @@ describe('WorkspaceManagementModal', () => {
       { id: 9, org_id: 3, role: 'member', status: 'pending', expires_at: '2026-08-26T00:00:00Z' },
     ]);
     render(<WorkspaceManagementModal isOpen onClose={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText('Invitation · member')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Link mời #9')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Thu hồi' }));
     await waitFor(() => expect(revokeInvite).toHaveBeenCalledWith(9));
     expect(listInvites.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('can collapse and expand members and invitations independently', async () => {
+    listInvites.mockResolvedValueOnce([
+      { id: 9, org_id: 3, role: 'member', status: 'pending', expires_at: '2026-08-26T00:00:00Z' },
+    ]);
+    render(<WorkspaceManagementModal isOpen onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Link mời #9')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Thành viên/i }));
+    expect(screen.queryByText('owner@example.com')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Invitation/i }));
+    expect(screen.queryByText('Link mời #9')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Thành viên/i }));
+    expect(screen.getByText('owner@example.com')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Invitation/i }));
+    expect(screen.getByText('Link mời #9')).toBeInTheDocument();
   });
 });

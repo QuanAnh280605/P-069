@@ -17,7 +17,7 @@ async def test_create_and_list_workspace(client, async_session):
     response = await client.post("/api/v1/org", json={"name": "Acme Analytics"}, headers=_headers(user))
 
     assert response.status_code == 201
-    assert response.json()["role"] == "admin"
+    assert response.json()["role"] == "data_lead"
 
     listed = await client.get("/api/v1/org/my-orgs", headers=_headers(user))
     assert listed.status_code == 200
@@ -56,6 +56,20 @@ async def test_member_can_preview_invitation_and_accept(client, async_session):
 
     assert accepted.status_code == 200
     assert accepted.json()["role"] == "member"
+
+
+@pytest.mark.asyncio
+async def test_workspace_admin_role_is_rejected(client, async_session):
+    owner = await async_session.get(UserModel, 1)
+    created = await client.post("/api/v1/org", json={"name": "Acme"}, headers=_headers(owner))
+
+    response = await client.put(
+        "/api/v1/org/members/1",
+        json={"role": "admin"},
+        headers={**_headers(owner), "X-Organization-ID": str(created.json()["id"])},
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

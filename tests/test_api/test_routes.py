@@ -78,3 +78,16 @@ async def test_get_metric_filter_columns_not_found(client):
     headers = get_test_headers()
     response = await client.get("/api/v1/semantic/999/metric/999/filter-columns", headers=headers)
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_chat_session_requires_query(client):
+    """Creating a chat without a first query must not create an empty session."""
+    response = await client.post(
+        "/api/v1/semantic/1/chat/sessions",
+        json={},
+        headers=get_test_headers(),
+    )
+
+    assert response.status_code == 400
+    assert "query" in response.json()["detail"].lower()
