@@ -1,10 +1,12 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { MetricExplorerView } from '@/components/views/MetricExplorerView';
 import { MetricRecord, SemanticCatalog } from '@/lib/api';
 
 describe('MetricExplorerView', () => {
+  afterEach(() => cleanup());
+
   it('blocks query execution for SQL Dump sources', () => {
     render(
       <MetricExplorerView
@@ -117,6 +119,92 @@ describe('MetricExplorerView', () => {
     expect(screen.getByText('Khách hàng')).toBeInTheDocument();
     expect(screen.getByText('Ngày tạo đơn')).toBeInTheDocument();
     expect(screen.getByText('Tỉnh / Thành phố')).toBeInTheDocument();
+  });
+
+  it('renders reference Explorer layout with tabs, Compile Preview, Execute, and guardrail badge', async () => {
+    const mockMetrics: MetricRecord[] = [
+      {
+        metric_id: 1,
+        db_id: 3,
+        name: 'Doanh thu thuần',
+        description: 'Tổng doanh thu',
+        sql_template: 'SELECT SUM(price) FROM orders',
+        source: 'ai',
+        status: 'approved',
+        created_by: 1,
+        created_at: '2026-01-01',
+        updated_at: '2026-01-01',
+        definition: {
+          schema_version: 2,
+          metric: {
+            name: 'Doanh thu thuần',
+            base_entity: 'orders',
+            base_entity_id: 10,
+            grain: { column_ids: [101] },
+            formula: { function: 'SUM', expression: 'price' },
+            filters: [],
+            status: 'approved',
+            confidence: 'high',
+            excluded_notes: '',
+          },
+        },
+      },
+    ];
+
+    const mockCatalog: SemanticCatalog = {
+      db_id: 3,
+      source_type: 'postgresql',
+      query_supported: true,
+      tables: [
+        {
+          table_id: 10,
+          db_id: 3,
+          table_name: 'orders',
+          business_name: 'Đơn hàng',
+          description: 'Bảng đơn hàng',
+          columns: [
+            {
+              column_id: 101,
+              table_id: 10,
+              column_name: 'created_at',
+              business_name: 'Ngày tạo đơn',
+              data_type: 'TIMESTAMP',
+              is_time_dimension: true,
+            },
+          ],
+        },
+      ],
+      relationships: [],
+    };
+
+    render(
+      <MetricExplorerView
+        dbId={3}
+        metrics={mockMetrics}
+        catalog={mockCatalog}
+        theme="light"
+      />
+    );
+
+    // Compile Preview and Execute are distinct buttons
+    const previewButtons = screen.getAllByRole('button', { name: /Preview SQL/i });
+    expect(previewButtons.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole('button', { name: /Thực thi.*Execute/i }).length).toBeGreaterThanOrEqual(1);
+
+    // Select a metric to trigger ResultPanel rendering
+    const metricCheckbox = screen.getByRole('checkbox', { name: /Doanh thu thuần/i });
+    fireEvent.click(metricCheckbox);
+
+    // Result panel tabs: Table, Chart, SQL
+    expect(screen.getByRole('button', { name: /Bảng số liệu/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Biểu đồ/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /SQL Code/i })).toBeInTheDocument();
+
+    // Guardrail badge: Read-only, authoritative limits 100 default, 1000 max, 15s timeout
+    expect(screen.getByText(/Read-only/i)).toBeInTheDocument();
+    expect(screen.getByText(/LIMIT 100/)).toBeInTheDocument();
+    expect(screen.getByText(/max 1000/)).toBeInTheDocument();
+    expect(screen.getByText(/15s timeout/)).toBeInTheDocument();
   });
 
   it('disables unreachable table dimensions when a metric with no join path is selected', async () => {

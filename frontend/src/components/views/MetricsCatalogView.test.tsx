@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MetricsCatalogView } from '@/components/views/MetricsCatalogView';
 import { MetricRecord } from '@/lib/api';
@@ -60,6 +60,10 @@ describe('MetricsCatalogView', () => {
     },
   ];
 
+  beforeEach(() => {
+    cleanup();
+  });
+
   it('renders both Pending and Approved sections with counts', () => {
     render(
       <MetricsCatalogView
@@ -83,5 +87,114 @@ describe('MetricsCatalogView', () => {
 
     // Verify quick action button
     expect(screen.getByText('Duyệt tất cả (1)')).toBeInTheDocument();
+  });
+
+  it('renders metric cards with formula expression in monospace', () => {
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={mockMetrics}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onOpenStudio={vi.fn()}
+        onApproveAll={vi.fn()}
+        onApproveMetric={vi.fn()}
+      />
+    );
+    // Verify formula expression display
+    expect(screen.getByText(/SUM\(price\).*Bảng.*orders/)).toBeInTheDocument();
+    expect(screen.getByText(/COUNT\(id\).*Bảng.*orders/)).toBeInTheDocument();
+  });
+
+  it('shows individual approve button on pending metric cards', () => {
+    const onApprove = vi.fn();
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={mockMetrics}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onOpenStudio={vi.fn()}
+        onApproveAll={vi.fn()}
+        onApproveMetric={onApprove}
+      />
+    );
+    // Pending card should have individual approve button
+    const approveBtn = screen.getByRole('button', { name: /Duyệt chỉ số này/i });
+    expect(approveBtn).toBeInTheDocument();
+    fireEvent.click(approveBtn);
+    expect(onApprove).toHaveBeenCalledWith(2);
+  });
+
+  it('renders filter tabs with correct metric counts', () => {
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={mockMetrics}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onOpenStudio={vi.fn()}
+        onApproveAll={vi.fn()}
+        onApproveMetric={vi.fn()}
+      />
+    );
+    // Filter tabs should show counts
+    expect(screen.getByText(/Tất cả \(2\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Chờ phê duyệt \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Đã phê duyệt \(1\)/)).toBeInTheDocument();
+  });
+
+  it('filters metrics when filter tab is clicked', async () => {
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={mockMetrics}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onOpenStudio={vi.fn()}
+        onApproveAll={vi.fn()}
+        onApproveMetric={vi.fn()}
+      />
+    );
+
+    // Click on "Chờ phê duyệt" tab
+    fireEvent.click(screen.getByText(/Chờ phê duyệt/));
+
+    // Only pending metric should be visible in the card grid
+    expect(screen.getByText('Số lượng đơn hàng mới')).toBeInTheDocument();
+    expect(screen.queryByText('Doanh thu thuần')).not.toBeInTheDocument();
+  });
+
+  it('shows YAML definition toggle in metric cards', () => {
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={mockMetrics}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onOpenStudio={vi.fn()}
+        onApproveAll={vi.fn()}
+        onApproveMetric={vi.fn()}
+      />
+    );
+    // Each card should have YAML definition toggle
+    expect(screen.getAllByText(/Xem YAML definition/).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('shows status badges with correct labels', () => {
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={mockMetrics}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onOpenStudio={vi.fn()}
+        onApproveAll={vi.fn()}
+        onApproveMetric={vi.fn()}
+      />
+    );
+    // Status badges
+    expect(screen.getByText('Đã duyệt')).toBeInTheDocument();
+    expect(screen.getByText('Chờ duyệt')).toBeInTheDocument();
   });
 });

@@ -36,14 +36,6 @@ export function AIQueryModal({ isOpen, dbId, theme, onClose, onResolved }: Props
 
   const isDark = theme === 'dark';
 
-  useEffect(() => {
-    if (isOpen && dbId) {
-      initWizard();
-    } else {
-      resetModalState();
-    }
-  }, [isOpen, dbId]);
-
   const resetModalState = () => {
     setSessionId(null);
     setStep(1);
@@ -73,12 +65,20 @@ export function AIQueryModal({ isOpen, dbId, theme, onClose, onResolved }: Props
       if (res.options.length > 0) {
         setSelectedOptionId(res.options[0].id);
       }
-    } catch (err: any) {
-      setError(err?.message || 'Không thể khởi tạo AI Query Assistant.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Không thể khởi tạo AI Query Assistant.');
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (isOpen && dbId) {
+      void initWizard();
+    } else {
+      resetModalState();
+    }
+  }, [isOpen, dbId]);
 
   const handleNextStep = async () => {
     if (!sessionId || !selectedOptionId) return;
