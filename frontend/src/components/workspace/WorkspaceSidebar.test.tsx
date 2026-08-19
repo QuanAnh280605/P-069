@@ -65,7 +65,8 @@ describe('WorkspaceSidebar', () => {
     it('shows the brand header with collapse button', () => {
       render(<WorkspaceSidebar {...defaultProps} collapsed={false} />);
 
-      expect(screen.getByText('SemanticLayer')).toBeInTheDocument();
+      expect(screen.getByText('S206')).toBeInTheDocument();
+      expect(screen.getByText('SEMANTIC')).toBeInTheDocument();
       expect(screen.getByLabelText('Collapse sidebar')).toBeInTheDocument();
     });
 

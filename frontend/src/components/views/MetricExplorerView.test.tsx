@@ -365,6 +365,7 @@ describe('MetricExplorerView', () => {
   it('renders interactive chart studio with Bar, Line, Area, and Pie chart types without errors', async () => {
     vi.spyOn(apiModule, 'executeSemanticQueryApi').mockResolvedValue({
       sql: 'SELECT status, SUM(price) FROM orders GROUP BY status',
+      parameters: {},
       columns: ['status', 'total_price'],
       rows: [
         ['Hoàn thành', 1500000],

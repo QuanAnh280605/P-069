@@ -314,6 +314,61 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
     };
   }, [dbId, metricIds]);
 
+  const displayedDimensions = useMemo(() => {
+    if (!catalog || metricIds.length === 0) return [];
+
+    if (recommendedDims.length > 0 && !dimSearch.trim()) {
+      return recommendedDims;
+    }
+
+    if (dimSearch.trim()) {
+      const q = dimSearch.toLowerCase();
+      const list: RecommendedDimensionItem[] = [];
+      catalog.tables.forEach((t) => {
+        t.columns.forEach((c) => {
+          if (isBusinessDimension(c)) {
+            const matches =
+              c.column_name.toLowerCase().includes(q) ||
+              (c.business_name && c.business_name.toLowerCase().includes(q)) ||
+              t.table_name.toLowerCase().includes(q);
+            if (matches) {
+              list.push({
+                column_id: c.column_id,
+                column_name: c.column_name,
+                business_name: c.business_name || c.column_name,
+                table_id: t.table_id,
+                table_name: t.table_name,
+                table_business_name: t.business_name || t.table_name,
+                tier: 'A',
+                tier_label: 'Tìm kiếm',
+                is_safe_join: true,
+                requires_reaggregation: false,
+                data_type: c.data_type,
+              });
+            }
+          }
+        });
+      });
+      return list;
+    }
+
+    if (!baseTable) return [];
+    return baseTable.columns
+      .filter((c) => isBusinessDimension(c))
+      .map((c) => ({
+        column_id: c.column_id,
+        column_name: c.column_name,
+        business_name: c.business_name || c.column_name,
+        table_id: baseTable.table_id,
+        table_name: baseTable.table_name,
+        table_business_name: baseTable.business_name || baseTable.table_name,
+        tier: 'A' as const,
+        tier_label: 'Trực tiếp',
+        is_safe_join: true,
+        requires_reaggregation: false,
+        data_type: c.data_type,
+      }));
+  }, [metricIds, recommendedDims, dimSearch, catalog, baseTable]);
 
   if (!catalog) {
     return (
@@ -497,62 +552,6 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
     link.click();
     document.body.removeChild(link);
   };
-
-  const displayedDimensions = useMemo(() => {
-    if (metricIds.length === 0) return [];
-
-    if (recommendedDims.length > 0 && !dimSearch.trim()) {
-      return recommendedDims;
-    }
-
-    if (dimSearch.trim()) {
-      const q = dimSearch.toLowerCase();
-      const list: RecommendedDimensionItem[] = [];
-      catalog.tables.forEach((t) => {
-        t.columns.forEach((c) => {
-          if (isBusinessDimension(c)) {
-            const matches =
-              c.column_name.toLowerCase().includes(q) ||
-              (c.business_name && c.business_name.toLowerCase().includes(q)) ||
-              t.table_name.toLowerCase().includes(q);
-            if (matches) {
-              list.push({
-                column_id: c.column_id,
-                column_name: c.column_name,
-                business_name: c.business_name || c.column_name,
-                table_id: t.table_id,
-                table_name: t.table_name,
-                table_business_name: t.business_name || t.table_name,
-                tier: 'A',
-                tier_label: 'Tìm kiếm',
-                is_safe_join: true,
-                requires_reaggregation: false,
-                data_type: c.data_type,
-              });
-            }
-          }
-        });
-      });
-      return list;
-    }
-
-    if (!baseTable) return [];
-    return baseTable.columns
-      .filter((c) => isBusinessDimension(c))
-      .map((c) => ({
-        column_id: c.column_id,
-        column_name: c.column_name,
-        business_name: c.business_name || c.column_name,
-        table_id: baseTable.table_id,
-        table_name: baseTable.table_name,
-        table_business_name: baseTable.business_name || baseTable.table_name,
-        tier: 'A' as const,
-        tier_label: 'Trực tiếp',
-        is_safe_join: true,
-        requires_reaggregation: false,
-        data_type: c.data_type,
-      }));
-  }, [metricIds, recommendedDims, dimSearch, catalog.tables, baseTable]);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
