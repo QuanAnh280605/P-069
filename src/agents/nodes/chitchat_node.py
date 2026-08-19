@@ -21,12 +21,13 @@ _SYSTEM_PROMPT = (
 )
 
 _FALLBACK_RESPONSE = "Xin lỗi, tôi không thể phản hồi lúc này. Vui lòng thử lại!"
+_MAX_HISTORY_CHARS = 12000
 
 
 async def chitchat_node(state: AgentState) -> dict[str, Any]:
     """Generate a friendly natural-language response to chitchat messages.
 
-    Uses a higher temperature (0.7) for more natural, human-like responses.
+    Uses the shared deterministic LLM configuration.
     """
     user_message = state.get("user_message", "").strip()
     if not user_message:
@@ -34,12 +35,9 @@ async def chitchat_node(state: AgentState) -> dict[str, Any]:
 
     try:
         llm = get_llm()
-        messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ]
-        # Increase temperature for more natural chitchat responses
-        llm.temperature = 0.7  # type: ignore[attr-defined]
+        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        messages.extend(_history_messages(state.get("chat_history", [])))
+        messages.append({"role": "user", "content": user_message})
         response = await llm.ainvoke(messages)
         reply = (response.content if hasattr(response, "content") else str(response)).strip()
         logger.info("Chitchat node replied (len=%d chars)", len(reply))
@@ -48,3 +46,21 @@ async def chitchat_node(state: AgentState) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("Chitchat node failed: %s", exc)
         return {"chat_response": _FALLBACK_RESPONSE}
+
+
+def _history_messages(history: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Normalize prior messages and keep the prompt within a bounded budget."""
+    result: list[dict[str, str]] = []
+    remaining = _MAX_HISTORY_CHARS
+    for item in reversed(history):
+        role = item.get("role")
+        content = item.get("content", "").strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        content = content[-remaining:]
+        result.append({"role": role, "content": content})
+        remaining -= len(content)
+        if remaining <= 0:
+            break
+    result.reverse()
+    return result

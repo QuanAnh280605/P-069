@@ -7,7 +7,6 @@ export interface SemanticColumn {
   description?: string;
   sample_value?: string;
 }
-
 export interface SemanticTable {
   table_name: string;
   business_name: string;
@@ -45,13 +44,18 @@ export interface MetricDefinition {
 
 export interface MetricRecord {
   metric_id: number;
+  db_id?: number;
   name: string;
+  description?: string;
+  sql_template?: string;
   definition: MetricDefinition | null;
   source: 'ai' | 'manual';
-  version: number;
+  version?: number;
   status: MetricStatus;
   approved_by?: number | null;
+  created_by?: number | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface SemanticLayerData {
@@ -112,6 +116,8 @@ export interface CatalogColumn {
   business_name: string;
   data_type: string;
   is_time_dimension: boolean;
+  is_primary_key?: boolean;
+  is_foreign_key?: boolean;
   allowed_values: unknown;
 }
 
@@ -138,7 +144,8 @@ export interface SemanticQueryFilter {
 
 export interface SemanticQueryRequest {
   metric_ids: number[];
-  dimensions: DimensionSelection[];
+  dimensions?: DimensionSelection[];
+  dimension_ids?: number[];
   filters: SemanticQueryFilter[];
   limit: number;
 }
@@ -160,9 +167,11 @@ export interface SemanticQueryPreview {
 export interface SemanticQueryResult {
   sql: string;
   parameters: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   columns: string[];
   rows: unknown[][];
   row_count: number;
+  execution_time_ms?: number;
 }
 
 const LEGACY_INITIAL_LAYERS: unknown[] = [
@@ -301,11 +310,114 @@ const API_BASE_URL =
   'http://localhost:8000';
 const API_BASE = API_BASE_URL;
 
+export type WorkspaceRole = 'admin' | 'data_lead' | 'member';
+
+export interface WorkspaceSummary {
+  id: number;
+  name: string;
+  slug: string;
+  role: WorkspaceRole;
+  permissions: Record<string, boolean>;
+  created_at: string;
+}
+
+export interface WorkspaceMember {
+  user_id: number;
+  email: string;
+  username: string;
+  full_name: string;
+  role: WorkspaceRole;
+  joined_at: string;
+}
+
+export interface WorkspaceInvite {
+  id: number;
+  org_id: number;
+  role: 'member' | 'data_lead';
+  invitee_email?: string | null;
+  status: 'pending' | 'accepted' | 'revoked' | 'expired';
+  expires_at: string;
+  invite_url?: string | null;
+}
+
+export interface WorkspaceInvitePreview {
+  organization_name: string;
+  organization_slug: string;
+  role: 'member' | 'data_lead';
+  invitee_email?: string | null;
+  expires_at: string;
+}
+
+function getWorkspaceHeader(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  const id = window.localStorage.getItem('current_organization_id');
+  return id ? { 'X-Organization-ID': id } : {};
+}
+
 function getAuthHeader(): Record<string, string> {
   const token =
     getStoredToken() ||
     (typeof window !== 'undefined' ? localStorage.getItem('access_token') || localStorage.getItem('token') : null);
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...getWorkspaceHeader(),
+  };
+}
+
+export function listWorkspacesApi(): Promise<WorkspaceSummary[]> {
+  return semanticRequest<WorkspaceSummary[]>('/api/v1/org/my-orgs');
+}
+
+export function getCurrentWorkspaceApi(): Promise<WorkspaceSummary> {
+  return semanticRequest<WorkspaceSummary>('/api/v1/org/current');
+}
+
+export function createWorkspaceApi(name: string, slug?: string): Promise<WorkspaceSummary> {
+  return semanticRequest<WorkspaceSummary>('/api/v1/org', {
+    method: 'POST',
+    body: JSON.stringify({ name, slug }),
+  });
+}
+
+export function listWorkspaceMembersApi(): Promise<WorkspaceMember[]> {
+  return semanticRequest<WorkspaceMember[]>('/api/v1/org/members');
+}
+
+export function updateWorkspaceMemberApi(userId: number, role: WorkspaceRole): Promise<void> {
+  return semanticRequest<void>(`/api/v1/org/members/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ role }),
+  });
+}
+
+export function removeWorkspaceMemberApi(userId: number): Promise<void> {
+  return semanticRequest<void>(`/api/v1/org/members/${userId}`, { method: 'DELETE' });
+}
+
+export function createWorkspaceInviteApi(
+  role: 'member' | 'data_lead',
+  inviteeEmail?: string,
+): Promise<WorkspaceInvite> {
+  return semanticRequest<WorkspaceInvite>('/api/v1/org/invite', {
+    method: 'POST',
+    body: JSON.stringify({ role, invitee_email: inviteeEmail || null }),
+  });
+}
+
+export function revokeWorkspaceInviteApi(invitationId: number): Promise<void> {
+  return semanticRequest<void>(`/api/v1/org/invite/${invitationId}`, { method: 'DELETE' });
+}
+
+export function listWorkspaceInvitesApi(): Promise<WorkspaceInvite[]> {
+  return semanticRequest<WorkspaceInvite[]>('/api/v1/org/invites');
+}
+
+export function previewWorkspaceInviteApi(token: string): Promise<WorkspaceInvitePreview> {
+  return semanticRequest<WorkspaceInvitePreview>(`/api/v1/invite/${token}`);
+}
+
+export function acceptWorkspaceInviteApi(token: string): Promise<WorkspaceSummary> {
+  return semanticRequest<WorkspaceSummary>(`/api/v1/invite/${token}/accept`, { method: 'POST' });
 }
 
 export class SemanticApiError extends Error {
@@ -313,6 +425,13 @@ export class SemanticApiError extends Error {
     super(message);
     this.name = 'SemanticApiError';
   }
+}
+
+export const METRIC_WRITE_PERMISSION_MESSAGE =
+  'Bạn không có quyền lưu hoặc chỉnh sửa metric. Chỉ Data Lead được thực hiện thao tác này.';
+
+export function isPermissionDenied(error: unknown): boolean {
+  return error instanceof SemanticApiError && error.status === 403;
 }
 
 export async function semanticRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -390,36 +509,108 @@ export async function generateCustomMetricsApi(
 }
 
 export interface ChatOrchestratorResponse {
-  intent: 'chitchat' | 'metric_query';
+  intent: 'chitchat' | 'data_question' | 'metric_query';
   chat_response?: string | null;
   suggestions?: MetricSuggestion[] | null;
   duplicates?: DuplicateMetricNotice[];
   dedupe_performed?: boolean;
+  session_id: string;
+  user_message_id: string;
+  assistant_message_id: string;
+  session?: ChatSessionItem | null;
+}
+
+export interface ChatSessionItem {
+  id: string;
+  db_id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface ChatMessageItem {
+  id: string;
+  session_id: string;
+  client_message_id?: string | null;
+  sequence_no: number;
+  sender: 'user' | 'assistant' | 'system';
+  content: string;
+  intent?: string | null;
+  metadata_json?: {
+    schema_version?: number;
+    status?: 'pending' | 'completed' | 'error';
+    suggestions?: MetricSuggestion[];
+    duplicates?: DuplicateMetricNotice[];
+    dedupe_performed?: boolean;
+    error?: string | null;
+  } | null;
+  created_at: string;
+}
+
+export interface ChatSessionDetail extends ChatSessionItem {
+  messages: ChatMessageItem[];
+  next_before_sequence?: number | null;
+}
+
+async function chatRequest<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader(), ...(init?.headers || {}) },
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({ detail: 'Lỗi khi gọi API Chat' }));
+    throw new Error(typeof errData?.detail === 'string' ? errData.detail : 'Không thể xử lý yêu cầu chat');
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+export async function listChatSessionsApi(dbId: string): Promise<ChatSessionItem[]> {
+  return chatRequest<ChatSessionItem[]>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions`);
+}
+
+export async function createChatSessionApi(dbId: string, title?: string): Promise<ChatSessionItem> {
+  return chatRequest<ChatSessionItem>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions`, {
+    method: 'POST',
+    body: JSON.stringify(title ? { title } : {}),
+  });
+}
+
+export async function getChatSessionDetailApi(
+  dbId: string,
+  sessionId: string,
+  beforeSequence?: number,
+): Promise<ChatSessionDetail> {
+  const cursor = beforeSequence ? `?limit=100&before_sequence=${beforeSequence}` : '?limit=100';
+  return chatRequest<ChatSessionDetail>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}${cursor}`);
+}
+
+export async function deleteChatSessionApi(dbId: string, sessionId: string): Promise<void> {
+  await chatRequest<void>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}`, { method: 'DELETE' });
+}
+
+export async function updateChatSessionTitleApi(
+  dbId: string,
+  sessionId: string,
+  title: string,
+): Promise<ChatSessionItem> {
+  return chatRequest<ChatSessionItem>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  });
 }
 
 export async function sendChatOrchestratorApi(
   dbId: string,
   message: string,
+  sessionId?: string | null,
+  clientMessageId?: string,
 ): Promise<ChatOrchestratorResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/semantic/${dbId}/chat`, {
+  return chatRequest<ChatOrchestratorResponse>(`${API_BASE}/api/v1/semantic/${dbId}/chat`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...getAuthHeader(),
-    },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, session_id: sessionId || null, client_message_id: clientMessageId }),
   });
-
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({ detail: 'Lỗi khi gọi API Chat Orchestrator' }));
-    const errorMsg =
-      typeof errData?.detail === 'string'
-        ? errData.detail
-        : JSON.stringify(errData?.detail || 'Không thể gửi tin nhắn đến Chat Orchestrator');
-    throw new Error(`[Chat Error ${res.status}]: ${errorMsg}`);
-  }
-
-  return await res.json();
 }
 
 /* Legacy SQL metric adapter removed in favor of canonical definitions.
@@ -644,6 +835,7 @@ export async function uploadSqlDumpPreview(
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/sql',
     'X-Filename': file.name,
+    ...getWorkspaceHeader(),
   };
   if (dialect) headers['X-SQL-Dialect'] = dialect;
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/preview`, {
@@ -676,7 +868,7 @@ export async function saveImportedSchema(
 
 export async function listImportedSchemas(token: string): Promise<ImportedSchemaSummary[]> {
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/saved`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
   return response.json() as Promise<ImportedSchemaSummary[]>;
@@ -689,7 +881,7 @@ export async function getImportedSchema(id: number, token: string): Promise<Impo
 export async function deleteImportedSchema(id: number, token: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/import/saved/${id}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
 }
@@ -703,6 +895,7 @@ async function requestImportedSchema(
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,
+      ...getWorkspaceHeader(),
       'Content-Type': 'application/json',
     },
   });
@@ -734,6 +927,7 @@ export async function connectLiveTargetDb(
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
+      ...getWorkspaceHeader(),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -748,7 +942,7 @@ export async function connectLiveTargetDb(
 
 export async function listLiveTargetDbs(token: string): Promise<LiveDbSummary[]> {
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/saved`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
   return response.json() as Promise<LiveDbSummary[]>;
@@ -756,7 +950,7 @@ export async function listLiveTargetDbs(token: string): Promise<LiveDbSummary[]>
 
 export async function getLiveTargetDb(id: number, token: string): Promise<LiveDbRecord> {
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/saved/${id}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
   return response.json() as Promise<LiveDbRecord>;
@@ -765,7 +959,7 @@ export async function getLiveTargetDb(id: number, token: string): Promise<LiveDb
 export async function deleteLiveTargetDb(id: number, token: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/saved/${id}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) throw new Error(await readPreviewError(response));
 }
@@ -777,7 +971,7 @@ export async function deleteDatabaseApi(id: string, token: string): Promise<void
   }
   const response = await fetch(`${API_BASE_URL}/api/v1/semantic/db/${id}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...getWorkspaceHeader() },
   });
   if (!response.ok) {
     await deleteLiveTargetDb(numId, token).catch(() => null);
@@ -908,3 +1102,62 @@ export async function advanceWizardApi(
     body: JSON.stringify({ session_id: sessionId, option_id: optionId }),
   });
 }
+
+export interface RecommendedDimensionItem {
+  column_id: number;
+  column_name: string;
+  business_name: string;
+  table_id: number;
+  table_name: string;
+  table_business_name: string;
+  tier: 'A' | 'B' | 'C' | 'D';
+  tier_label: string;
+  is_safe_join: boolean;
+  requires_reaggregation: boolean;
+  data_type: string;
+  cardinality_hint?: number | null;
+}
+
+export interface MetricDimensionsResponse {
+  metric_id: number;
+  metric_name: string;
+  base_table: string;
+  dimensions: RecommendedDimensionItem[];
+}
+
+export async function getMetricRecommendedDimensionsApi(
+  dbId: number | string,
+  metricId: number | string
+): Promise<MetricDimensionsResponse> {
+  return semanticRequest<MetricDimensionsResponse>(
+    `/api/v1/semantic/${dbId}/metric/${metricId}/dimensions`
+  );
+}
+export interface FilterColumnItem {
+  column_id: number;
+  column_name: string;
+  business_name: string;
+  table_id: number;
+  table_name: string;
+  table_business_name: string;
+  group_type: 'base' | 'related';
+  data_type: string;
+  is_time_dimension: boolean;
+}
+
+export interface MetricFilterColumnsResponse {
+  metric_id: number;
+  metric_name: string;
+  base_table: string;
+  columns: FilterColumnItem[];
+}
+
+export async function getMetricFilterColumnsApi(
+  dbId: number | string,
+  metricId: number | string
+): Promise<MetricFilterColumnsResponse> {
+  return semanticRequest<MetricFilterColumnsResponse>(
+    `/api/v1/semantic/${dbId}/metric/${metricId}/filter-columns`
+  );
+}
+

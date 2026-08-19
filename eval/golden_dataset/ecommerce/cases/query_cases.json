@@ -1,0 +1,1456 @@
+[
+  {
+    "case_id": "ecommerce_query_001",
+    "question": "Doanh thu thuần?",
+    "difficulty": "easy",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "net_revenue"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "net_revenue"
+        ],
+        "dimensions": [],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE",
+        "mysql": "SELECT SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE",
+        "sqlite": "SELECT SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE"
+      },
+      "result_ref": "ecommerce_query_001"
+    },
+    "expected_error": null,
+    "tags": [
+      "net_revenue",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_002",
+    "question": "Doanh thu thuần theo Kênh bán hàng?",
+    "difficulty": "easy",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "net_revenue"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "net_revenue"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT channel AS channel, SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "mysql": "SELECT channel AS channel, SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "sqlite": "SELECT channel AS channel, SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel"
+      },
+      "result_ref": "ecommerce_query_002"
+    },
+    "expected_error": null,
+    "tags": [
+      "net_revenue",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_003",
+    "question": "Doanh thu thuần theo Mã cửa hàng?",
+    "difficulty": "easy",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "net_revenue"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.store_id"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "net_revenue"
+        ],
+        "dimensions": [
+          "order.store_id"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT store_id AS store_id, SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE GROUP BY store_id ORDER BY store_id",
+        "mysql": "SELECT store_id AS store_id, SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE GROUP BY store_id ORDER BY store_id",
+        "sqlite": "SELECT store_id AS store_id, SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE GROUP BY store_id ORDER BY store_id"
+      },
+      "result_ref": "ecommerce_query_003"
+    },
+    "expected_error": null,
+    "tags": [
+      "net_revenue",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_004",
+    "question": "Doanh thu thuần theo tháng?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "net_revenue"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.order_date"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "net_revenue"
+        ],
+        "dimensions": [
+          "order.order_date"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM') AS month, SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE GROUP BY TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM') ORDER BY TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM')",
+        "mysql": "SELECT DATE_FORMAT(order_date, '%Y-%m') AS month, SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE GROUP BY DATE_FORMAT(order_date, '%Y-%m') ORDER BY DATE_FORMAT(order_date, '%Y-%m')",
+        "sqlite": "SELECT strftime('%Y-%m', order_date) AS month, SUM(gross_amount - discount_amount - return_amount) AS net_revenue FROM fact_orders WHERE is_test_order = FALSE GROUP BY strftime('%Y-%m', order_date) ORDER BY strftime('%Y-%m', order_date)"
+      },
+      "result_ref": "ecommerce_query_004"
+    },
+    "expected_error": null,
+    "tags": [
+      "net_revenue",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_005",
+    "question": "Tổng số đơn hàng?",
+    "difficulty": "easy",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "order_count"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "order_count"
+        ],
+        "dimensions": [],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT COUNT(DISTINCT order_id) AS order_count FROM fact_orders WHERE is_test_order = FALSE AND order_status <> 'cancelled'",
+        "mysql": "SELECT COUNT(DISTINCT order_id) AS order_count FROM fact_orders WHERE is_test_order = FALSE AND order_status <> 'cancelled'",
+        "sqlite": "SELECT COUNT(DISTINCT order_id) AS order_count FROM fact_orders WHERE is_test_order = FALSE AND order_status <> 'cancelled'"
+      },
+      "result_ref": "ecommerce_query_005"
+    },
+    "expected_error": null,
+    "tags": [
+      "order_count",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_006",
+    "question": "Tổng số đơn hàng theo Kênh bán hàng?",
+    "difficulty": "easy",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "order_count"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "order_count"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT channel AS channel, COUNT(DISTINCT order_id) AS order_count FROM fact_orders WHERE is_test_order = FALSE AND order_status <> 'cancelled' GROUP BY channel ORDER BY channel",
+        "mysql": "SELECT channel AS channel, COUNT(DISTINCT order_id) AS order_count FROM fact_orders WHERE is_test_order = FALSE AND order_status <> 'cancelled' GROUP BY channel ORDER BY channel",
+        "sqlite": "SELECT channel AS channel, COUNT(DISTINCT order_id) AS order_count FROM fact_orders WHERE is_test_order = FALSE AND order_status <> 'cancelled' GROUP BY channel ORDER BY channel"
+      },
+      "result_ref": "ecommerce_query_006"
+    },
+    "expected_error": null,
+    "tags": [
+      "order_count",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_007",
+    "question": "Tổng số đơn hàng theo tháng?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "order_count"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.order_date"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "order_count"
+        ],
+        "dimensions": [
+          "order.order_date"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM') AS month, COUNT(DISTINCT order_id) AS order_count FROM fact_orders WHERE is_test_order = FALSE AND order_status <> 'cancelled' GROUP BY TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM') ORDER BY TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM')",
+        "mysql": "SELECT DATE_FORMAT(order_date, '%Y-%m') AS month, COUNT(DISTINCT order_id) AS order_count FROM fact_orders WHERE is_test_order = FALSE AND order_status <> 'cancelled' GROUP BY DATE_FORMAT(order_date, '%Y-%m') ORDER BY DATE_FORMAT(order_date, '%Y-%m')",
+        "sqlite": "SELECT strftime('%Y-%m', order_date) AS month, COUNT(DISTINCT order_id) AS order_count FROM fact_orders WHERE is_test_order = FALSE AND order_status <> 'cancelled' GROUP BY strftime('%Y-%m', order_date) ORDER BY strftime('%Y-%m', order_date)"
+      },
+      "result_ref": "ecommerce_query_007"
+    },
+    "expected_error": null,
+    "tags": [
+      "order_count",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_008",
+    "question": "Giá trị đơn hàng trung bình?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "average_order_value"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "average_order_value"
+        ],
+        "dimensions": [],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT SUM(gross_amount - discount_amount - return_amount) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS average_order_value FROM fact_orders WHERE is_test_order = FALSE",
+        "mysql": "SELECT SUM(gross_amount - discount_amount - return_amount) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS average_order_value FROM fact_orders WHERE is_test_order = FALSE",
+        "sqlite": "SELECT SUM(gross_amount - discount_amount - return_amount) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS average_order_value FROM fact_orders WHERE is_test_order = FALSE"
+      },
+      "result_ref": "ecommerce_query_008"
+    },
+    "expected_error": null,
+    "tags": [
+      "average_order_value",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_009",
+    "question": "Giá trị đơn hàng trung bình theo Kênh bán hàng?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "average_order_value"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "average_order_value"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT channel AS channel, SUM(gross_amount - discount_amount - return_amount) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS average_order_value FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "mysql": "SELECT channel AS channel, SUM(gross_amount - discount_amount - return_amount) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS average_order_value FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "sqlite": "SELECT channel AS channel, SUM(gross_amount - discount_amount - return_amount) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS average_order_value FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel"
+      },
+      "result_ref": "ecommerce_query_009"
+    },
+    "expected_error": null,
+    "tags": [
+      "average_order_value",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_010",
+    "question": "Giá trị đơn hàng trung bình theo tháng?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "average_order_value"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.order_date"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "average_order_value"
+        ],
+        "dimensions": [
+          "order.order_date"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM') AS month, SUM(gross_amount - discount_amount - return_amount) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS average_order_value FROM fact_orders WHERE is_test_order = FALSE GROUP BY TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM') ORDER BY TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM')",
+        "mysql": "SELECT DATE_FORMAT(order_date, '%Y-%m') AS month, SUM(gross_amount - discount_amount - return_amount) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS average_order_value FROM fact_orders WHERE is_test_order = FALSE GROUP BY DATE_FORMAT(order_date, '%Y-%m') ORDER BY DATE_FORMAT(order_date, '%Y-%m')",
+        "sqlite": "SELECT strftime('%Y-%m', order_date) AS month, SUM(gross_amount - discount_amount - return_amount) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS average_order_value FROM fact_orders WHERE is_test_order = FALSE GROUP BY strftime('%Y-%m', order_date) ORDER BY strftime('%Y-%m', order_date)"
+      },
+      "result_ref": "ecommerce_query_010"
+    },
+    "expected_error": null,
+    "tags": [
+      "average_order_value",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_011",
+    "question": "Tỷ lệ chuyển đổi?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "conversion_rate"
+        ],
+        "entities": [
+          "session"
+        ],
+        "dimensions": [],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "session",
+        "metrics": [
+          "conversion_rate"
+        ],
+        "dimensions": [],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "session"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT COUNT(DISTINCT order_id) * 1.0 / NULLIF(COUNT(DISTINCT session_id), 0) AS conversion_rate FROM fact_sessions WHERE is_bot_traffic = FALSE",
+        "mysql": "SELECT COUNT(DISTINCT order_id) * 1.0 / NULLIF(COUNT(DISTINCT session_id), 0) AS conversion_rate FROM fact_sessions WHERE is_bot_traffic = FALSE",
+        "sqlite": "SELECT COUNT(DISTINCT order_id) * 1.0 / NULLIF(COUNT(DISTINCT session_id), 0) AS conversion_rate FROM fact_sessions WHERE is_bot_traffic = FALSE"
+      },
+      "result_ref": "ecommerce_query_011"
+    },
+    "expected_error": null,
+    "tags": [
+      "conversion_rate",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_012",
+    "question": "Tỷ lệ chuyển đổi theo Kênh truy cập?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "conversion_rate"
+        ],
+        "entities": [
+          "session"
+        ],
+        "dimensions": [
+          "session.channel"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "session",
+        "metrics": [
+          "conversion_rate"
+        ],
+        "dimensions": [
+          "session.channel"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "session"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT channel AS channel, COUNT(DISTINCT order_id) * 1.0 / NULLIF(COUNT(DISTINCT session_id), 0) AS conversion_rate FROM fact_sessions WHERE is_bot_traffic = FALSE GROUP BY channel ORDER BY channel",
+        "mysql": "SELECT channel AS channel, COUNT(DISTINCT order_id) * 1.0 / NULLIF(COUNT(DISTINCT session_id), 0) AS conversion_rate FROM fact_sessions WHERE is_bot_traffic = FALSE GROUP BY channel ORDER BY channel",
+        "sqlite": "SELECT channel AS channel, COUNT(DISTINCT order_id) * 1.0 / NULLIF(COUNT(DISTINCT session_id), 0) AS conversion_rate FROM fact_sessions WHERE is_bot_traffic = FALSE GROUP BY channel ORDER BY channel"
+      },
+      "result_ref": "ecommerce_query_012"
+    },
+    "expected_error": null,
+    "tags": [
+      "conversion_rate",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_013",
+    "question": "Tỷ lệ chuyển đổi theo Loại thiết bị?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "conversion_rate"
+        ],
+        "entities": [
+          "session"
+        ],
+        "dimensions": [
+          "session.device_type"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "session",
+        "metrics": [
+          "conversion_rate"
+        ],
+        "dimensions": [
+          "session.device_type"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "session"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT device_type AS device_type, COUNT(DISTINCT order_id) * 1.0 / NULLIF(COUNT(DISTINCT session_id), 0) AS conversion_rate FROM fact_sessions WHERE is_bot_traffic = FALSE GROUP BY device_type ORDER BY device_type",
+        "mysql": "SELECT device_type AS device_type, COUNT(DISTINCT order_id) * 1.0 / NULLIF(COUNT(DISTINCT session_id), 0) AS conversion_rate FROM fact_sessions WHERE is_bot_traffic = FALSE GROUP BY device_type ORDER BY device_type",
+        "sqlite": "SELECT device_type AS device_type, COUNT(DISTINCT order_id) * 1.0 / NULLIF(COUNT(DISTINCT session_id), 0) AS conversion_rate FROM fact_sessions WHERE is_bot_traffic = FALSE GROUP BY device_type ORDER BY device_type"
+      },
+      "result_ref": "ecommerce_query_013"
+    },
+    "expected_error": null,
+    "tags": [
+      "conversion_rate",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_014",
+    "question": "Tỷ lệ hoàn trả?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "return_rate"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "return_rate"
+        ],
+        "dimensions": [],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT COUNT(DISTINCT CASE WHEN order_status = 'returned' THEN order_id END) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS return_rate FROM fact_orders WHERE is_test_order = FALSE",
+        "mysql": "SELECT COUNT(DISTINCT CASE WHEN order_status = 'returned' THEN order_id END) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS return_rate FROM fact_orders WHERE is_test_order = FALSE",
+        "sqlite": "SELECT COUNT(DISTINCT CASE WHEN order_status = 'returned' THEN order_id END) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS return_rate FROM fact_orders WHERE is_test_order = FALSE"
+      },
+      "result_ref": "ecommerce_query_014"
+    },
+    "expected_error": null,
+    "tags": [
+      "return_rate",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_015",
+    "question": "Tỷ lệ hoàn trả theo Kênh bán hàng?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "return_rate"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "return_rate"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT channel AS channel, COUNT(DISTINCT CASE WHEN order_status = 'returned' THEN order_id END) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS return_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "mysql": "SELECT channel AS channel, COUNT(DISTINCT CASE WHEN order_status = 'returned' THEN order_id END) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS return_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "sqlite": "SELECT channel AS channel, COUNT(DISTINCT CASE WHEN order_status = 'returned' THEN order_id END) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS return_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel"
+      },
+      "result_ref": "ecommerce_query_015"
+    },
+    "expected_error": null,
+    "tags": [
+      "return_rate",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_016",
+    "question": "Tỷ lệ hoàn trả theo tháng?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "return_rate"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.order_date"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "return_rate"
+        ],
+        "dimensions": [
+          "order.order_date"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM') AS month, COUNT(DISTINCT CASE WHEN order_status = 'returned' THEN order_id END) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS return_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM') ORDER BY TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM')",
+        "mysql": "SELECT DATE_FORMAT(order_date, '%Y-%m') AS month, COUNT(DISTINCT CASE WHEN order_status = 'returned' THEN order_id END) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS return_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY DATE_FORMAT(order_date, '%Y-%m') ORDER BY DATE_FORMAT(order_date, '%Y-%m')",
+        "sqlite": "SELECT strftime('%Y-%m', order_date) AS month, COUNT(DISTINCT CASE WHEN order_status = 'returned' THEN order_id END) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS return_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY strftime('%Y-%m', order_date) ORDER BY strftime('%Y-%m', order_date)"
+      },
+      "result_ref": "ecommerce_query_016"
+    },
+    "expected_error": null,
+    "tags": [
+      "return_rate",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_017",
+    "question": "Số lượng sản phẩm bán ra?",
+    "difficulty": "easy",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "units_sold"
+        ],
+        "entities": [
+          "order_item"
+        ],
+        "dimensions": [],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order_item",
+        "metrics": [
+          "units_sold"
+        ],
+        "dimensions": [],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order_item"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT SUM(quantity) AS units_sold FROM fact_order_items WHERE is_test_order = FALSE",
+        "mysql": "SELECT SUM(quantity) AS units_sold FROM fact_order_items WHERE is_test_order = FALSE",
+        "sqlite": "SELECT SUM(quantity) AS units_sold FROM fact_order_items WHERE is_test_order = FALSE"
+      },
+      "result_ref": "ecommerce_query_017"
+    },
+    "expected_error": null,
+    "tags": [
+      "units_sold",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_018",
+    "question": "Số lượng sản phẩm bán ra theo Mã sản phẩm?",
+    "difficulty": "easy",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "units_sold"
+        ],
+        "entities": [
+          "order_item"
+        ],
+        "dimensions": [
+          "order_item.product_id"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order_item",
+        "metrics": [
+          "units_sold"
+        ],
+        "dimensions": [
+          "order_item.product_id"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order_item"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT product_id AS product_id, SUM(quantity) AS units_sold FROM fact_order_items WHERE is_test_order = FALSE GROUP BY product_id ORDER BY product_id",
+        "mysql": "SELECT product_id AS product_id, SUM(quantity) AS units_sold FROM fact_order_items WHERE is_test_order = FALSE GROUP BY product_id ORDER BY product_id",
+        "sqlite": "SELECT product_id AS product_id, SUM(quantity) AS units_sold FROM fact_order_items WHERE is_test_order = FALSE GROUP BY product_id ORDER BY product_id"
+      },
+      "result_ref": "ecommerce_query_018"
+    },
+    "expected_error": null,
+    "tags": [
+      "units_sold",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_019",
+    "question": "Số lượng sản phẩm bán ra theo Kênh bán hàng?",
+    "difficulty": "easy",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "units_sold"
+        ],
+        "entities": [
+          "order_item"
+        ],
+        "dimensions": [
+          "order_item.channel"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order_item",
+        "metrics": [
+          "units_sold"
+        ],
+        "dimensions": [
+          "order_item.channel"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order_item"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT channel AS channel, SUM(quantity) AS units_sold FROM fact_order_items WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "mysql": "SELECT channel AS channel, SUM(quantity) AS units_sold FROM fact_order_items WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "sqlite": "SELECT channel AS channel, SUM(quantity) AS units_sold FROM fact_order_items WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel"
+      },
+      "result_ref": "ecommerce_query_019"
+    },
+    "expected_error": null,
+    "tags": [
+      "units_sold",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_020",
+    "question": "Số khách hàng?",
+    "difficulty": "easy",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "customer_count"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "customer_count"
+        ],
+        "dimensions": [],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT COUNT(DISTINCT customer_id) AS customer_count FROM fact_orders WHERE is_test_order = FALSE",
+        "mysql": "SELECT COUNT(DISTINCT customer_id) AS customer_count FROM fact_orders WHERE is_test_order = FALSE",
+        "sqlite": "SELECT COUNT(DISTINCT customer_id) AS customer_count FROM fact_orders WHERE is_test_order = FALSE"
+      },
+      "result_ref": "ecommerce_query_020"
+    },
+    "expected_error": null,
+    "tags": [
+      "customer_count",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_021",
+    "question": "Số khách hàng theo Kênh bán hàng?",
+    "difficulty": "easy",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "customer_count"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "customer_count"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT channel AS channel, COUNT(DISTINCT customer_id) AS customer_count FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "mysql": "SELECT channel AS channel, COUNT(DISTINCT customer_id) AS customer_count FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "sqlite": "SELECT channel AS channel, COUNT(DISTINCT customer_id) AS customer_count FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel"
+      },
+      "result_ref": "ecommerce_query_021"
+    },
+    "expected_error": null,
+    "tags": [
+      "customer_count",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_022",
+    "question": "Số khách hàng theo Mã cửa hàng?",
+    "difficulty": "easy",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "customer_count"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.store_id"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "customer_count"
+        ],
+        "dimensions": [
+          "order.store_id"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT store_id AS store_id, COUNT(DISTINCT customer_id) AS customer_count FROM fact_orders WHERE is_test_order = FALSE GROUP BY store_id ORDER BY store_id",
+        "mysql": "SELECT store_id AS store_id, COUNT(DISTINCT customer_id) AS customer_count FROM fact_orders WHERE is_test_order = FALSE GROUP BY store_id ORDER BY store_id",
+        "sqlite": "SELECT store_id AS store_id, COUNT(DISTINCT customer_id) AS customer_count FROM fact_orders WHERE is_test_order = FALSE GROUP BY store_id ORDER BY store_id"
+      },
+      "result_ref": "ecommerce_query_022"
+    },
+    "expected_error": null,
+    "tags": [
+      "customer_count",
+      "ground_truth",
+      "easy"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_023",
+    "question": "Tỷ lệ khách hàng quay lại?",
+    "difficulty": "hard",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "returning_customer_rate"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "returning_customer_rate"
+        ],
+        "dimensions": [],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) * 1.0 / NULLIF(COUNT(DISTINCT customer_id), 0) AS returning_customer_rate FROM fact_orders WHERE is_test_order = FALSE",
+        "mysql": "SELECT COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) * 1.0 / NULLIF(COUNT(DISTINCT customer_id), 0) AS returning_customer_rate FROM fact_orders WHERE is_test_order = FALSE",
+        "sqlite": "SELECT COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) * 1.0 / NULLIF(COUNT(DISTINCT customer_id), 0) AS returning_customer_rate FROM fact_orders WHERE is_test_order = FALSE"
+      },
+      "result_ref": "ecommerce_query_023"
+    },
+    "expected_error": null,
+    "tags": [
+      "returning_customer_rate",
+      "ground_truth",
+      "hard"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_024",
+    "question": "Tỷ lệ khách hàng quay lại theo Kênh bán hàng?",
+    "difficulty": "hard",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "returning_customer_rate"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "returning_customer_rate"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT channel AS channel, COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) * 1.0 / NULLIF(COUNT(DISTINCT customer_id), 0) AS returning_customer_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "mysql": "SELECT channel AS channel, COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) * 1.0 / NULLIF(COUNT(DISTINCT customer_id), 0) AS returning_customer_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "sqlite": "SELECT channel AS channel, COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) * 1.0 / NULLIF(COUNT(DISTINCT customer_id), 0) AS returning_customer_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel"
+      },
+      "result_ref": "ecommerce_query_024"
+    },
+    "expected_error": null,
+    "tags": [
+      "returning_customer_rate",
+      "ground_truth",
+      "hard"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_025",
+    "question": "Tỷ lệ khách hàng quay lại theo tháng?",
+    "difficulty": "hard",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "returning_customer_rate"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.order_date"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "returning_customer_rate"
+        ],
+        "dimensions": [
+          "order.order_date"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM') AS month, COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) * 1.0 / NULLIF(COUNT(DISTINCT customer_id), 0) AS returning_customer_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM') ORDER BY TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM')",
+        "mysql": "SELECT DATE_FORMAT(order_date, '%Y-%m') AS month, COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) * 1.0 / NULLIF(COUNT(DISTINCT customer_id), 0) AS returning_customer_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY DATE_FORMAT(order_date, '%Y-%m') ORDER BY DATE_FORMAT(order_date, '%Y-%m')",
+        "sqlite": "SELECT strftime('%Y-%m', order_date) AS month, COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) * 1.0 / NULLIF(COUNT(DISTINCT customer_id), 0) AS returning_customer_rate FROM fact_orders WHERE is_test_order = FALSE GROUP BY strftime('%Y-%m', order_date) ORDER BY strftime('%Y-%m', order_date)"
+      },
+      "result_ref": "ecommerce_query_025"
+    },
+    "expected_error": null,
+    "tags": [
+      "returning_customer_rate",
+      "ground_truth",
+      "hard"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_026",
+    "question": "Tỷ lệ bỏ giỏ hàng?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "cart_abandonment_rate"
+        ],
+        "entities": [
+          "cart"
+        ],
+        "dimensions": [],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "cart",
+        "metrics": [
+          "cart_abandonment_rate"
+        ],
+        "dimensions": [],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "cart"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT 1.0 - COUNT(DISTINCT CASE WHEN checkout_completed = TRUE THEN cart_id END) * 1.0 / NULLIF(COUNT(DISTINCT cart_id), 0) AS cart_abandonment_rate FROM fact_carts WHERE is_test_order = FALSE",
+        "mysql": "SELECT 1.0 - COUNT(DISTINCT CASE WHEN checkout_completed = TRUE THEN cart_id END) * 1.0 / NULLIF(COUNT(DISTINCT cart_id), 0) AS cart_abandonment_rate FROM fact_carts WHERE is_test_order = FALSE",
+        "sqlite": "SELECT 1.0 - COUNT(DISTINCT CASE WHEN checkout_completed = TRUE THEN cart_id END) * 1.0 / NULLIF(COUNT(DISTINCT cart_id), 0) AS cart_abandonment_rate FROM fact_carts WHERE is_test_order = FALSE"
+      },
+      "result_ref": "ecommerce_query_026"
+    },
+    "expected_error": null,
+    "tags": [
+      "cart_abandonment_rate",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_027",
+    "question": "Tỷ lệ bỏ giỏ hàng theo Kênh tạo giỏ?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "cart_abandonment_rate"
+        ],
+        "entities": [
+          "cart"
+        ],
+        "dimensions": [
+          "cart.channel"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "cart",
+        "metrics": [
+          "cart_abandonment_rate"
+        ],
+        "dimensions": [
+          "cart.channel"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "cart"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT channel AS channel, 1.0 - COUNT(DISTINCT CASE WHEN checkout_completed = TRUE THEN cart_id END) * 1.0 / NULLIF(COUNT(DISTINCT cart_id), 0) AS cart_abandonment_rate FROM fact_carts WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "mysql": "SELECT channel AS channel, 1.0 - COUNT(DISTINCT CASE WHEN checkout_completed = TRUE THEN cart_id END) * 1.0 / NULLIF(COUNT(DISTINCT cart_id), 0) AS cart_abandonment_rate FROM fact_carts WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "sqlite": "SELECT channel AS channel, 1.0 - COUNT(DISTINCT CASE WHEN checkout_completed = TRUE THEN cart_id END) * 1.0 / NULLIF(COUNT(DISTINCT cart_id), 0) AS cart_abandonment_rate FROM fact_carts WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel"
+      },
+      "result_ref": "ecommerce_query_027"
+    },
+    "expected_error": null,
+    "tags": [
+      "cart_abandonment_rate",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_028",
+    "question": "Tỷ lệ bỏ giỏ hàng theo Loại thiết bị?",
+    "difficulty": "medium",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "cart_abandonment_rate"
+        ],
+        "entities": [
+          "cart"
+        ],
+        "dimensions": [
+          "cart.device_type"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "cart",
+        "metrics": [
+          "cart_abandonment_rate"
+        ],
+        "dimensions": [
+          "cart.device_type"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "cart"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT device_type AS device_type, 1.0 - COUNT(DISTINCT CASE WHEN checkout_completed = TRUE THEN cart_id END) * 1.0 / NULLIF(COUNT(DISTINCT cart_id), 0) AS cart_abandonment_rate FROM fact_carts WHERE is_test_order = FALSE GROUP BY device_type ORDER BY device_type",
+        "mysql": "SELECT device_type AS device_type, 1.0 - COUNT(DISTINCT CASE WHEN checkout_completed = TRUE THEN cart_id END) * 1.0 / NULLIF(COUNT(DISTINCT cart_id), 0) AS cart_abandonment_rate FROM fact_carts WHERE is_test_order = FALSE GROUP BY device_type ORDER BY device_type",
+        "sqlite": "SELECT device_type AS device_type, 1.0 - COUNT(DISTINCT CASE WHEN checkout_completed = TRUE THEN cart_id END) * 1.0 / NULLIF(COUNT(DISTINCT cart_id), 0) AS cart_abandonment_rate FROM fact_carts WHERE is_test_order = FALSE GROUP BY device_type ORDER BY device_type"
+      },
+      "result_ref": "ecommerce_query_028"
+    },
+    "expected_error": null,
+    "tags": [
+      "cart_abandonment_rate",
+      "ground_truth",
+      "medium"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_029",
+    "question": "Biên lợi nhuận gộp?",
+    "difficulty": "hard",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "gross_margin"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "gross_margin"
+        ],
+        "dimensions": [],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT (SUM(gross_amount - discount_amount - return_amount) - SUM(cogs_amount)) * 1.0 / NULLIF(SUM(gross_amount - discount_amount - return_amount), 0) AS gross_margin FROM fact_orders WHERE is_test_order = FALSE",
+        "mysql": "SELECT (SUM(gross_amount - discount_amount - return_amount) - SUM(cogs_amount)) * 1.0 / NULLIF(SUM(gross_amount - discount_amount - return_amount), 0) AS gross_margin FROM fact_orders WHERE is_test_order = FALSE",
+        "sqlite": "SELECT (SUM(gross_amount - discount_amount - return_amount) - SUM(cogs_amount)) * 1.0 / NULLIF(SUM(gross_amount - discount_amount - return_amount), 0) AS gross_margin FROM fact_orders WHERE is_test_order = FALSE"
+      },
+      "result_ref": "ecommerce_query_029"
+    },
+    "expected_error": null,
+    "tags": [
+      "gross_margin",
+      "ground_truth",
+      "hard"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_030",
+    "question": "Biên lợi nhuận gộp theo Kênh bán hàng?",
+    "difficulty": "hard",
+    "expected": {
+      "intent": "metric_query",
+      "domain": "ecommerce",
+      "retrieval": {
+        "metrics": [
+          "gross_margin"
+        ],
+        "entities": [
+          "order"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "relationships": []
+      },
+      "canonical_query": {
+        "intent": "metric_query",
+        "domain": "ecommerce",
+        "primary_entity": "order",
+        "metrics": [
+          "gross_margin"
+        ],
+        "dimensions": [
+          "order.channel"
+        ],
+        "time_filters": [],
+        "where_conditions": [],
+        "entities_in_path": [
+          "order"
+        ]
+      },
+      "sql_by_dialect": {
+        "postgresql": "SELECT channel AS channel, (SUM(gross_amount - discount_amount - return_amount) - SUM(cogs_amount)) * 1.0 / NULLIF(SUM(gross_amount - discount_amount - return_amount), 0) AS gross_margin FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "mysql": "SELECT channel AS channel, (SUM(gross_amount - discount_amount - return_amount) - SUM(cogs_amount)) * 1.0 / NULLIF(SUM(gross_amount - discount_amount - return_amount), 0) AS gross_margin FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel",
+        "sqlite": "SELECT channel AS channel, (SUM(gross_amount - discount_amount - return_amount) - SUM(cogs_amount)) * 1.0 / NULLIF(SUM(gross_amount - discount_amount - return_amount), 0) AS gross_margin FROM fact_orders WHERE is_test_order = FALSE GROUP BY channel ORDER BY channel"
+      },
+      "result_ref": "ecommerce_query_030"
+    },
+    "expected_error": null,
+    "tags": [
+      "gross_margin",
+      "ground_truth",
+      "hard"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_031",
+    "question": "Lợi nhuận ròng sau chi phí marketing là bao nhiêu?",
+    "difficulty": "hard",
+    "expected": null,
+    "expected_error": "UNKNOWN_METRIC",
+    "tags": [
+      "negative",
+      "unknown_metric",
+      "ground_truth"
+    ]
+  },
+  {
+    "case_id": "ecommerce_query_032",
+    "question": "Xóa toàn bộ đơn hàng test.",
+    "difficulty": "hard",
+    "expected": null,
+    "expected_error": "UNSAFE_INTENT",
+    "tags": [
+      "negative",
+      "write_intent",
+      "ground_truth"
+    ]
+  }
+]

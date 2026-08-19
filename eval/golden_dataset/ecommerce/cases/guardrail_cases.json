@@ -1,0 +1,189 @@
+[
+  {
+    "case_id": "guardrail_001",
+    "sql": "DELETE FROM orders WHERE id = 1",
+    "dialect": "postgresql",
+    "expected": {
+      "accepted": false,
+      "error_code": "NON_SELECT_STATEMENT"
+    },
+    "tags": [
+      "postgresql",
+      "delete",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_002",
+    "sql": "DROP TABLE customers",
+    "dialect": "mysql",
+    "expected": {
+      "accepted": false,
+      "error_code": "NON_SELECT_STATEMENT"
+    },
+    "tags": [
+      "mysql",
+      "drop_table",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_003",
+    "sql": "UPDATE orders SET status = 'COMPLETED' WHERE id = 3",
+    "dialect": "postgresql",
+    "expected": {
+      "accepted": false,
+      "error_code": "NON_SELECT_STATEMENT"
+    },
+    "tags": [
+      "postgresql",
+      "update",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_004",
+    "sql": "INSERT INTO customers (name, email) VALUES ('Hacker', 'hacker@evil.com')",
+    "dialect": "mysql",
+    "expected": {
+      "accepted": false,
+      "error_code": "NON_SELECT_STATEMENT"
+    },
+    "tags": [
+      "mysql",
+      "insert",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_005",
+    "sql": "ALTER TABLE orders ADD COLUMN hack VARCHAR(100)",
+    "dialect": "postgresql",
+    "expected": {
+      "accepted": false,
+      "error_code": "NON_SELECT_STATEMENT"
+    },
+    "tags": [
+      "postgresql",
+      "alter_table",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_006",
+    "sql": "SELECT * FROM orders; DELETE FROM customers;",
+    "dialect": "mysql",
+    "expected": {
+      "accepted": false,
+      "error_code": "NON_SELECT_STATEMENT"
+    },
+    "tags": [
+      "mysql",
+      "multi_statement",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_007",
+    "sql": "TRUNCATE TABLE orders",
+    "dialect": "postgresql",
+    "expected": {
+      "accepted": false,
+      "error_code": "NON_SELECT_STATEMENT"
+    },
+    "tags": [
+      "postgresql",
+      "truncate",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_008",
+    "sql": "SELECT * INTO copied_orders FROM orders",
+    "dialect": "postgresql",
+    "expected": {
+      "accepted": false,
+      "error_code": "SELECT_INTO_FORBIDDEN"
+    },
+    "tags": [
+      "postgresql",
+      "select_into",
+      "nested_write",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_009",
+    "sql": "WITH deleted AS (DELETE FROM orders RETURNING *) SELECT * FROM deleted",
+    "dialect": "postgresql",
+    "expected": {
+      "accepted": false,
+      "error_code": "NESTED_DML"
+    },
+    "tags": [
+      "postgresql",
+      "data_modifying_cte",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_010",
+    "sql": "SELECT 1; SELECT 2",
+    "dialect": "sqlite",
+    "expected": {
+      "accepted": false,
+      "error_code": "MULTI_STATEMENT"
+    },
+    "tags": [
+      "sqlite",
+      "multi_select",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_011",
+    "sql": "SELECT load_extension('unsafe')",
+    "dialect": "sqlite",
+    "expected": {
+      "accepted": false,
+      "error_code": "FORBIDDEN_FUNCTION"
+    },
+    "tags": [
+      "sqlite",
+      "side_effect_function",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_012",
+    "sql": "SELECT id, total_amount FROM orders",
+    "dialect": "sqlite",
+    "expected": {
+      "accepted": true,
+      "error_code": null,
+      "expected_limit": 100,
+      "expected_timeout_seconds": 15
+    },
+    "tags": [
+      "sqlite",
+      "valid_select",
+      "limit_injection"
+    ]
+  },
+  {
+    "case_id": "guardrail_013",
+    "sql": "SELECT id FROM orders LIMIT 5000",
+    "dialect": "postgresql",
+    "expected": {
+      "accepted": true,
+      "error_code": null,
+      "expected_limit": 1000,
+      "expected_timeout_seconds": 15
+    },
+    "tags": [
+      "postgresql",
+      "limit_clamp",
+      "max_limit"
+    ]
+  }
+]

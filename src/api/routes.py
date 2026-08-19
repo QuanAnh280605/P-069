@@ -3,17 +3,20 @@
 import logging
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.api.auth import get_current_user, get_current_user_profile
+from src.api.auth import get_current_user
 from src.models.db import (
     CanonicalRelationshipModel,
+    ChatMessageModel,
+    ChatSessionModel,
     ImportedSchemaModel,
     LiveTargetDbModel,
+    OrganizationMemberModel,
     SemanticColumnModel,
     SemanticDatabaseModel,
     SemanticMetricModel,
@@ -25,8 +28,13 @@ from src.models.schema_metadata import DiagnosticCode, RawSchemaMetadata, Schema
 from src.models.schemas import (
     ApproveRequest,
     CanonicalRelationshipResponse,
+    ChatMessageResponse,
     ChatRequest,
     ChatResponse,
+    ChatSessionCreateRequest,
+    ChatSessionDetailResponse,
+    ChatSessionSummaryResponse,
+    ChatSessionUpdateRequest,
     CustomMetricGenerateRequest,
     CustomMetricGenerateResponse,
     GenerateRequest,
@@ -37,6 +45,8 @@ from src.models.schemas import (
     LiveDbResponse,
     LiveDbSummaryResponse,
     MetricCreate,
+    MetricDimensionsResponse,
+    MetricFilterColumnsResponse,
     MetricHistoryResponse,
     MetricListItem,
     MetricResponse,
@@ -53,9 +63,24 @@ from src.models.schemas import (
     SemanticQueryResponse,
     SemanticTableUpdate,
     SqlDumpPreviewResponse,
-    UserProfileResponse,
+)
+from src.services.chat_service import (
+    ChatAuthorizationError,
+    auto_generate_session_title,
+    create_chat_session,
+    delete_chat_session,
+    get_chat_database,
+    get_chat_message_by_client_id,
+    get_chat_messages_page,
+    get_chat_session,
+    get_chat_session_with_messages,
+    get_recent_chat_history,
+    list_chat_sessions,
+    save_chat_message,
+    update_chat_session_title,
 )
 from src.services.database import decrypt_conn_url, get_db_session
+from src.services.dimension_recommender import get_dimensions_for_metric, get_filter_columns_for_metric
 from src.services.export_service import build_semantic_layer_dict, serialize_to_json, serialize_to_yaml
 from src.services.imported_schema_service import (
     create_imported_schema,
@@ -71,6 +96,12 @@ from src.services.live_db_service import (
 )
 from src.services.metric_dedupe import load_existing_for_dedupe
 from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
+from src.services.organization_service import (
+    ROLE_PERMISSIONS,
+    get_membership,
+    require_permission,
+    resolve_membership,
+)
 from src.services.query_compiler import SemanticQueryCompiler
 from src.services.query_execution import execute_compiled_query
 from src.services.schema_ingestion import parse_sql_dump_preview
@@ -103,6 +134,59 @@ async def _execute_sql_on_live_db(
 
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+
+async def _request_org_id(db: AsyncSession, user_id: int, org_id: int | None) -> int:
+    """Resolve the active Workspace for a semantic resource mutation."""
+    try:
+        organization, _ = await resolve_membership(db, user_id, org_id)
+        return organization.id
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+async def _require_org_permission(db: AsyncSession, user_id: int, org_id: int | None, permission: str) -> None:
+    """Enforce a Workspace permission for the selected Workspace."""
+    try:
+        _, membership = await resolve_membership(db, user_id, org_id)
+        require_permission(membership, permission)
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+async def _require_resource_permission(
+    db: AsyncSession,
+    user_id: int,
+    db_id: int,
+    org_id: int | None,
+    permission: str,
+) -> SemanticDatabaseModel:
+    """Authorize a resource and permission in the active Workspace."""
+    resource = await db.get(SemanticDatabaseModel, db_id)
+    if resource is None:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+    try:
+        organization, membership = await resolve_membership(db, user_id, org_id)
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    if resource.org_id is not None and resource.org_id != organization.id:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+    if resource.org_id is None and resource.created_by != user_id:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+    if resource.org_id is None:
+        return resource
+    try:
+        require_permission(membership, permission)
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    return resource
+
 
 DEMO_RETAIL_SCHEMA: dict[str, Any] = {
     "order_header": {
@@ -210,30 +294,37 @@ async def import_sql_dump_preview(
 @router.post("/semantic/import/saved", response_model=ImportedSchemaResponse, status_code=201)
 async def save_imported_schema(
     body: ImportedSchemaCreateRequest,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> ImportedSchemaResponse:
     """Persist parsed schema metadata under a user-provided display name."""
-    return await create_imported_schema(db, current_user.id, body.display_name, body.raw_schema)
+    active_org_id = await _request_org_id(db, current_user.id, org_id)
+    await _require_org_permission(db, current_user.id, active_org_id, "can_manage_schema")
+    return await create_imported_schema(db, current_user.id, body.display_name, body.raw_schema, active_org_id)
 
 
 @router.get("/semantic/import/saved", response_model=list[ImportedSchemaSummaryResponse])
 async def get_saved_imported_schemas(
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> list[ImportedSchemaSummaryResponse]:
     """List imported schemas owned by the authenticated user."""
-    return await list_imported_schemas(db, current_user.id)
+    active_org_id = await _request_org_id(db, current_user.id, org_id)
+    return await list_imported_schemas(db, current_user.id, active_org_id)
 
 
 @router.get("/semantic/import/saved/{schema_id}", response_model=ImportedSchemaResponse)
 async def get_saved_imported_schema(
     schema_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> ImportedSchemaResponse:
     """Load one user-owned imported schema for preview."""
-    record = await get_imported_schema(db, current_user.id, schema_id)
+    active_org_id = await _request_org_id(db, current_user.id, org_id)
+    record = await get_imported_schema(db, current_user.id, schema_id, active_org_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Saved schema not found")
     return record
@@ -242,11 +333,14 @@ async def get_saved_imported_schema(
 @router.delete("/semantic/import/saved/{schema_id}", status_code=204)
 async def remove_saved_imported_schema(
     schema_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Delete one user-owned imported schema."""
-    if not await delete_imported_schema(db, current_user.id, schema_id):
+    active_org_id = await _request_org_id(db, current_user.id, org_id)
+    await _require_org_permission(db, current_user.id, active_org_id, "can_manage_schema")
+    if not await delete_imported_schema(db, current_user.id, schema_id, active_org_id):
         raise HTTPException(status_code=404, detail="Saved schema not found")
 
 
@@ -258,6 +352,7 @@ async def remove_saved_imported_schema(
 @router.post("/semantic/db/connect", response_model=LiveDbResponse, status_code=201)
 async def connect_live_target_db(
     body: LiveDbConnectRequest,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> LiveDbResponse:
@@ -269,13 +364,18 @@ async def connect_live_target_db(
         current_user.id,
     )
     try:
+        active_org_id = await _request_org_id(db, current_user.id, org_id)
+        await _require_org_permission(db, current_user.id, active_org_id, "can_manage_schema")
         return await create_live_target_db(
             db,
             current_user.id,
             body.display_name,
             body.dialect,
             body.conn_url,
+            active_org_id,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to connect live DB '%s': %s", body.display_name, exc, exc_info=True)
         raise HTTPException(status_code=400, detail=f"Failed to connect and introspect target database: {exc}") from exc
@@ -283,21 +383,25 @@ async def connect_live_target_db(
 
 @router.get("/semantic/db/saved", response_model=list[LiveDbSummaryResponse])
 async def get_saved_live_target_dbs(
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> list[LiveDbSummaryResponse]:
     """List live target databases connected and saved by the user."""
-    return await list_live_target_dbs(db, current_user.id)
+    active_org_id = await _request_org_id(db, current_user.id, org_id)
+    return await list_live_target_dbs(db, current_user.id, active_org_id)
 
 
 @router.get("/semantic/db/saved/{db_id}", response_model=LiveDbResponse)
 async def get_saved_live_target_db(
     db_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> LiveDbResponse:
     """Get details and raw schema metadata of a saved live target database."""
-    record = await get_live_target_db(db, current_user.id, db_id)
+    active_org_id = await _request_org_id(db, current_user.id, org_id)
+    record = await get_live_target_db(db, current_user.id, db_id, active_org_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Saved live database not found")
     return record
@@ -306,17 +410,21 @@ async def get_saved_live_target_db(
 @router.delete("/semantic/db/saved/{db_id}", status_code=204)
 async def remove_saved_live_target_db(
     db_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Delete a saved live target database connection."""
-    if not await delete_live_target_db(db, current_user.id, db_id):
+    active_org_id = await _request_org_id(db, current_user.id, org_id)
+    await _require_org_permission(db, current_user.id, active_org_id, "can_manage_schema")
+    if not await delete_live_target_db(db, current_user.id, db_id, active_org_id):
         raise HTTPException(status_code=404, detail="Saved live database not found")
 
 
 @router.delete("/semantic/db/{db_id}", status_code=204)
 async def remove_database_unified(
     db_id: str,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
@@ -324,9 +432,10 @@ async def remove_database_unified(
     parsed_id = _parse_int_id(db_id)
     deleted = False
     if parsed_id is not None:
-        if await delete_live_target_db(db, current_user.id, parsed_id):
+        await _require_resource_permission(db, current_user.id, parsed_id, org_id, "can_manage_schema")
+        if await delete_live_target_db(db, current_user.id, parsed_id, org_id):
             deleted = True
-        elif await delete_imported_schema(db, current_user.id, parsed_id):
+        elif await delete_imported_schema(db, current_user.id, parsed_id, org_id):
             deleted = True
         elif await delete_semantic_database(db, parsed_id, current_user.id):
             deleted = True
@@ -343,6 +452,7 @@ async def remove_database_unified(
 @router.post("/semantic/generate", response_model=SemanticGenerateV2Response, status_code=status.HTTP_202_ACCEPTED)
 async def generate_semantic_layer(
     request: GenerateRequest,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> SemanticGenerateV2Response:
@@ -354,12 +464,7 @@ async def generate_semantic_layer(
     db_id = request.db_id
     logger.info("Received request to re-generate AI semantic layer for db_id=%d (user_id=%d)", db_id, current_user.id)
 
-    sem_stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == db_id)
-
-    sem_result = await db.execute(sem_stmt)
-    sem_db = sem_result.scalar_one_or_none()
-    if not sem_db:
-        raise HTTPException(status_code=404, detail="Semantic database not found")
+    sem_db = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_manage_schema")
 
     raw_schema, dialect = await _find_source_raw_schema(db, db_id, sem_db.db_type)
 
@@ -419,6 +524,7 @@ async def _find_source_raw_schema(
 @router.post("/semantic/approve", response_model=SemanticApproveV2Response)
 async def approve_semantic_layer(
     request: ApproveRequest,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> SemanticApproveV2Response:
@@ -427,12 +533,7 @@ async def approve_semantic_layer(
     Checks ownership: only metrics created by the current user can be approved.
     """
     db_id = request.db_id
-
-    sem_stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == db_id)
-    sem_result = await db.execute(sem_stmt)
-    sem_db = sem_result.scalar_one_or_none()
-    if not sem_db:
-        raise HTTPException(status_code=404, detail="Semantic database not found")
+    sem_db = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_approve_metrics")
 
     metrics_stmt = select(SemanticMetricModel).where(
         SemanticMetricModel.db_id == db_id,
@@ -446,7 +547,7 @@ async def approve_semantic_layer(
 
     approved_count = 0
     for metric in draft_metrics:
-        if metric.created_by is not None and metric.created_by != current_user.id and current_user.role != "admin":
+        if sem_db.org_id is None and metric.created_by not in {None, current_user.id}:
             continue
         await approve_metric(db=db, metric_id=metric.id, user_id=current_user.id)
         approved_count += 1
@@ -465,11 +566,13 @@ async def approve_semantic_layer(
 async def approve_single_metric_endpoint(
     db_id: str,
     metric_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricResponse:
     """Approve a single metric by its ID."""
     numeric_db_id = int(db_id)
+    await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_approve_metrics")
     stmt = select(SemanticMetricModel).where(
         SemanticMetricModel.id == metric_id,
         SemanticMetricModel.db_id == numeric_db_id,
@@ -501,11 +604,14 @@ async def update_table(
     db_id: str,
     table_name: str,
     body: SemanticTableUpdate,
-    user: UserProfileResponse = Depends(get_current_user_profile),
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Update business_name & description for a table."""
     int_id = _parse_int_id(db_id)
+    if int_id is not None:
+        await _require_resource_permission(db, user.id, int_id, org_id, "can_manage_schema")
     if int_id is None:
         return {"message": "Table updated successfully"}
 
@@ -529,11 +635,14 @@ async def update_column(
     table_name: str,
     column_name: str,
     body: SemanticColumnUpdate,
-    user: UserProfileResponse = Depends(get_current_user_profile),
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Update business_name & description for a column."""
     int_id = _parse_int_id(db_id)
+    if int_id is not None:
+        await _require_resource_permission(db, user.id, int_id, org_id, "can_manage_schema")
     if int_id is None:
         return {"message": "Column updated successfully"}
 
@@ -628,10 +737,30 @@ async def _load_schema_context_for_db(db: AsyncSession, db_id: Any) -> dict[str,
     return DEMO_RETAIL_SCHEMA
 
 
+async def _load_approved_metric_context(db: AsyncSession, db_id: int) -> list[dict[str, Any]]:
+    """Return safe approved metric context for the read-only data assistant."""
+    stmt = select(SemanticMetricModel).where(
+        SemanticMetricModel.db_id == db_id,
+        SemanticMetricModel.status == "approved",
+    )
+    metrics = (await db.execute(stmt)).scalars().all()
+    return [{"name": metric.name, "definition": _safe_metric_definition(metric.definition)} for metric in metrics]
+
+
+async def _chat_can_generate_metrics(db: AsyncSession, database: SemanticDatabaseModel, user_id: int) -> bool:
+    """Resolve metric-authoring capability from Workspace membership."""
+    if database.org_id is None:
+        return True
+    membership = await get_membership(db, user_id, database.org_id)
+    return bool(membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_use_metric_studio", False))
+
+
 @router.post("/semantic/{db_id}/metrics/generate", response_model=CustomMetricGenerateResponse)
 async def generate_custom_metrics(
     db_id: str,
     body: CustomMetricGenerateRequest,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> CustomMetricGenerateResponse:
     """Sinh công thức Business Metrics thông minh từ yêu cầu người dùng bằng tiếng Việt."""
@@ -645,13 +774,9 @@ async def generate_custom_metrics(
 
     try:
         numeric_db_id = int(db_id)
-        if numeric_db_id >= 100:
-            db_stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == numeric_db_id)
-            db_res = await db.execute(db_stmt)
-            if db_res.scalar_one_or_none() is None:
-                raise HTTPException(status_code=404, detail=f"Database with id {db_id} not found")
-    except ValueError:
-        pass
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=f"Database with id {db_id} not found") from error
+    await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_create_metrics")
 
     schema_context = await _load_schema_context_for_db(db, db_id)
     existing, dedupe_performed = await load_existing_for_dedupe(db, db_id)
@@ -680,17 +805,13 @@ async def generate_custom_metrics(
 async def create_metric_endpoint(
     db_id: str,
     body: MetricCreate,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricResponse:
     """Tạo Business Metric mới — tự động tạo record trong metric_versions."""
     numeric_db_id = int(db_id)
-
-    db_stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == numeric_db_id)
-    db_res = await db.execute(db_stmt)
-    db_record = db_res.scalar_one_or_none()
-    if not db_record:
-        raise HTTPException(status_code=404, detail=f"Semantic database {numeric_db_id} not found")
+    db_record = await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_create_metrics")
 
     metric_data: dict[str, Any] = {
         "definition": body.definition.model_dump(mode="json"),
@@ -734,10 +855,22 @@ def _safe_metric_definition(definition_raw: Any) -> MetricDefinition | None:
 @router.get("/semantic/{db_id}/metrics", response_model=list[MetricListItem])
 async def list_metrics(
     db_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> list[MetricListItem]:
     """Danh sách metrics kèm version, status, approved_by."""
+    semantic_db = await _owned_semantic_database(db, db_id, current_user.id, org_id)
+    if semantic_db is None:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
     stmt = select(SemanticMetricModel).where(SemanticMetricModel.db_id == db_id).order_by(SemanticMetricModel.id)
+    if semantic_db.org_id is not None:
+        membership = await get_membership(db, current_user.id, semantic_db.org_id)
+        can_view_pending = bool(
+            membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_view_pending_metrics", False)
+        )
+        if not can_view_pending:
+            stmt = stmt.where(SemanticMetricModel.status == "approved")
     result = await db.execute(stmt)
     metrics = result.scalars().all()
 
@@ -761,11 +894,12 @@ async def list_metrics(
 @router.get("/semantic/{db_id}/catalog", response_model=SemanticCatalogResponse)
 async def get_semantic_catalog(
     db_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> SemanticCatalogResponse:
     """Return canonical IDs and query capability for an owned semantic database."""
-    semantic_db = await _owned_semantic_database(db, db_id, current_user.id)
+    semantic_db = await _owned_semantic_database(db, db_id, current_user.id, org_id)
     if semantic_db is None:
         raise HTTPException(status_code=404, detail="Semantic database not found")
     source_type = await _catalog_source_type(db, db_id)
@@ -778,11 +912,22 @@ async def get_semantic_catalog(
     )
 
 
-async def _owned_semantic_database(db: AsyncSession, db_id: int, user_id: int) -> SemanticDatabaseModel | None:
-    """Find an owned semantic database."""
-    stmt = select(SemanticDatabaseModel).where(
-        SemanticDatabaseModel.id == db_id,
-        (SemanticDatabaseModel.created_by == user_id) | (SemanticDatabaseModel.created_by.is_(None)),
+async def _owned_semantic_database(
+    db: AsyncSession, db_id: int, user_id: int, org_id: int | None = None
+) -> SemanticDatabaseModel | None:
+    """Find a semantic database owned by or shared with the authenticated user."""
+    try:
+        organization, _ = await resolve_membership(db, user_id, org_id)
+    except (PermissionError, ValueError):
+        return None
+    stmt = (
+        select(SemanticDatabaseModel)
+        .outerjoin(OrganizationMemberModel, OrganizationMemberModel.org_id == SemanticDatabaseModel.org_id)
+        .where(
+            SemanticDatabaseModel.id == db_id,
+            ((SemanticDatabaseModel.org_id == organization.id) & (OrganizationMemberModel.user_id == user_id))
+            | ((SemanticDatabaseModel.org_id.is_(None)) & (SemanticDatabaseModel.created_by == user_id)),
+        )
     )
     return (await db.execute(stmt)).scalar_one_or_none()
 
@@ -808,6 +953,8 @@ def _catalog_table(table: SemanticTableModel) -> SemanticCatalogTable:
             business_name=column.business_name,
             data_type=column.data_type,
             is_time_dimension=column.is_time_dimension,
+            is_primary_key=column.is_primary_key,
+            is_foreign_key=column.is_foreign_key,
             allowed_values=column.allowed_values,
         )
         for column in sorted(table.columns, key=lambda item: item.id)
@@ -856,14 +1003,26 @@ async def _catalog_source_type(db: AsyncSession, db_id: int) -> str:
 async def get_metric_history(
     db_id: int,
     metric_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricHistoryResponse:
     """Lịch sử version của một metric."""
+    semantic_db = await _owned_semantic_database(db, db_id, current_user.id, org_id)
+    if semantic_db is None:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
     metric = await get_metric_with_history(db=db, metric_id=metric_id)
     if not metric:
         raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
     if metric.db_id != db_id:
         raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found in database {db_id}")
+    if semantic_db.org_id is not None and metric.status != "approved":
+        membership = await get_membership(db, current_user.id, semantic_db.org_id)
+        can_view_pending = bool(
+            membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_view_pending_metrics", False)
+        )
+        if not can_view_pending:
+            raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
 
     versions = [
         MetricVersionItem(
@@ -883,17 +1042,79 @@ async def get_metric_history(
     )
 
 
+@router.get("/semantic/{db_id}/metric/{metric_id}/dimensions", response_model=MetricDimensionsResponse)
+async def get_metric_recommended_dimensions(
+    db_id: int,
+    metric_id: int,
+    db: AsyncSession = Depends(get_db_session),
+    _user: UserModel = Depends(get_current_user),
+) -> MetricDimensionsResponse:
+    """Recommend high-signal dimensions for a specific metric across Tier A, B, C, and D."""
+    stmt_metric = select(SemanticMetricModel).where(
+        SemanticMetricModel.id == metric_id,
+        SemanticMetricModel.db_id == db_id,
+    )
+    metric = (await db.execute(stmt_metric)).scalar_one_or_none()
+    if not metric:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metric {metric_id} not found")
+
+    base_table_name = ""
+    if metric.base_entity_id:
+        stmt_t = select(SemanticTableModel.table_name).where(SemanticTableModel.id == metric.base_entity_id)
+        base_table_name = (await db.execute(stmt_t)).scalar_one_or_none() or ""
+
+    dims = await get_dimensions_for_metric(db, db_id, metric_id)
+    return MetricDimensionsResponse(
+        metric_id=metric.id,
+        metric_name=metric.name,
+        base_table=base_table_name,
+        dimensions=dims,
+    )
+
+
+@router.get("/semantic/{db_id}/metric/{metric_id}/filter-columns", response_model=MetricFilterColumnsResponse)
+async def get_metric_filter_columns(
+    db_id: int,
+    metric_id: int,
+    db: AsyncSession = Depends(get_db_session),
+    _user: UserModel = Depends(get_current_user),
+) -> MetricFilterColumnsResponse:
+    """Retrieve safe and relevant filter columns for a specific metric."""
+    stmt_metric = select(SemanticMetricModel).where(
+        SemanticMetricModel.id == metric_id,
+        SemanticMetricModel.db_id == db_id,
+    )
+    metric = (await db.execute(stmt_metric)).scalar_one_or_none()
+    if not metric:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metric {metric_id} not found")
+
+    base_table_name = ""
+    if metric.base_entity_id:
+        stmt_t = select(SemanticTableModel.table_name).where(SemanticTableModel.id == metric.base_entity_id)
+        base_table_name = (await db.execute(stmt_t)).scalar_one_or_none() or ""
+
+    cols = await get_filter_columns_for_metric(db, db_id, metric_id)
+    return MetricFilterColumnsResponse(
+        metric_id=metric.id,
+        metric_name=metric.name,
+        base_table=base_table_name,
+        columns=cols,
+    )
+
+
 @router.put("/semantic/{db_id}/metric/{metric_id}", response_model=MetricResponse)
 async def update_metric(
     db_id: str,
     metric_id: int,
     body: MetricUpdate,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricResponse:
     """Replace a metric definition and reset it to pending approval."""
     try:
         numeric_db_id = int(db_id)
+        await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_create_metrics")
         metric = await update_metric_record(
             db,
             metric_id,
@@ -917,10 +1138,16 @@ async def update_metric(
 async def delete_metric(
     db_id: str,
     metric_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Xóa một Business Metric khỏi Semantic Layer."""
-    stmt = select(SemanticMetricModel).where(SemanticMetricModel.id == metric_id)
+    await _require_resource_permission(db, current_user.id, int(db_id), org_id, "can_create_metrics")
+    stmt = select(SemanticMetricModel).where(
+        SemanticMetricModel.id == metric_id,
+        SemanticMetricModel.db_id == int(db_id),
+    )
     res = await db.execute(stmt)
     metric = res.scalar_one_or_none()
     if metric:
@@ -937,11 +1164,15 @@ async def delete_metric(
 async def export_semantic_layer(
     db_id: int,
     format: str = "json",
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> PlainTextResponse:
     """Export approved Semantic Layer as JSON or YAML file download."""
     if format not in ("json", "yaml"):
         raise HTTPException(status_code=400, detail="format must be 'json' or 'yaml'")
+    if await _owned_semantic_database(db, db_id, current_user.id, org_id) is None:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
 
     try:
         layer = await build_semantic_layer_dict(db, db_id)
@@ -967,11 +1198,12 @@ async def _query_target(
     db: AsyncSession,
     db_id: int,
     user_id: int,
+    org_id: int | None = None,
 ) -> tuple[SemanticDatabaseModel, LiveTargetDbModel]:
-    stmt = select(SemanticDatabaseModel).where(
-        SemanticDatabaseModel.id == db_id,
-        SemanticDatabaseModel.created_by == user_id,
-    )
+    semantic_db = await _owned_semantic_database(db, db_id, user_id, org_id)
+    if semantic_db is None:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+    stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == db_id)
     semantic_db = (await db.execute(stmt)).scalar_one_or_none()
     if semantic_db is None:
         raise HTTPException(status_code=404, detail="Semantic database not found")
@@ -1002,11 +1234,12 @@ async def _compile_request(
 async def compile_semantic_query(
     db_id: int,
     body: SemanticQueryRequest,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> SemanticQueryCompileResponse:
     """Compile a semantic query preview without connecting to the target database."""
-    await _query_target(db, db_id, current_user.id)
+    await _query_target(db, db_id, current_user.id, org_id)
     compiled = await _compile_request(db, db_id, body)
     return SemanticQueryCompileResponse(
         sql=compiled.sql,
@@ -1019,6 +1252,7 @@ async def compile_semantic_query(
 async def execute_semantic_query(
     db_id: str,
     body: SemanticQueryRequest,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> SemanticQueryResponse:
@@ -1031,25 +1265,7 @@ async def execute_semantic_query(
     if parsed_id is None:
         raise HTTPException(status_code=400, detail="Invalid database id")
 
-    # Fetch semantic database record
-    stmt = select(SemanticDatabaseModel).where(
-        SemanticDatabaseModel.id == parsed_id,
-        SemanticDatabaseModel.created_by == current_user.id,
-    )
-    result = await db.execute(stmt)
-    sem_db = result.scalar_one_or_none()
-    if not sem_db:
-        raise HTTPException(status_code=404, detail="Semantic database not found")
-
-    # Verify linked LiveTargetDbModel exists (reject SQL Dump)
-    live_stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.semantic_db_id == parsed_id)
-    live_result = await db.execute(live_stmt)
-    live_db = live_result.scalar_one_or_none()
-    if not live_db:
-        raise HTTPException(
-            status_code=400,
-            detail="Query only supported for Live DB connections",
-        )
+    _, live_db = await _query_target(db, parsed_id, current_user.id, org_id)
 
     compiled = await _compile_request(db, parsed_id, body)
 
@@ -1087,32 +1303,228 @@ async def agent_status() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _chat_db_id(raw_db_id: str) -> int:
+    """Parse a semantic database id for chat endpoints."""
+    try:
+        return int(raw_db_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Chat database not found") from exc
+
+
+def _session_summary(session: ChatSessionModel) -> ChatSessionSummaryResponse:
+    """Serialize a chat session summary without exposing sensitive data."""
+    return ChatSessionSummaryResponse(
+        id=session.id,
+        db_id=session.db_id,
+        title=session.title,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        message_count=len(session.messages) if "messages" in session.__dict__ else 0,
+    )
+
+
+def _message_response(message: ChatMessageModel) -> ChatMessageResponse:
+    """Serialize one persisted chat message."""
+    return ChatMessageResponse.model_validate(message)
+
+
+def _assistant_metadata(
+    suggestions: list[Any] | None,
+    duplicates: list[Any] | None = None,
+    dedupe_performed: bool = True,
+    status_name: str = "completed",
+) -> dict[str, Any]:
+    """Build the versioned assistant message metadata contract."""
+    return {
+        "schema_version": 1,
+        "status": status_name,
+        "suggestions": suggestions or [],
+        "duplicates": duplicates or [],
+        "dedupe_performed": dedupe_performed,
+        "error": None,
+    }
+
+
+@router.get("/semantic/{db_id}/chat/sessions", response_model=list[ChatSessionSummaryResponse])
+async def get_chat_sessions(
+    db_id: str,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> list[ChatSessionSummaryResponse]:
+    """List chat sessions owned by the current user for one live database."""
+    try:
+        sessions = await list_chat_sessions(db, current_user.id, _chat_db_id(db_id), org_id=org_id)
+    except ChatAuthorizationError as exc:
+        raise HTTPException(status_code=404, detail="Chat database not found") from exc
+    return [_session_summary(session) for session in sessions]
+
+
+@router.post("/semantic/{db_id}/chat/sessions", response_model=ChatSessionSummaryResponse, status_code=201)
+async def create_chat_session_route(
+    db_id: str,
+    body: ChatSessionCreateRequest | None = None,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ChatSessionSummaryResponse:
+    """Create an empty chat session for an owned live database."""
+    try:
+        session = await create_chat_session(
+            db, current_user.id, _chat_db_id(db_id), body.title if body else None, org_id
+        )
+    except (ChatAuthorizationError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Chat database not found") from exc
+    return _session_summary(session)
+
+
+@router.get("/semantic/{db_id}/chat/sessions/{session_id}", response_model=ChatSessionDetailResponse)
+async def get_chat_session_route(
+    db_id: str,
+    session_id: str,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    limit: int = Query(default=50, ge=1, le=100),
+    before_sequence: int | None = Query(default=None, ge=1),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ChatSessionDetailResponse:
+    """Return one authorized page of chat history."""
+    try:
+        numeric_db_id = _chat_db_id(db_id)
+        await get_chat_database(db, current_user.id, numeric_db_id, org_id=org_id)
+        session = await get_chat_session(db, session_id, current_user.id)
+        if session is None or session.db_id != numeric_db_id:
+            raise ChatAuthorizationError("Chat session not found")
+        messages, total, next_cursor = await get_chat_messages_page(
+            db, session_id, current_user.id, limit, before_sequence
+        )
+    except ChatAuthorizationError as exc:
+        raise HTTPException(status_code=404, detail="Chat session not found") from exc
+    summary = _session_summary(session)
+    return ChatSessionDetailResponse(
+        id=summary.id,
+        db_id=summary.db_id,
+        title=summary.title,
+        created_at=summary.created_at,
+        updated_at=summary.updated_at,
+        messages=[_message_response(item) for item in messages],
+        message_count=total,
+        next_before_sequence=next_cursor,
+    )
+
+
+@router.patch("/semantic/{db_id}/chat/sessions/{session_id}", response_model=ChatSessionSummaryResponse)
+async def rename_chat_session(
+    db_id: str,
+    session_id: str,
+    body: ChatSessionUpdateRequest,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ChatSessionSummaryResponse:
+    """Rename one authorized chat session."""
+    try:
+        numeric_db_id = _chat_db_id(db_id)
+        await get_chat_database(db, current_user.id, numeric_db_id, org_id=org_id)
+        existing = await get_chat_session(db, session_id, current_user.id)
+        if existing is None or existing.db_id != numeric_db_id:
+            raise ChatAuthorizationError("Chat session not found")
+        session = await update_chat_session_title(db, session_id, current_user.id, body.title)
+    except (ChatAuthorizationError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Chat session not found") from exc
+    assert session is not None
+    return _session_summary(session)
+
+
+@router.delete("/semantic/{db_id}/chat/sessions/{session_id}", status_code=204)
+async def remove_chat_session(
+    db_id: str,
+    session_id: str,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    """Delete one authorized chat session and its messages."""
+    try:
+        numeric_db_id = _chat_db_id(db_id)
+        await get_chat_database(db, current_user.id, numeric_db_id, org_id=org_id)
+        existing = await get_chat_session(db, session_id, current_user.id)
+        if existing is None or existing.db_id != numeric_db_id:
+            raise ChatAuthorizationError("Chat session not found")
+        deleted = await delete_chat_session(db, session_id, current_user.id)
+    except ChatAuthorizationError as exc:
+        raise HTTPException(status_code=404, detail="Chat session not found") from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+
 @router.post("/semantic/{db_id}/chat", response_model=ChatResponse)
 async def chat_orchestrator(
     db_id: str,
     body: ChatRequest,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> ChatResponse:
-    """Multi-agent chatbot: route chitchat to natural-language reply or metric generation.
+    """Route read-only data assistance or authorized metric generation.
 
     - 'chitchat' intent  → friendly Vietnamese natural-language response
+    - 'data_question' intent → read-only schema and approved-metric guidance
     - 'metric_query' intent → Business Metric suggestions from schema
     """
     from src.agents.chat_graph import chat_agent
 
-    schema_context = await _load_schema_context_for_db(db, db_id)
-    existing, dedupe_performed = await load_existing_for_dedupe(db, db_id)
-
-    initial_state: dict = {
-        "user_message": body.message,
-        "enriched_schema": schema_context,
-        "existing_metrics": existing,
-        "dedupe_performed": dedupe_performed,
-    }
+    numeric_db_id = _chat_db_id(db_id)
+    try:
+        chat_database = await get_chat_database(db, current_user.id, numeric_db_id, org_id=org_id)
+        can_generate_metrics = await _chat_can_generate_metrics(db, chat_database, current_user.id)
+        session = await _resolve_chat_session(db, body.session_id, current_user.id, numeric_db_id)
+        replay = await _replay_chat_response(db, session, current_user.id, body.client_message_id)
+        if replay is not None:
+            return replay
+        history = await get_recent_chat_history(db, session.id)
+        user_message = await save_chat_message(
+            db,
+            session.id,
+            "user",
+            body.message,
+            client_message_id=body.client_message_id,
+        )
+        if session.title == "Cuộc trò chuyện mới":
+            await update_chat_session_title(db, session.id, current_user.id, auto_generate_session_title(body.message))
+        schema_context = await _load_schema_context_for_db(db, str(numeric_db_id))
+        approved_metrics = await _load_approved_metric_context(db, numeric_db_id)
+        existing, dedupe_performed = await load_existing_for_dedupe(db, str(numeric_db_id))
+    except ChatAuthorizationError as exc:
+        raise HTTPException(status_code=404, detail="Chat session or database not found") from exc
 
     try:
-        final_state = await chat_agent.ainvoke(initial_state)
+        final_state = await chat_agent.ainvoke(
+            {
+                "session_id": session.id,
+                "user_message": body.message,
+                "chat_history": history,
+                "enriched_schema": schema_context,
+                "approved_metrics": approved_metrics,
+                "can_generate_metrics": can_generate_metrics,
+                "existing_metrics": existing,
+                "dedupe_performed": dedupe_performed,
+            }
+        )
     except Exception as exc:
+        await save_chat_message(
+            db,
+            session.id,
+            "assistant",
+            "Xin lỗi, tôi không thể xử lý yêu cầu lúc này.",
+            metadata_json={
+                "schema_version": 1,
+                "status": "error",
+                "suggestions": [],
+                "error": "chat_agent_failed",
+            },
+            client_message_id=f"{body.client_message_id}:assistant" if body.client_message_id else None,
+        )
         logger.error("Chat orchestrator failed: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1121,18 +1533,79 @@ async def chat_orchestrator(
 
     intent = final_state.get("intent", "chitchat")
 
+    raw_metrics = final_state.get("suggested_metrics") or []
+    notices = final_state.get("duplicate_notices") or []
+    performed = final_state.get("dedupe_performed", True)
+    response_text = final_state.get("chat_response", "")
     if intent == "metric_query":
-        raw_metrics = final_state.get("suggested_metrics") or []
-        notices = final_state.get("duplicate_notices") or []
-        performed = final_state.get("dedupe_performed", True)
-        return ChatResponse(
-            intent=intent,
-            suggestions=raw_metrics,
-            duplicates=notices,
-            dedupe_performed=performed,
-        )
-
+        if raw_metrics:
+            response_text = f"Đã đề xuất {len(raw_metrics)} Metric Definition."
+        elif notices:
+            response_text = "Không có metric mới — các chỉ số đề xuất đã tồn tại trong hệ thống."
+        else:
+            response_text = "Không sinh được metric phù hợp với schema."
+    assistant = await save_chat_message(
+        db,
+        session.id,
+        "assistant",
+        response_text,
+        intent=intent,
+        metadata_json=_assistant_metadata(raw_metrics, duplicates=notices, dedupe_performed=performed),
+        client_message_id=f"{body.client_message_id}:assistant" if body.client_message_id else None,
+    )
+    refreshed = await get_chat_session_with_messages(db, session.id, current_user.id)
+    assert refreshed is not None
     return ChatResponse(
         intent=intent,
-        chat_response=final_state.get("chat_response", ""),
+        chat_response=(final_state.get("chat_response") if intent in {"chitchat", "data_question"} else response_text),
+        suggestions=raw_metrics if intent == "metric_query" else None,
+        duplicates=notices if intent == "metric_query" else [],
+        dedupe_performed=performed,
+        session_id=session.id,
+        user_message_id=user_message.id,
+        assistant_message_id=assistant.id,
+        session=_session_summary(refreshed),
+    )
+
+
+async def _resolve_chat_session(db: AsyncSession, session_id: str | None, user_id: int, db_id: int) -> ChatSessionModel:
+    """Resolve an existing owned session or create a new one."""
+    if session_id:
+        session = await get_chat_session(db, session_id, user_id)
+        if session is None or session.db_id != db_id:
+            raise ChatAuthorizationError("Chat session not found")
+        return session
+    return await create_chat_session(db, user_id, db_id)
+
+
+async def _replay_chat_response(
+    db: AsyncSession,
+    session: ChatSessionModel,
+    user_id: int,
+    client_message_id: str | None,
+) -> ChatResponse | None:
+    """Return a completed response for a retried client request."""
+    if not client_message_id:
+        return None
+    user_message = await get_chat_message_by_client_id(db, session.id, client_message_id)
+    assistant = await get_chat_message_by_client_id(db, session.id, f"{client_message_id}:assistant")
+    if user_message is None or assistant is None:
+        return None
+    metadata = assistant.metadata_json if isinstance(assistant.metadata_json, dict) else {}
+    suggestions = metadata.get("suggestions") or []
+    duplicates = metadata.get("duplicates") or []
+    intent = assistant.intent or "chitchat"
+    refreshed = await get_chat_session_with_messages(db, session.id, user_id)
+    if refreshed is None:
+        return None
+    return ChatResponse(
+        intent=intent,
+        chat_response=assistant.content if intent in {"chitchat", "data_question"} else None,
+        suggestions=suggestions if intent == "metric_query" else None,
+        duplicates=duplicates if intent == "metric_query" else [],
+        dedupe_performed=bool(metadata.get("dedupe_performed", True)),
+        session_id=session.id,
+        user_message_id=user_message.id,
+        assistant_message_id=assistant.id,
+        session=_session_summary(refreshed),
     )

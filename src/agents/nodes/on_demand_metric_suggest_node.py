@@ -39,7 +39,7 @@ async def _generate(state: AgentState, schema: dict[str, Any]) -> dict[str, Any]
     existing_text = format_existing_metrics_context(existing) if existing else None
     messages = [
         ("system", build_metric_system_prompt(schema_text, existing_text)),
-        ("user", _user_prompt(state)),
+        ("user", _user_message(state)),
     ]
     definitions, llm_duplicates, llm_conflicts = await generate_definitions_v2(messages, use_v2=bool(existing))
     valid = validate_metric_definitions(definitions, "postgres", schema)
@@ -52,7 +52,17 @@ async def _generate(state: AgentState, schema: dict[str, Any]) -> dict[str, Any]
     }
 
 
-def _user_prompt(state: AgentState) -> str:
-    """Fall back to a generic Vietnamese request when the user message is blank."""
-    user_msg = state.get("user_message", "").strip()
-    return user_msg if user_msg else _DEFAULT_USER_PROMPT
+def _user_message(state: AgentState) -> str:
+    """Combine bounded chat history with the latest request for generation."""
+    history = _format_history(state.get("chat_history", []))
+    current = state.get("user_message", "").strip() or _DEFAULT_USER_PROMPT
+    return f"Lịch sử liên quan:\n{history}\n\nYêu cầu mới nhất:\n{current}"
+
+
+def _format_history(history: list[dict[str, str]]) -> str:
+    """Format bounded prior conversation context for metric generation."""
+    lines = []
+    for item in history[-6:]:
+        if item.get("role") in {"user", "assistant"} and item.get("content"):
+            lines.append(f"{item['role']}: {item['content'][:1200]}")
+    return "\n".join(lines) or "(không có)"

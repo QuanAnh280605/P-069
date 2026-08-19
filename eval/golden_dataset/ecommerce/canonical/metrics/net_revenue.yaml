@@ -1,0 +1,21 @@
+metric: net_revenue
+business_name: "Doanh thu thuần"
+domain: ecommerce
+metric_type: simple
+target_entity: order
+source_table: fact_orders
+aggregation: sum
+field: null
+business_formula: "SUM(Order Amount) - SUM(Discounts) - SUM(Returns)"
+sql_expression: "gross_amount - discount_amount - return_amount"
+dependencies: []
+description: "Doanh thu thực nhận sau khi trừ chiết khấu, hoàn trả và thuế trên tổng giá trị đơn hàng."
+default_filters:
+  - condition: "is_test_order = FALSE"
+allowed_dimensions: [order.order_date, order.channel, order.store_id]
+default_time_grain: day
+reference_source: "Shopify Analytics Fields"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#net_revenue"
+synonyms: ["doanh thu thuần", "doanh thu ròng", "net sales"]

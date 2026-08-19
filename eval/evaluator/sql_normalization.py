@@ -56,6 +56,8 @@ def parse_single_statement(sql: str, dialect: Dialect = "sqlite") -> exp.Express
     except ParseError as exc:
         raise SqlValidationError("SQL_PARSE_ERROR") from exc
     if len(statements) != 1:
+        if any(_contains_write(statement) for statement in statements):
+            raise SqlValidationError("NON_SELECT_STATEMENT")
         raise SqlValidationError("MULTI_STATEMENT")
     return cast(exp.Expression, statements[0])
 
@@ -88,8 +90,10 @@ def _sqlglot_dialect(dialect: Dialect) -> str:
 
 
 def _validate_read_only(expression: exp.Expression) -> None:
-    if expression.find(*_WRITE_NODES) is not None:
+    if isinstance(expression, _WRITE_NODES):
         raise SqlValidationError("NON_SELECT_STATEMENT")
+    if _contains_write(expression):
+        raise SqlValidationError("NESTED_DML")
     if expression.find(exp.Into) is not None:
         raise SqlValidationError("SELECT_INTO_FORBIDDEN")
     if not isinstance(expression, exp.Query):
@@ -97,6 +101,10 @@ def _validate_read_only(expression: exp.Expression) -> None:
     for function in expression.find_all(exp.Anonymous):
         if function.name.casefold() in _FORBIDDEN_FUNCTIONS:
             raise SqlValidationError("FORBIDDEN_FUNCTION")
+
+
+def _contains_write(expression: exp.Expression) -> bool:
+    return expression.find(*_WRITE_NODES) is not None
 
 
 def _canonicalize_aliases(expression: exp.Expression) -> exp.Expression:

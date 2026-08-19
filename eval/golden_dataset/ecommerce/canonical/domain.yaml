@@ -1,0 +1,5 @@
+domain: ecommerce
+business_name: "Thương mại Điện tử"
+description: "Lĩnh vực phân tích đơn hàng, sản phẩm bán ra, phiên truy cập và giỏ hàng"
+default_currency: "VND"
+language: "vi"

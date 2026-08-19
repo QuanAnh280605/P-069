@@ -5,15 +5,18 @@ import sqlite3
 import tempfile
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth import create_access_token
-from src.models.db import LiveTargetDbModel, UserModel
+from src.models.db import LiveTargetDbModel, OrganizationMemberModel, UserModel
+from src.services.organization_service import create_organization
 
 CONNECT_ENDPOINT = "/api/v1/semantic/db/connect"
 SAVED_DB_ENDPOINT = "/api/v1/semantic/db/saved"
 
 
-def _token_headers(user: UserModel | None = None) -> dict[str, str]:
+def _token_headers(user: UserModel | None = None, org_id: int | None = None) -> dict[str, str]:
     active_user = user or UserModel(
         id=1,
         email="test@company.com",
@@ -23,7 +26,24 @@ def _token_headers(user: UserModel | None = None) -> dict[str, str]:
         role="admin",
         status="active",
     )
-    return {"Authorization": f"Bearer {create_access_token(active_user)}"}
+    headers = {"Authorization": f"Bearer {create_access_token(active_user)}"}
+    if org_id is not None:
+        headers["X-Organization-ID"] = str(org_id)
+    return headers
+
+
+async def _data_lead_workspace(async_session: AsyncSession) -> int:
+    """Create a Workspace where the seed user can manage semantic data."""
+    organization = await create_organization(async_session, 1, "Data Workspace", "data-workspace")
+    membership = await async_session.scalar(
+        select(OrganizationMemberModel).where(
+            OrganizationMemberModel.org_id == organization.id,
+            OrganizationMemberModel.user_id == 1,
+        )
+    )
+    membership.role = "data_lead"
+    await async_session.commit()
+    return organization.id
 
 
 @pytest.fixture
@@ -44,7 +64,9 @@ def temp_sqlite_db():
 
 
 @pytest.mark.asyncio
-async def test_live_db_connect_endpoint_lifecycle(client, temp_sqlite_db: str):
+async def test_live_db_connect_endpoint_lifecycle(
+    client, async_session: AsyncSession, temp_sqlite_db: str
+):
     """Test POST /semantic/db/connect and GET/DELETE endpoints."""
     conn_url = f"sqlite:///{temp_sqlite_db}"
     payload = {
@@ -54,7 +76,8 @@ async def test_live_db_connect_endpoint_lifecycle(client, temp_sqlite_db: str):
     }
 
     # Connect & Introspect
-    res = await client.post(CONNECT_ENDPOINT, json=payload, headers=_token_headers())
+    org_id = await _data_lead_workspace(async_session)
+    res = await client.post(CONNECT_ENDPOINT, json=payload, headers=_token_headers(org_id=org_id))
     assert res.status_code == 201
     data = res.json()
     assert data["display_name"] == "E-Commerce Live DB"
@@ -63,28 +86,30 @@ async def test_live_db_connect_endpoint_lifecycle(client, temp_sqlite_db: str):
     db_id = data["id"]
 
     # List saved live dbs
-    list_res = await client.get(SAVED_DB_ENDPOINT, headers=_token_headers())
+    list_res = await client.get(SAVED_DB_ENDPOINT, headers=_token_headers(org_id=org_id))
     assert list_res.status_code == 200
     items = list_res.json()
     assert len(items) == 1
     assert items[0]["id"] == db_id
 
     # Get single live db detail
-    detail_res = await client.get(f"{SAVED_DB_ENDPOINT}/{db_id}", headers=_token_headers())
+    detail_res = await client.get(f"{SAVED_DB_ENDPOINT}/{db_id}", headers=_token_headers(org_id=org_id))
     assert detail_res.status_code == 200
     assert detail_res.json()["display_name"] == "E-Commerce Live DB"
 
     # Delete live db
-    del_res = await client.delete(f"{SAVED_DB_ENDPOINT}/{db_id}", headers=_token_headers())
+    del_res = await client.delete(f"{SAVED_DB_ENDPOINT}/{db_id}", headers=_token_headers(org_id=org_id))
     assert del_res.status_code == 204
 
     # Verify deleted
-    get_after = await client.get(f"{SAVED_DB_ENDPOINT}/{db_id}", headers=_token_headers())
+    get_after = await client.get(f"{SAVED_DB_ENDPOINT}/{db_id}", headers=_token_headers(org_id=org_id))
     assert get_after.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_live_db_connect_auto_detect_and_mismatch(client, temp_sqlite_db: str):
+async def test_live_db_connect_auto_detect_and_mismatch(
+    client, async_session: AsyncSession, temp_sqlite_db: str
+):
     """Test POST /semantic/db/connect with auto-detect and strict mismatch validation."""
     conn_url = f"sqlite:///{temp_sqlite_db}"
 
@@ -94,7 +119,8 @@ async def test_live_db_connect_auto_detect_and_mismatch(client, temp_sqlite_db: 
         "dialect": "auto",
         "conn_url": conn_url,
     }
-    res_auto = await client.post(CONNECT_ENDPOINT, json=auto_payload, headers=_token_headers())
+    org_id = await _data_lead_workspace(async_session)
+    res_auto = await client.post(CONNECT_ENDPOINT, json=auto_payload, headers=_token_headers(org_id=org_id))
     assert res_auto.status_code == 201
     assert res_auto.json()["dialect"] == "sqlite"
 
@@ -104,7 +130,9 @@ async def test_live_db_connect_auto_detect_and_mismatch(client, temp_sqlite_db: 
         "dialect": "mysql",
         "conn_url": conn_url,
     }
-    res_mismatch = await client.post(CONNECT_ENDPOINT, json=mismatch_payload, headers=_token_headers())
+    res_mismatch = await client.post(
+        CONNECT_ENDPOINT, json=mismatch_payload, headers=_token_headers(org_id=org_id)
+    )
     assert res_mismatch.status_code == 400
     assert "does not match selected dialect" in res_mismatch.json()["detail"]
 

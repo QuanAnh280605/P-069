@@ -65,6 +65,70 @@ class UserProfileResponse(BaseModel):
     created_at: datetime
 
 
+class OrganizationCreateRequest(BaseModel):
+    """Request to create a company Workspace."""
+
+    name: str = Field(..., min_length=1, max_length=200)
+    slug: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class OrganizationSummaryResponse(BaseModel):
+    """Workspace summary and current user's role."""
+
+    id: int
+    name: str
+    slug: str
+    role: Literal["admin", "data_lead", "member"]
+    permissions: dict[str, bool] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class OrganizationMemberResponse(BaseModel):
+    """Workspace member with account identity and role."""
+
+    user_id: int
+    email: str
+    username: str
+    full_name: str
+    role: Literal["admin", "data_lead", "member"]
+    joined_at: datetime
+
+
+class OrganizationRoleUpdateRequest(BaseModel):
+    """Request to change a Workspace member role."""
+
+    role: Literal["admin", "data_lead", "member"]
+
+
+class OrganizationInviteCreateRequest(BaseModel):
+    """Request to create a one-time Workspace invitation."""
+
+    role: Literal["data_lead", "member"] = "member"
+    invitee_email: EmailStr | None = None
+
+
+class OrganizationInviteResponse(BaseModel):
+    """Invitation details; raw token is only returned on creation."""
+
+    id: int
+    org_id: int
+    role: Literal["data_lead", "member"]
+    invitee_email: str | None = None
+    status: Literal["pending", "accepted", "revoked", "expired"]
+    expires_at: datetime
+    invite_url: str | None = None
+
+
+class OrganizationInvitePreviewResponse(BaseModel):
+    """Public invitation preview before authentication."""
+
+    organization_name: str
+    organization_slug: str
+    role: Literal["data_lead", "member"]
+    invitee_email: str | None = None
+    expires_at: datetime
+
+
 # ---------------------------------------------------------------------------
 # DB Connection
 # ---------------------------------------------------------------------------
@@ -459,6 +523,8 @@ class SemanticCatalogColumn(BaseModel):
     business_name: str
     data_type: str
     is_time_dimension: bool = False
+    is_primary_key: bool = False
+    is_foreign_key: bool = False
     allowed_values: Any = None
 
 
@@ -483,6 +549,59 @@ class SemanticCatalogResponse(BaseModel):
     query_supported: bool
     tables: list[SemanticCatalogTable] = Field(default_factory=list)
     relationships: list[CanonicalRelationshipResponse] = Field(default_factory=list)
+
+
+class RecommendedDimensionItem(BaseModel):
+    """Describe one recommended dimension item for a metric."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    column_id: int
+    column_name: str
+    business_name: str
+    table_id: int
+    table_name: str
+    table_business_name: str
+    tier: Literal["A", "B", "C", "D"]
+    tier_label: str
+    is_safe_join: bool
+    requires_reaggregation: bool
+    data_type: str
+    cardinality_hint: int | None = None
+
+
+class MetricDimensionsResponse(BaseModel):
+    """List of recommended dimensions for a specific metric."""
+
+    metric_id: int
+    metric_name: str
+    base_table: str
+    dimensions: list[RecommendedDimensionItem] = Field(default_factory=list)
+
+
+class FilterColumnItem(BaseModel):
+    """Describe one safe, relevant filter column for a metric."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    column_id: int
+    column_name: str
+    business_name: str
+    table_id: int
+    table_name: str
+    table_business_name: str
+    group_type: Literal["base", "related"]
+    data_type: str
+    is_time_dimension: bool = False
+
+
+class MetricFilterColumnsResponse(BaseModel):
+    """Response containing valid, safe filter columns for a metric."""
+
+    metric_id: int
+    metric_name: str
+    base_table: str
+    columns: list[FilterColumnItem] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -558,15 +677,72 @@ class ChatRequest(BaseModel):
         max_length=2000,
         description="Câu hỏi hoặc tin nhắn ngôn ngữ tự nhiên từ người dùng",
     )
+    session_id: str | None = Field(default=None, min_length=36, max_length=36)
+    client_message_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class ChatMessageResponse(BaseModel):
+    """Persisted chat message returned to the frontend."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    session_id: str
+    client_message_id: str | None = None
+    sequence_no: int
+    sender: Literal["user", "assistant", "system"]
+    content: str
+    intent: str | None = None
+    metadata_json: dict[str, Any] | list[Any] | None = None
+    created_at: datetime
+
+
+class ChatSessionSummaryResponse(BaseModel):
+    """Summary of one owned chat session."""
+
+    id: str
+    db_id: int
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    message_count: int = 0
+
+
+class ChatSessionDetailResponse(ChatSessionSummaryResponse):
+    """Paginated chat session detail."""
+
+    messages: list[ChatMessageResponse] = Field(default_factory=list)
+    next_before_sequence: int | None = None
+
+
+class ChatSessionCreateRequest(BaseModel):
+    """Request to create an empty chat session."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class ChatSessionUpdateRequest(BaseModel):
+    """Request to rename a chat session."""
+
+    title: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        """Trim whitespace before validating a session title."""
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("Title cannot be empty")
+        return normalized
 
 
 class ChatResponse(BaseModel):
     """Response từ chatbot orchestrator sau khi phân loại intent."""
 
-    intent: str = Field(..., description="'chitchat' hoặc 'metric_query'")
+    intent: str = Field(..., description="'chitchat', 'data_question' hoặc 'metric_query'")
     chat_response: str | None = Field(
         default=None,
-        description="Câu trả lời ngôn ngữ tự nhiên (khi intent = 'chitchat')",
+        description="Câu trả lời ngôn ngữ tự nhiên cho chitchat/data_question",
     )
     suggestions: list[Any] | None = Field(
         default=None,
@@ -574,3 +750,7 @@ class ChatResponse(BaseModel):
     )
     duplicates: list[DuplicateMetricNotice] = Field(default_factory=list)
     dedupe_performed: bool = True
+    session_id: str
+    user_message_id: str
+    assistant_message_id: str
+    session: ChatSessionSummaryResponse | None = None

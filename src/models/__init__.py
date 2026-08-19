@@ -4,6 +4,10 @@ from src.models.db import (
     Base,
     ImportedSchemaModel,
     LiveTargetDbModel,
+    OrganizationAuditLogModel,
+    OrganizationInvitationModel,
+    OrganizationMemberModel,
+    OrganizationModel,
     SemanticColumnModel,
     SemanticDatabaseModel,
     SemanticMetricModel,
@@ -36,6 +40,10 @@ from src.models.schemas import (
 
 __all__ = [
     "Base",
+    "OrganizationModel",
+    "OrganizationMemberModel",
+    "OrganizationInvitationModel",
+    "OrganizationAuditLogModel",
     "CanonicalRelationshipResponse",
     "ImportedSchemaModel",
     "LiveTargetDbModel",

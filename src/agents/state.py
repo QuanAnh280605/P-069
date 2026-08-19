@@ -78,8 +78,21 @@ class AgentState(TypedDict, total=False):
 
     # Chat Orchestrator — Router output
     intent: str
-    """Kết quả phân loại intent: 'chitchat' hoặc 'metric_query'."""
+    """Intent: 'chitchat', 'data_question', or 'metric_query'."""
+
+    can_generate_metrics: bool
+    """Server-derived capability controlling metric-authoring routing."""
+
+    approved_metrics: list[dict[str, Any]]
+    """Approved metric context available to the read-only data assistant."""
 
     # Chitchat Agent — Output
     chat_response: str
     """Câu trả lời ngôn ngữ tự nhiên khi intent = 'chitchat'."""
+
+    # Chat persistence — history excludes the current user message.
+    session_id: str
+    """ID phiên chat hiện tại."""
+
+    chat_history: list[dict[str, str]]
+    """Prior user/assistant messages used as conversational context."""

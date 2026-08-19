@@ -1,0 +1,19 @@
+terms:
+  - term: "Doanh thu thuần"
+    definition: "Doanh thu gộp trừ giảm giá và giá trị hoàn trả."
+    synonyms: ["doanh thu ròng", "net sales"]
+  - term: "Đơn hàng hợp lệ"
+    definition: "Đơn không phải đơn test và không có trạng thái cancelled."
+    synonyms: ["valid order", "đơn thành công"]
+  - term: "Phiên truy cập"
+    definition: "Một phiên người dùng truy cập cửa hàng; bot traffic không được tính."
+    synonyms: ["session", "lượt truy cập"]
+  - term: "Khách hàng quay lại"
+    definition: "Khách hàng có customer_order_seq lớn hơn 1."
+    synonyms: ["returning customer", "repeat customer"]
+  - term: "Giỏ hàng bỏ dở"
+    definition: "Giỏ hàng không hoàn tất checkout."
+    synonyms: ["abandoned cart", "bỏ giỏ"]
+  - term: "COGS"
+    definition: "Giá vốn hàng bán dùng để tính biên lợi nhuận gộp."
+    synonyms: ["cost of goods sold", "giá vốn"]

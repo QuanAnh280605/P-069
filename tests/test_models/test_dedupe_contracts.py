@@ -43,5 +43,10 @@ def test_generate_response_carries_dedupe():
 
 
 def test_chat_response_carries_dedupe():
-    r = ChatResponse(intent="metric_query")
+    r = ChatResponse(
+        intent="metric_query",
+        session_id="s1",
+        user_message_id="u1",
+        assistant_message_id="a1",
+    )
     assert r.duplicates == [] and r.dedupe_performed is True

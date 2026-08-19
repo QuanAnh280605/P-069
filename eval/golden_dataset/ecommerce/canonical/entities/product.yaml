@@ -1,0 +1,34 @@
+entity: product
+table_mapping: products
+business_name: "Sản phẩm"
+description: "Thông tin tham chiếu của sản phẩm trong dòng đơn hàng."
+synonyms: ["mặt hàng", "hàng hóa", "product"]
+accepted_business_names: ["Sản phẩm", "Mặt hàng"]
+dimensions:
+  - name: id
+    business_name: "Mã sản phẩm"
+    type: number
+    field: id
+    primary_key: true
+  - name: name
+    business_name: "Tên sản phẩm"
+    type: string
+    field: name
+  - name: category
+    business_name: "Danh mục sản phẩm"
+    type: string
+    field: category
+    synonyms: ["ngành hàng", "nhóm hàng"]
+  - name: price
+    business_name: "Giá niêm yết"
+    type: number
+    field: price
+  - name: status
+    business_name: "Trạng thái kinh doanh"
+    type: string
+    field: status
+relationships:
+  - target_entity: order_item
+    relation_type: HAS_MANY
+    join_condition: "products.id = fact_order_items.product_id"
+    inferred: false
