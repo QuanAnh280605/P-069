@@ -48,6 +48,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         setCurrentId(selected);
         window.localStorage.setItem('current_organization_id', String(selected));
       }
+    } catch {
+      setWorkspaces([]);
     } finally {
       setIsLoading(false);
     }

@@ -11,6 +11,12 @@ import { AnimatedSphere } from '@/components/landing/animated-sphere';
 
 type AuthMode = 'login' | 'register';
 
+function getPostAuthPath(): string {
+  if (typeof window === 'undefined') return '/workspace';
+  const returnTo = new URLSearchParams(window.location.search).get('returnTo');
+  return returnTo?.startsWith('/invite/') ? returnTo : '/workspace';
+}
+
 export function AuthForm({ mode }: { mode: AuthMode }) {
   const router = useRouter();
   const { token, isLoading, login, register, loginWithGoogle } = useAuth();
@@ -26,7 +32,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
 
   useEffect(() => {
     if (!isLoading && token) {
-      router.replace('/workspace');
+      router.replace(getPostAuthPath());
     }
   }, [isLoading, token, router]);
 
@@ -65,7 +71,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
       } else {
         await login(email, password);
       }
-      router.push('/workspace');
+      router.push(getPostAuthPath());
     } catch (err: unknown) {
       setError(
         err instanceof Error
@@ -149,7 +155,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                   try {
                     setError('');
                     await loginWithGoogle(credentialResponse.credential);
-                    router.push('/workspace');
+                    router.push(getPostAuthPath());
                   } catch (err: unknown) {
                     setError(err instanceof Error ? err.message : 'Đăng nhập Google thất bại');
                   }

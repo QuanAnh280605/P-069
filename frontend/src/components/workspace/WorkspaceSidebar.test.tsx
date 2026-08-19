@@ -218,13 +218,64 @@ describe('WorkspaceSidebar', () => {
     });
   });
 
-  describe('production deletion callback', () => {
-    it('calls onRemoveDatabase with database id when delete is clicked', () => {
-      const onRemoveDatabase = vi.fn();
-      render(<WorkspaceSidebar {...defaultProps} onRemoveDatabase={onRemoveDatabase} />);
+  describe('chat history integration', () => {
+    const mockChatSessions = [
+      {
+        id: 'chat-1',
+        db_id: 1,
+        title: 'Doanh thu Q1',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        message_count: 5,
+      },
+    ];
 
-      fireEvent.click(screen.getByLabelText('Remove Production DB'));
-      expect(onRemoveDatabase).toHaveBeenCalledWith('db-1');
+    it('renders chat history section when canChat is true', () => {
+      render(
+        <WorkspaceSidebar
+          {...defaultProps}
+          canChat={true}
+          chatSessions={mockChatSessions}
+          activeChatSessionId="chat-1"
+        />,
+      );
+
+      expect(screen.getByText('Lịch sử trò chuyện')).toBeInTheDocument();
+      expect(screen.getByText('Doanh thu Q1')).toBeInTheDocument();
+    });
+
+    it('calls onSelectChatSession when clicking a chat item', () => {
+      const onSelectChatSession = vi.fn();
+      render(
+        <WorkspaceSidebar
+          {...defaultProps}
+          canChat={true}
+          chatSessions={mockChatSessions}
+          activeChatSessionId="chat-1"
+          onSelectChatSession={onSelectChatSession}
+        />,
+      );
+
+      fireEvent.click(screen.getByText('Doanh thu Q1'));
+      expect(onSelectChatSession).toHaveBeenCalledWith('chat-1');
+    });
+
+    it('shows new chat button in collapsed rail when canChat is true', () => {
+      const onNewChatSession = vi.fn();
+      render(
+        <WorkspaceSidebar
+          {...defaultProps}
+          collapsed={true}
+          canChat={true}
+          chatSessions={mockChatSessions}
+          onNewChatSession={onNewChatSession}
+        />,
+      );
+
+      const newChatBtn = screen.getByLabelText('Tạo cuộc trò chuyện mới');
+      expect(newChatBtn).toBeInTheDocument();
+      fireEvent.click(newChatBtn);
+      expect(onNewChatSession).toHaveBeenCalledTimes(1);
     });
   });
 

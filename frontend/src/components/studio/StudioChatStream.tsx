@@ -30,7 +30,7 @@ export interface ChatMessage {
   isError?: boolean;
 }
 
-export interface StudioChatStreamProps {
+interface StudioChatStreamProps {
   messages: ChatMessage[];
   onSendMessage: (promptText: string, targetTables: string[]) => Promise<void>;
   isLoading: boolean;

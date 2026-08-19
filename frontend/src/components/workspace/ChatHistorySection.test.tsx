@@ -1,179 +1,211 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ChatHistorySection } from '@/components/workspace/ChatHistorySection';
 import type { ChatSessionItem } from '@/lib/api';
-import { ChatHistorySection } from './ChatHistorySection';
+
+const mockSessions: ChatSessionItem[] = [
+  {
+    id: 's-1',
+    db_id: 1,
+    title: 'Doanh thu tháng 1',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    message_count: 4,
+  },
+  {
+    id: 's-2',
+    db_id: 1,
+    title: 'Phân tích khách hàng mới',
+    created_at: new Date(Date.now() - 3600000).toISOString(),
+    updated_at: new Date(Date.now() - 3600000).toISOString(),
+    message_count: 2,
+  },
+  {
+    id: 's-3',
+    db_id: 1,
+    title: 'Báo cáo tồn kho',
+    created_at: new Date(Date.now() - 7200000).toISOString(),
+    updated_at: new Date(Date.now() - 7200000).toISOString(),
+    message_count: 1,
+  },
+];
 
 describe('ChatHistorySection', () => {
-  afterEach(() => cleanup());
-
-  const mockSessions: ChatSessionItem[] = [
-    {
-      id: 'session-1',
-      db_id: 1,
-      title: 'Doanh thu Q1',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      message_count: 3,
-    },
-    {
-      id: 'session-2',
-      db_id: 1,
-      title: 'Khách hàng active',
-      created_at: new Date(Date.now() - 3600000).toISOString(),
-      updated_at: new Date(Date.now() - 3600000).toISOString(),
-      message_count: 5,
-    },
-    {
-      id: 'session-3',
-      db_id: 1,
-      title: 'Phân tích đơn hủy',
-      created_at: new Date(Date.now() - 86400000).toISOString(),
-      updated_at: new Date(Date.now() - 86400000).toISOString(),
-      message_count: 1,
-    },
-  ];
-
-  it('does not render if canChat is false', () => {
-    const { container } = render(
-      <ChatHistorySection
-        sessions={mockSessions}
-        activeSessionId="session-1"
-        loadingSessions={false}
-        canChat={false}
-      />,
-    );
-    expect(container.firstChild).toBeNull();
+  beforeEach(() => {
+    cleanup();
   });
 
-  it('renders session items with titles and message counts', () => {
+  it('renders section header with count badge and new chat button', () => {
     render(
       <ChatHistorySection
         sessions={mockSessions}
-        activeSessionId="session-1"
+        activeSessionId="s-1"
         loadingSessions={false}
         canChat={true}
+        onSelectSession={vi.fn()}
+        onNewChat={vi.fn()}
+        onDeleteSession={vi.fn()}
+        onRenameSession={vi.fn()}
       />,
     );
 
     expect(screen.getByText('Lịch sử trò chuyện')).toBeInTheDocument();
-    expect(screen.getByText('Doanh thu Q1')).toBeInTheDocument();
-    expect(screen.getByText('Khách hàng active')).toBeInTheDocument();
-    expect(screen.getByText('Phân tích đơn hủy')).toBeInTheDocument();
-    expect(screen.getByText('3 tin nhắn')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tạo cuộc trò chuyện mới')).toBeInTheDocument();
   });
 
-  it('highlights the active session with data-active attribute', () => {
+  it('renders all session items with message counts', () => {
     render(
       <ChatHistorySection
         sessions={mockSessions}
-        activeSessionId="session-2"
+        activeSessionId="s-1"
         loadingSessions={false}
         canChat={true}
+        onSelectSession={vi.fn()}
+        onNewChat={vi.fn()}
+        onDeleteSession={vi.fn()}
+        onRenameSession={vi.fn()}
       />,
     );
 
-    const activeItem = screen.getByText('Khách hàng active').closest('[data-active]');
-    expect(activeItem).toHaveAttribute('data-active', 'true');
-
-    const inactiveItem = screen.getByText('Doanh thu Q1').closest('[data-active]');
-    expect(inactiveItem).toHaveAttribute('data-active', 'false');
+    expect(screen.getByText('Doanh thu tháng 1')).toBeInTheDocument();
+    expect(screen.getByText('Phân tích khách hàng mới')).toBeInTheDocument();
+    expect(screen.getByText('Báo cáo tồn kho')).toBeInTheDocument();
+    expect(screen.getByText('4 tin')).toBeInTheDocument();
+    expect(screen.getByText('2 tin')).toBeInTheDocument();
   });
 
-  it('calls onSelectSession when clicking a session item', () => {
+  it('filters sessions by search input', () => {
+    render(
+      <ChatHistorySection
+        sessions={mockSessions}
+        activeSessionId="s-1"
+        loadingSessions={false}
+        canChat={true}
+        onSelectSession={vi.fn()}
+        onNewChat={vi.fn()}
+        onDeleteSession={vi.fn()}
+        onRenameSession={vi.fn()}
+      />,
+    );
+
+    const searchInput = screen.getByPlaceholderText('Tìm đoạn chat...');
+    fireEvent.change(searchInput, { target: { value: 'khách hàng' } });
+
+    expect(screen.getByText('Phân tích khách hàng mới')).toBeInTheDocument();
+    expect(screen.queryByText('Doanh thu tháng 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Báo cáo tồn kho')).not.toBeInTheDocument();
+  });
+
+  it('calls onSelectSession when clicking on a session card', () => {
     const handleSelect = vi.fn();
     render(
       <ChatHistorySection
         sessions={mockSessions}
-        activeSessionId="session-1"
+        activeSessionId="s-1"
         loadingSessions={false}
         canChat={true}
         onSelectSession={handleSelect}
+        onNewChat={vi.fn()}
+        onDeleteSession={vi.fn()}
+        onRenameSession={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByText('Khách hàng active'));
-    expect(handleSelect).toHaveBeenCalledWith('session-2');
-  });
-
-  it('filters sessions using the search input when sessions >= 3', () => {
-    render(
-      <ChatHistorySection
-        sessions={mockSessions}
-        activeSessionId="session-1"
-        loadingSessions={false}
-        canChat={true}
-      />,
-    );
-
-    const searchInput = screen.getByPlaceholderText('Tìm kiếm hội thoại...');
-    fireEvent.change(searchInput, { target: { value: 'Doanh thu' } });
-
-    expect(screen.getByText('Doanh thu Q1')).toBeInTheDocument();
-    expect(screen.queryByText('Khách hàng active')).not.toBeInTheDocument();
-  });
-
-  it('calls onNewChat when clicking the new chat button', () => {
-    const handleNewChat = vi.fn();
-    render(
-      <ChatHistorySection
-        sessions={mockSessions}
-        activeSessionId="session-1"
-        loadingSessions={false}
-        canChat={true}
-        onNewChat={handleNewChat}
-      />,
-    );
-
-    const newBtn = screen.getByLabelText('Tạo cuộc trò chuyện mới');
-    fireEvent.click(newBtn);
-    expect(handleNewChat).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText('Phân tích khách hàng mới'));
+    expect(handleSelect).toHaveBeenCalledWith('s-2');
   });
 
   it('allows renaming session inline', async () => {
-    const handleRename = vi.fn();
+    const handleRename = vi.fn().mockResolvedValue(undefined);
     render(
       <ChatHistorySection
         sessions={mockSessions}
-        activeSessionId="session-1"
+        activeSessionId="s-1"
         loadingSessions={false}
         canChat={true}
+        onSelectSession={vi.fn()}
+        onNewChat={vi.fn()}
+        onDeleteSession={vi.fn()}
         onRenameSession={handleRename}
       />,
     );
 
-    const renameBtn = screen.getByLabelText('Đổi tên Doanh thu Q1');
-    fireEvent.click(renameBtn);
+    const editBtns = screen.getAllByTitle('Đổi tên đoạn chat');
+    fireEvent.click(editBtns[0]);
 
-    const input = screen.getByDisplayValue('Doanh thu Q1');
-    fireEvent.change(input, { target: { value: 'Doanh thu năm 2026' } });
+    const editInput = screen.getByPlaceholderText('Tên đoạn chat...') as HTMLInputElement;
+    fireEvent.change(editInput, { target: { value: 'Doanh thu Q1 mới' } });
 
-    const saveBtn = screen.getByLabelText('Lưu tên mới');
+    const saveBtn = screen.getByRole('button', { name: /Lưu/i });
     fireEvent.click(saveBtn);
 
-    expect(handleRename).toHaveBeenCalledWith('session-1', 'Doanh thu năm 2026');
+    await waitFor(() => {
+      expect(handleRename).toHaveBeenCalledWith('s-1', 'Doanh thu Q1 mới');
+    });
   });
 
-  it('shows delete confirmation and calls onDeleteSession on confirm', () => {
+  it('confirms and calls onDeleteSession', () => {
     const handleDelete = vi.fn();
     render(
       <ChatHistorySection
         sessions={mockSessions}
-        activeSessionId="session-1"
+        activeSessionId="s-1"
         loadingSessions={false}
         canChat={true}
+        onSelectSession={vi.fn()}
+        onNewChat={vi.fn()}
         onDeleteSession={handleDelete}
+        onRenameSession={vi.fn()}
       />,
     );
 
-    const deleteBtn = screen.getByLabelText('Xóa Doanh thu Q1');
-    fireEvent.click(deleteBtn);
+    const deleteBtns = screen.getAllByTitle('Xóa đoạn chat');
+    fireEvent.click(deleteBtns[0]);
 
-    expect(screen.getByText('Xác nhận xóa đoạn chat?')).toBeInTheDocument();
+    expect(screen.getByText('Xóa đoạn chat?')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Xác nhận xóa'));
 
-    const confirmBtn = screen.getByLabelText('Xác nhận xóa');
-    fireEvent.click(confirmBtn);
+    expect(handleDelete).toHaveBeenCalledWith('s-1');
+  });
 
-    expect(handleDelete).toHaveBeenCalledWith('session-1');
+  it('renders empty state and allows creating new chat', () => {
+    const handleNewChat = vi.fn();
+    render(
+      <ChatHistorySection
+        sessions={[]}
+        activeSessionId={null}
+        loadingSessions={false}
+        canChat={true}
+        onSelectSession={vi.fn()}
+        onNewChat={handleNewChat}
+        onDeleteSession={vi.fn()}
+        onRenameSession={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Chưa có đoạn chat')).toBeInTheDocument();
+    const startBtn = screen.getByRole('button', { name: /Bắt đầu chat/i });
+    fireEvent.click(startBtn);
+
+    expect(handleNewChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null when canChat is false', () => {
+    const { container } = render(
+      <ChatHistorySection
+        sessions={mockSessions}
+        activeSessionId="s-1"
+        loadingSessions={false}
+        canChat={false}
+        onSelectSession={vi.fn()}
+        onNewChat={vi.fn()}
+        onDeleteSession={vi.fn()}
+        onRenameSession={vi.fn()}
+      />,
+    );
+
+    expect(container.firstChild).toBeNull();
   });
 });

@@ -104,6 +104,7 @@ export default function WorkspacePage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceManagementOpen, setWorkspaceManagementOpen] = useState(false);
   const [metricOpen, setMetricOpen] = useState(false);
+  const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
   const [editingMetric, setEditingMetric] = useState<MetricRecord | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<MetricSuggestion | null>(null);
   const [toast, setToast] = useState('');
@@ -120,11 +121,21 @@ export default function WorkspacePage() {
   );
   const activeLayerId = activeLayer?.id;
   const semanticDbId = activeLayer?.semantic_db_id;
+  const canChat = Boolean(semanticDbId && activeLayer?.source_type === 'live');
 
   const notify = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(''), 3000);
   }, []);
+
+  const updateChatUrl = (sessionId: string | null) => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (sessionId) url.searchParams.set('chat', sessionId);
+    else url.searchParams.delete('chat');
+    window.history.replaceState({}, '', url);
+  };
+
 
   useEffect(() => {
     if (!isLoading && !token) {
@@ -140,7 +151,7 @@ export default function WorkspacePage() {
     void loadConnections(token)
       .then((items) => {
         setLayers(items);
-        setSelectedId((current) => current || items[0]?.id || null);
+        setSelectedId(items[0]?.id || null);
       })
       .catch((error) =>
         notify(error instanceof Error ? error.message : 'Không thể tải danh sách database'),
@@ -435,6 +446,10 @@ export default function WorkspacePage() {
         onClose={() => setSettingsOpen(false)}
         databaseCount={layers.length}
         metricCount={activeLayer?.metrics.length}
+      />
+      <WorkspaceManagementModal
+        isOpen={workspaceModalOpen}
+        onClose={() => setWorkspaceModalOpen(false)}
       />
       <MetricModal
         isOpen={metricOpen}

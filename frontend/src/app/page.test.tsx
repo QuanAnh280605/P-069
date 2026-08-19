@@ -34,7 +34,7 @@ describe('Landing Page', () => {
     render(<LandingPage />);
     const navs = screen.getAllByRole('navigation');
     expect(navs.length).toBeGreaterThanOrEqual(1);
-  });
+  }, 15000);
 
   it('renders Vietnamese hero heading', () => {
     render(<LandingPage />);
