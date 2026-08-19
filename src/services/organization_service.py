@@ -268,7 +268,6 @@ async def create_invitation(
     org_id: int,
     actor_id: int,
     role: str,
-    invitee_email: str | None,
     frontend_base_url: str,
 ) -> OrganizationInviteResponse:
     """Create a seven-day, one-time Workspace invitation."""
@@ -282,7 +281,6 @@ async def create_invitation(
     invitation = OrganizationInvitationModel(
         org_id=org_id,
         inviter_id=actor_id,
-        invitee_email=invitee_email.lower() if invitee_email else None,
         role=role,
         token_hash=_hash_token(raw_token),
         expires_at=_now() + timedelta(days=7),
@@ -296,7 +294,6 @@ async def create_invitation(
         id=invitation.id,
         org_id=org_id,
         role=role,
-        invitee_email=invitation.invitee_email,
         status=invitation.status,
         expires_at=invitation.expires_at,
         invite_url=f"{frontend_base_url.rstrip('/')}/invite/{raw_token}",
@@ -313,7 +310,6 @@ async def preview_invitation(db: AsyncSession, raw_token: str) -> OrganizationIn
         organization_name=organization.name,
         organization_slug=organization.slug,
         role=invitation.role,
-        invitee_email=invitation.invitee_email,
         expires_at=invitation.expires_at,
     )
 
@@ -321,8 +317,6 @@ async def preview_invitation(db: AsyncSession, raw_token: str) -> OrganizationIn
 async def accept_invitation(db: AsyncSession, raw_token: str, user: UserModel) -> OrganizationSummaryResponse:
     """Accept an invitation and create the user's Workspace membership."""
     invitation = await _get_active_invitation(db, raw_token)
-    if invitation.invitee_email and invitation.invitee_email.lower() != user.email.lower():
-        raise PermissionError("Invitation is restricted to another email address")
     existing = await get_membership(db, user.id, invitation.org_id)
     if existing is not None:
         raise ValueError("User is already a Workspace member")
@@ -377,7 +371,6 @@ async def list_invitations(db: AsyncSession, org_id: int) -> list[OrganizationIn
                 id=invitation.id,
                 org_id=invitation.org_id,
                 role=invitation.role,
-                invitee_email=invitation.invitee_email,
                 status=invitation.status,
                 expires_at=invitation.expires_at,
             )

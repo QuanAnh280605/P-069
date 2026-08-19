@@ -46,6 +46,16 @@ def _parse_org_error(error: Exception) -> HTTPException:
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error))
 
 
+def _frontend_app_url(settings: object) -> str:
+    """Return the configured frontend URL and reject unsafe production fallbacks."""
+    url = str(getattr(settings, "frontend_app_url", "")).strip().rstrip("/")
+    if getattr(settings, "app_env", "development") == "production" and not url.startswith("https://"):
+        raise ValueError("FRONTEND_APP_URL must be an HTTPS deploy domain in production")
+    if not url:
+        raise ValueError("FRONTEND_APP_URL is required")
+    return url
+
+
 async def _active_org(db: AsyncSession, user_id: int, org_id: int | None):
     try:
         return await resolve_membership(db, user_id, org_id)
@@ -110,7 +120,7 @@ async def get_workspace_members(
     return await list_members(db, organization.id)
 
 
-@router.put("/org/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.put("/org/members/{user_id}", response_model=None, status_code=status.HTTP_204_NO_CONTENT)
 async def update_workspace_member(
     user_id: int,
     body: OrganizationRoleUpdateRequest,
@@ -126,7 +136,7 @@ async def update_workspace_member(
         raise _parse_org_error(error) from error
 
 
-@router.delete("/org/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/org/members/{user_id}", response_model=None, status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workspace_member(
     user_id: int,
     org_id: OrgHeader = None,
@@ -151,27 +161,25 @@ async def create_workspace_invitation(
     """Create a seven-day invitation link."""
     organization, _ = await _active_org(db, current_user.id, org_id)
     try:
-        base_url = get_settings().cors_origins.split(",")[0]
         return await create_invitation(
             db,
             organization.id,
             current_user.id,
             body.role,
-            str(body.invitee_email) if body.invitee_email else None,
-            base_url,
+            _frontend_app_url(get_settings()),
         )
     except (PermissionError, ValueError) as error:
         raise _parse_org_error(error) from error
 
 
-@router.delete("/org/invite/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/org/invite/{invitation_id}", response_model=None, status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_workspace_invitation(
     invitation_id: int,
     org_id: OrgHeader = None,
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
-    """Revoke a pending invitation immediately."""
+    """Revoke a pending Workspace invitation immediately."""
     organization, _ = await _active_org(db, current_user.id, org_id)
     try:
         await revoke_invitation(db, organization.id, current_user.id, invitation_id)

@@ -63,7 +63,7 @@ async def test_invitation_accept_creates_scoped_membership(async_session):
     user = await _add_user(async_session, 2, "member@company.com")
     organization = await create_organization(async_session, 1, "Acme", "acme")
     invitation = await create_invitation(
-        async_session, organization.id, 1, "member", user.email, "http://localhost:3000"
+        async_session, organization.id, 1, "member", "http://localhost:3000"
     )
 
     raw_token = invitation.invite_url.rsplit("/", 1)[-1]
@@ -72,18 +72,6 @@ async def test_invitation_accept_creates_scoped_membership(async_session):
     assert accepted.id == organization.id
     assert accepted.role == "member"
     assert await get_membership(async_session, user.id, organization.id)
-
-
-@pytest.mark.asyncio
-async def test_invitation_rejects_wrong_email(async_session):
-    user = await _add_user(async_session, 2, "wrong@company.com")
-    organization = await create_organization(async_session, 1, "Acme", "acme")
-    invitation = await create_invitation(
-        async_session, organization.id, 1, "member", "expected@company.com", "http://localhost:3000"
-    )
-
-    with pytest.raises(PermissionError, match="another email"):
-        await accept_invitation(async_session, invitation.invite_url.rsplit("/", 1)[-1], user)
 
 
 @pytest.mark.asyncio
@@ -114,7 +102,7 @@ async def test_member_cannot_remove_another_member(async_session):
 @pytest.mark.asyncio
 async def test_expired_invitation_is_rejected(async_session):
     organization = await create_organization(async_session, 1, "Acme", "acme")
-    invitation = await create_invitation(async_session, organization.id, 1, "member", None, "http://localhost:3000")
+    invitation = await create_invitation(async_session, organization.id, 1, "member", "http://localhost:3000")
     record = await async_session.scalar(
         select(OrganizationInvitationModel).where(OrganizationInvitationModel.id == invitation.id)
     )

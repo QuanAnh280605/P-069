@@ -106,7 +106,6 @@ export default function WorkspacePage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceManagementOpen, setWorkspaceManagementOpen] = useState(false);
   const [metricOpen, setMetricOpen] = useState(false);
-  const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
   const [editingMetric, setEditingMetric] = useState<MetricRecord | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<MetricSuggestion | null>(null);
   const [toast, setToast] = useState('');
@@ -489,10 +488,6 @@ export default function WorkspacePage() {
         onClose={() => setSettingsOpen(false)}
         databaseCount={layers.length}
         metricCount={activeLayer?.metrics.length}
-      />
-      <WorkspaceManagementModal
-        isOpen={workspaceModalOpen}
-        onClose={() => setWorkspaceModalOpen(false)}
       />
       <MetricModal
         isOpen={metricOpen}

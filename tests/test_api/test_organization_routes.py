@@ -31,7 +31,7 @@ async def test_member_can_preview_invitation_and_accept(client, async_session):
     org_id = created.json()["id"]
     invite = await client.post(
         "/api/v1/org/invite",
-        json={"role": "member", "invitee_email": "new@company.com"},
+        json={"role": "member"},
         headers={**_headers(owner), "X-Organization-ID": str(org_id)},
     )
     assert invite.status_code == 201
@@ -56,6 +56,25 @@ async def test_member_can_preview_invitation_and_accept(client, async_session):
 
     assert accepted.status_code == 200
     assert accepted.json()["role"] == "member"
+
+
+@pytest.mark.asyncio
+async def test_invitation_uses_deployed_frontend_url(client, async_session, monkeypatch):
+    owner = await async_session.get(UserModel, 1)
+    created = await client.post("/api/v1/org", json={"name": "Acme"}, headers=_headers(owner))
+    monkeypatch.setattr(
+        "src.api.organization_routes.get_settings",
+        lambda: type("Settings", (), {"frontend_app_url": "https://app.example.com"})(),
+    )
+
+    response = await client.post(
+        "/api/v1/org/invite",
+        json={"role": "member"},
+        headers={**_headers(owner), "X-Organization-ID": str(created.json()["id"])},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["invite_url"].startswith("https://app.example.com/invite/")
 
 
 @pytest.mark.asyncio

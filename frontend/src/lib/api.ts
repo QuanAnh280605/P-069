@@ -314,7 +314,6 @@ export interface WorkspaceInvite {
   id: number;
   org_id: number;
   role: 'member' | 'data_lead';
-  invitee_email?: string | null;
   status: 'pending' | 'accepted' | 'revoked' | 'expired';
   expires_at: string;
   invite_url?: string | null;
@@ -324,7 +323,6 @@ export interface WorkspaceInvitePreview {
   organization_name: string;
   organization_slug: string;
   role: 'member' | 'data_lead';
-  invitee_email?: string | null;
   expires_at: string;
 }
 
@@ -376,11 +374,10 @@ export function removeWorkspaceMemberApi(userId: number): Promise<void> {
 
 export function createWorkspaceInviteApi(
   role: 'member' | 'data_lead',
-  inviteeEmail?: string,
 ): Promise<WorkspaceInvite> {
   return semanticRequest<WorkspaceInvite>('/api/v1/org/invite', {
     method: 'POST',
-    body: JSON.stringify({ role, invitee_email: inviteeEmail || null }),
+    body: JSON.stringify({ role }),
   });
 }
 

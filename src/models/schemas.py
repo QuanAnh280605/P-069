@@ -104,7 +104,6 @@ class OrganizationInviteCreateRequest(BaseModel):
     """Request to create a one-time Workspace invitation."""
 
     role: Literal["data_lead", "member"] = "member"
-    invitee_email: EmailStr | None = None
 
 
 class OrganizationInviteResponse(BaseModel):
@@ -113,7 +112,6 @@ class OrganizationInviteResponse(BaseModel):
     id: int
     org_id: int
     role: Literal["data_lead", "member"]
-    invitee_email: str | None = None
     status: Literal["pending", "accepted", "revoked", "expired"]
     expires_at: datetime
     invite_url: str | None = None
@@ -125,7 +123,6 @@ class OrganizationInvitePreviewResponse(BaseModel):
     organization_name: str
     organization_slug: str
     role: Literal["data_lead", "member"]
-    invitee_email: str | None = None
     expires_at: datetime
 
 
