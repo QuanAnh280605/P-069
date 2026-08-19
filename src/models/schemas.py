@@ -422,6 +422,8 @@ class SemanticCatalogColumn(BaseModel):
     business_name: str
     data_type: str
     is_time_dimension: bool = False
+    is_primary_key: bool = False
+    is_foreign_key: bool = False
     allowed_values: Any = None
 
 
@@ -446,6 +448,59 @@ class SemanticCatalogResponse(BaseModel):
     query_supported: bool
     tables: list[SemanticCatalogTable] = Field(default_factory=list)
     relationships: list[CanonicalRelationshipResponse] = Field(default_factory=list)
+
+
+class RecommendedDimensionItem(BaseModel):
+    """Describe one recommended dimension item for a metric."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    column_id: int
+    column_name: str
+    business_name: str
+    table_id: int
+    table_name: str
+    table_business_name: str
+    tier: Literal["A", "B", "C", "D"]
+    tier_label: str
+    is_safe_join: bool
+    requires_reaggregation: bool
+    data_type: str
+    cardinality_hint: int | None = None
+
+
+class MetricDimensionsResponse(BaseModel):
+    """List of recommended dimensions for a specific metric."""
+
+    metric_id: int
+    metric_name: str
+    base_table: str
+    dimensions: list[RecommendedDimensionItem] = Field(default_factory=list)
+
+
+class FilterColumnItem(BaseModel):
+    """Describe one safe, relevant filter column for a metric."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    column_id: int
+    column_name: str
+    business_name: str
+    table_id: int
+    table_name: str
+    table_business_name: str
+    group_type: Literal["base", "related"]
+    data_type: str
+    is_time_dimension: bool = False
+
+
+class MetricFilterColumnsResponse(BaseModel):
+    """Response containing valid, safe filter columns for a metric."""
+
+    metric_id: int
+    metric_name: str
+    base_table: str
+    columns: list[FilterColumnItem] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

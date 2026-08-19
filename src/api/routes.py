@@ -37,6 +37,8 @@ from src.models.schemas import (
     LiveDbResponse,
     LiveDbSummaryResponse,
     MetricCreate,
+    MetricDimensionsResponse,
+    MetricFilterColumnsResponse,
     MetricHistoryResponse,
     MetricListItem,
     MetricResponse,
@@ -56,6 +58,7 @@ from src.models.schemas import (
     UserProfileResponse,
 )
 from src.services.database import decrypt_conn_url, get_db_session
+from src.services.dimension_recommender import get_dimensions_for_metric, get_filter_columns_for_metric
 from src.services.export_service import build_semantic_layer_dict, serialize_to_json, serialize_to_yaml
 from src.services.imported_schema_service import (
     create_imported_schema,
@@ -801,6 +804,8 @@ def _catalog_table(table: SemanticTableModel) -> SemanticCatalogTable:
             business_name=column.business_name,
             data_type=column.data_type,
             is_time_dimension=column.is_time_dimension,
+            is_primary_key=column.is_primary_key,
+            is_foreign_key=column.is_foreign_key,
             allowed_values=column.allowed_values,
         )
         for column in sorted(table.columns, key=lambda item: item.id)
@@ -873,6 +878,66 @@ async def get_metric_history(
         metric_id=metric.id,
         metric_name=metric.name,
         versions=versions,
+    )
+
+
+@router.get("/semantic/{db_id}/metric/{metric_id}/dimensions", response_model=MetricDimensionsResponse)
+async def get_metric_recommended_dimensions(
+    db_id: int,
+    metric_id: int,
+    db: AsyncSession = Depends(get_db_session),
+    _user: UserModel = Depends(get_current_user),
+) -> MetricDimensionsResponse:
+    """Recommend high-signal dimensions for a specific metric across Tier A, B, C, and D."""
+    stmt_metric = select(SemanticMetricModel).where(
+        SemanticMetricModel.id == metric_id,
+        SemanticMetricModel.db_id == db_id,
+    )
+    metric = (await db.execute(stmt_metric)).scalar_one_or_none()
+    if not metric:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metric {metric_id} not found")
+
+    base_table_name = ""
+    if metric.base_entity_id:
+        stmt_t = select(SemanticTableModel.table_name).where(SemanticTableModel.id == metric.base_entity_id)
+        base_table_name = (await db.execute(stmt_t)).scalar_one_or_none() or ""
+
+    dims = await get_dimensions_for_metric(db, db_id, metric_id)
+    return MetricDimensionsResponse(
+        metric_id=metric.id,
+        metric_name=metric.name,
+        base_table=base_table_name,
+        dimensions=dims,
+    )
+
+
+@router.get("/semantic/{db_id}/metric/{metric_id}/filter-columns", response_model=MetricFilterColumnsResponse)
+async def get_metric_filter_columns(
+    db_id: int,
+    metric_id: int,
+    db: AsyncSession = Depends(get_db_session),
+    _user: UserModel = Depends(get_current_user),
+) -> MetricFilterColumnsResponse:
+    """Retrieve safe and relevant filter columns for a specific metric."""
+    stmt_metric = select(SemanticMetricModel).where(
+        SemanticMetricModel.id == metric_id,
+        SemanticMetricModel.db_id == db_id,
+    )
+    metric = (await db.execute(stmt_metric)).scalar_one_or_none()
+    if not metric:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metric {metric_id} not found")
+
+    base_table_name = ""
+    if metric.base_entity_id:
+        stmt_t = select(SemanticTableModel.table_name).where(SemanticTableModel.id == metric.base_entity_id)
+        base_table_name = (await db.execute(stmt_t)).scalar_one_or_none() or ""
+
+    cols = await get_filter_columns_for_metric(db, db_id, metric_id)
+    return MetricFilterColumnsResponse(
+        metric_id=metric.id,
+        metric_name=metric.name,
+        base_table=base_table_name,
+        columns=cols,
     )
 
 
