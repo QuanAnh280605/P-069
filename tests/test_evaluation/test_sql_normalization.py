@@ -45,3 +45,19 @@ def test_postgresql_contract_dialect_maps_to_sqlglot() -> None:
 def test_unsafe_or_multi_statement_is_rejected(sql: str) -> None:
     with pytest.raises(SqlValidationError):
         normalize_sql(sql)
+
+
+def test_mixed_multi_statement_prioritizes_non_select_error() -> None:
+    with pytest.raises(SqlValidationError, match="NON_SELECT_STATEMENT"):
+        normalize_sql("SELECT * FROM orders; DELETE FROM customers")
+
+
+def test_data_modifying_cte_reports_nested_dml() -> None:
+    sql = "WITH removed AS (DELETE FROM orders RETURNING id) SELECT * FROM removed"
+    with pytest.raises(SqlValidationError, match="NESTED_DML"):
+        normalize_sql(sql)
+
+
+def test_multiple_selects_report_multi_statement() -> None:
+    with pytest.raises(SqlValidationError, match="MULTI_STATEMENT"):
+        normalize_sql("SELECT 1; SELECT 2")

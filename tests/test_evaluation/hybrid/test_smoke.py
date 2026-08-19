@@ -8,6 +8,7 @@ from eval.evaluator.hybrid.smoke import (
     smoke_metrics,
 )
 from eval.evaluator.schemas import EvaluationConfig
+from eval.evaluator.sql_normalization import effective_limit
 
 
 async def test_smoke_adapter_accepts_guarded_select(mini_dataset) -> None:
@@ -15,6 +16,22 @@ async def test_smoke_adapter_accepts_guarded_select(mini_dataset) -> None:
     assert callable(adapter.validate)  # structurally satisfies the GuardrailAdapter protocol
     decision = await adapter.validate("SELECT * FROM orders LIMIT 100", "sqlite")
     assert decision.accepted and decision.effective_limit == 100
+
+
+async def test_smoke_adapter_clamps_oversized_limit(mini_dataset) -> None:
+    adapter = SmokeGuardrailAdapter(EvaluationConfig())
+    decision = await adapter.validate("SELECT * FROM orders LIMIT 5000", "sqlite")
+    assert decision.effective_limit == 1000
+    assert decision.sql is not None
+    assert effective_limit(decision.sql, "sqlite") == 1000
+
+
+async def test_smoke_adapter_injects_default_limit(mini_dataset) -> None:
+    adapter = SmokeGuardrailAdapter(EvaluationConfig())
+    decision = await adapter.validate("SELECT * FROM orders", "sqlite")
+    assert decision.effective_limit == 100
+    assert decision.sql is not None
+    assert effective_limit(decision.sql, "sqlite") == 100
 
 
 async def test_smoke_adapter_rejects_unsafe_sql(mini_dataset) -> None:

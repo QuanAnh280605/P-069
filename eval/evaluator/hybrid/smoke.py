@@ -20,7 +20,7 @@ from eval.evaluator.schemas import (
     CandidateRelationship,
     EvaluationConfig,
 )
-from eval.evaluator.sql_normalization import SqlValidationError, effective_limit, normalize_sql
+from eval.evaluator.sql_normalization import NormalizedSql, SqlValidationError, effective_limit, normalize_sql
 
 
 @dataclass(frozen=True)
@@ -133,15 +133,23 @@ class SmokeGuardrailAdapter:
         """Normalize SQL and derive the guardrail decision without executing it."""
         try:
             normalized = normalize_sql(sql, dialect)
-            limit = effective_limit(sql, dialect) or self.config.default_limit
+            requested_limit = effective_limit(sql, dialect)
+            limit = min(requested_limit or self.config.default_limit, self.config.maximum_limit)
         except SqlValidationError as exc:
             return CandidateGuardrailOutput(accepted=False, error_code=str(exc))
         return CandidateGuardrailOutput(
             accepted=True,
-            sql=normalized.canonical,
+            sql=_apply_limit(normalized, dialect, limit),
             effective_limit=limit,
             effective_timeout_seconds=self.config.statement_timeout_seconds,
         )
+
+
+def _apply_limit(normalized: NormalizedSql, dialect: Dialect, limit: int) -> str:
+    """Inject the bounded effective limit into normalized SQL."""
+    sqlglot_dialect = "postgres" if dialect == "postgresql" else dialect
+    expression = normalized.expression.limit(limit)
+    return expression.sql(dialect=sqlglot_dialect, normalize=True, pretty=False)
 
 
 async def smoke_guardrail_responses(

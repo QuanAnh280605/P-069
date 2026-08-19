@@ -294,7 +294,13 @@ def _settings_with_hot_reload() -> Settings:
 
 
 def get_llm(role: str | None = None) -> BaseChatModel:
-    """Return a cached Agent role or isolated Judge chat model client."""
+    """Return a chat model client for the given role, reusing cached clients.
+
+    Args:
+        role: Optional call-site role. "enrich" and "metric" select their
+            model override; "judge" uses the isolated Judge configuration.
+            None uses the global Agent model configuration.
+    """
     settings = _settings_with_hot_reload()
     config = _resolve_llm_config(settings, role=role)
 

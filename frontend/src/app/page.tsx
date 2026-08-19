@@ -1,3 +1,4 @@
+"use client";
 import { NavigationSection } from "@/components/landing/navigation-section";
 import { HeroSection } from "@/components/landing/hero-section";
 import { BentoFeaturesSection } from "@/components/landing/bento-features-section";
