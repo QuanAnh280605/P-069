@@ -19,10 +19,18 @@ from src.services.organization_service import (
 
 def test_admin_is_not_a_semantic_data_approver():
     assert ROLE_PERMISSIONS["admin"]["can_manage_members"] is True
+    assert ROLE_PERMISSIONS["admin"]["can_manage_invitations"] is True
     assert ROLE_PERMISSIONS["admin"]["can_manage_schema"] is False
     assert ROLE_PERMISSIONS["admin"]["can_create_metrics"] is False
     assert ROLE_PERMISSIONS["admin"]["can_approve_metrics"] is False
+    assert ROLE_PERMISSIONS["admin"]["can_use_chat"] is True
+    assert ROLE_PERMISSIONS["admin"]["can_use_data_assistant"] is True
+    assert ROLE_PERMISSIONS["admin"]["can_use_metric_studio"] is False
     assert ROLE_PERMISSIONS["data_lead"]["can_approve_metrics"] is True
+    assert ROLE_PERMISSIONS["data_lead"]["can_manage_invitations"] is False
+    assert ROLE_PERMISSIONS["data_lead"]["can_use_metric_studio"] is True
+    assert ROLE_PERMISSIONS["member"]["can_use_data_assistant"] is True
+    assert ROLE_PERMISSIONS["member"]["can_use_metric_studio"] is False
 
 
 async def _add_user(async_session, user_id: int, email: str) -> UserModel:
@@ -87,6 +95,23 @@ async def test_last_admin_cannot_be_removed(async_session):
 
 
 @pytest.mark.asyncio
+async def test_member_cannot_remove_another_member(async_session):
+    member = await _add_user(async_session, 2, "member@company.com")
+    target = await _add_user(async_session, 3, "target@company.com")
+    organization = await create_organization(async_session, 1, "Acme", "acme")
+    async_session.add_all(
+        [
+            OrganizationMemberModel(org_id=organization.id, user_id=member.id, role="member"),
+            OrganizationMemberModel(org_id=organization.id, user_id=target.id, role="member"),
+        ]
+    )
+    await async_session.commit()
+
+    with pytest.raises(PermissionError, match="permission"):
+        await remove_member(async_session, organization.id, member.id, target.id)
+
+
+@pytest.mark.asyncio
 async def test_expired_invitation_is_rejected(async_session):
     organization = await create_organization(async_session, 1, "Acme", "acme")
     invitation = await create_invitation(async_session, organization.id, 1, "member", None, "http://localhost:3000")
@@ -97,7 +122,9 @@ async def test_expired_invitation_is_rejected(async_session):
     await async_session.commit()
 
     with pytest.raises(ValueError, match="expired"):
-        await accept_invitation(async_session, invitation.invite_url.rsplit("/", 1)[-1], await async_session.get(UserModel, 1))
+        await accept_invitation(
+            async_session, invitation.invite_url.rsplit("/", 1)[-1], await async_session.get(UserModel, 1)
+        )
 
 
 @pytest.mark.asyncio

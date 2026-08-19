@@ -31,6 +31,7 @@ from src.services.organization_service import (
     list_organizations,
     preview_invitation,
     remove_member,
+    require_permission,
     resolve_membership,
     revoke_invitation,
 )
@@ -66,7 +67,7 @@ async def create_workspace(
         name=organization.name,
         slug=organization.slug,
         role=membership.role,
-        permissions=ROLE_PERMISSIONS["admin"],
+        permissions=ROLE_PERMISSIONS[membership.role],
         created_at=organization.created_at,
     )
 
@@ -152,7 +153,12 @@ async def create_workspace_invitation(
     try:
         base_url = get_settings().cors_origins.split(",")[0]
         return await create_invitation(
-            db, organization.id, current_user.id, body.role, str(body.invitee_email) if body.invitee_email else None, base_url
+            db,
+            organization.id,
+            current_user.id,
+            body.role,
+            str(body.invitee_email) if body.invitee_email else None,
+            base_url,
         )
     except (PermissionError, ValueError) as error:
         raise _parse_org_error(error) from error
@@ -181,13 +187,17 @@ async def get_workspace_invitations(
 ) -> list[OrganizationInviteResponse]:
     """List pending invitations for Workspace management UI."""
     organization, membership = await _active_org(db, current_user.id, org_id)
-    if membership.role not in {"admin", "data_lead"}:
-        raise HTTPException(status_code=403, detail="Insufficient permission to list invitations")
+    try:
+        require_permission(membership, "can_manage_invitations")
+    except PermissionError as error:
+        raise _parse_org_error(error) from error
     return await list_invitations(db, organization.id)
 
 
 @router.get("/invite/{token}", response_model=OrganizationInvitePreviewResponse)
-async def get_invitation_preview(token: str, db: AsyncSession = Depends(get_db_session)) -> OrganizationInvitePreviewResponse:
+async def get_invitation_preview(
+    token: str, db: AsyncSession = Depends(get_db_session)
+) -> OrganizationInvitePreviewResponse:
     """Inspect an invitation before authentication."""
     try:
         return await preview_invitation(db, token)

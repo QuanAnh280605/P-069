@@ -27,27 +27,39 @@ from src.models.schemas import (
 ROLE_PERMISSIONS: dict[str, dict[str, bool]] = {
     "admin": {
         "can_manage_members": True,
+        "can_manage_invitations": True,
         "can_manage_schema": False,
         "can_create_metrics": False,
         "can_approve_metrics": False,
         "can_query": True,
-        "can_use_chat": False,
+        "can_use_chat": True,
+        "can_use_data_assistant": True,
+        "can_use_metric_studio": False,
+        "can_view_pending_metrics": True,
     },
     "data_lead": {
         "can_manage_members": False,
+        "can_manage_invitations": False,
         "can_manage_schema": True,
         "can_create_metrics": True,
         "can_approve_metrics": True,
         "can_query": True,
         "can_use_chat": True,
+        "can_use_data_assistant": True,
+        "can_use_metric_studio": True,
+        "can_view_pending_metrics": True,
     },
     "member": {
         "can_manage_members": False,
+        "can_manage_invitations": False,
         "can_manage_schema": False,
         "can_create_metrics": False,
         "can_approve_metrics": False,
         "can_query": True,
-        "can_use_chat": False,
+        "can_use_chat": True,
+        "can_use_data_assistant": True,
+        "can_use_metric_studio": False,
+        "can_view_pending_metrics": False,
     },
 }
 INVITE_ROLES = {"member", "data_lead"}
@@ -199,8 +211,9 @@ async def change_member_role(db: AsyncSession, org_id: int, actor_id: int, user_
     """Change a member role while preserving the last Admin."""
     await _lock_workspace_admins(db, org_id)
     actor = await get_membership(db, actor_id, org_id)
-    if actor is None or actor.role != "admin":
-        raise PermissionError("Only Workspace Admin can change roles")
+    if actor is None:
+        raise PermissionError("Workspace membership required")
+    require_permission(actor, "can_manage_members")
     target = await get_membership(db, user_id, org_id)
     if target is None:
         raise ValueError("Member not found")
@@ -218,6 +231,7 @@ async def remove_member(db: AsyncSession, org_id: int, actor_id: int, user_id: i
     target = await get_membership(db, user_id, org_id)
     if actor is None or target is None:
         raise ValueError("Member not found")
+    require_permission(actor, "can_manage_members")
     if target.role == "admin" and actor.role != "admin":
         raise PermissionError("Only Admin can remove an Admin")
     if target.role == "admin" and await _admin_count(db, org_id) <= 1:
@@ -228,9 +242,13 @@ async def remove_member(db: AsyncSession, org_id: int, actor_id: int, user_id: i
 
 
 async def _admin_count(db: AsyncSession, org_id: int) -> int:
-    stmt = select(func.count()).select_from(OrganizationMemberModel).where(
-        OrganizationMemberModel.org_id == org_id,
-        OrganizationMemberModel.role == "admin",
+    stmt = (
+        select(func.count())
+        .select_from(OrganizationMemberModel)
+        .where(
+            OrganizationMemberModel.org_id == org_id,
+            OrganizationMemberModel.role == "admin",
+        )
     )
     return int(await db.scalar(stmt) or 0)
 
@@ -255,8 +273,9 @@ async def create_invitation(
 ) -> OrganizationInviteResponse:
     """Create a seven-day, one-time Workspace invitation."""
     actor = await get_membership(db, actor_id, org_id)
-    if actor is None or actor.role not in {"admin", "data_lead"}:
-        raise PermissionError("Insufficient permission to invite members")
+    if actor is None:
+        raise PermissionError("Workspace membership required")
+    require_permission(actor, "can_manage_invitations")
     if role not in INVITE_ROLES:
         raise ValueError("Invalid invitation role")
     raw_token = secrets.token_urlsafe(32)
@@ -321,8 +340,9 @@ async def accept_invitation(db: AsyncSession, raw_token: str, user: UserModel) -
 async def revoke_invitation(db: AsyncSession, org_id: int, actor_id: int, invitation_id: int) -> None:
     """Revoke a pending Workspace invitation."""
     actor = await get_membership(db, actor_id, org_id)
-    if actor is None or actor.role not in {"admin", "data_lead"}:
-        raise PermissionError("Insufficient permission to revoke invitation")
+    if actor is None:
+        raise PermissionError("Workspace membership required")
+    require_permission(actor, "can_manage_invitations")
     invitation = await db.scalar(
         select(OrganizationInvitationModel).where(
             OrganizationInvitationModel.id == invitation_id,

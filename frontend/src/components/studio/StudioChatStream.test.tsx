@@ -54,6 +54,29 @@ describe('StudioChatStream', () => {
     expect(screen.queryByText(/SQL Compiled/)).not.toBeInTheDocument();
   });
 
+  it('renders assistant Markdown with lists, inline code, and GFM tables', () => {
+    render(
+      <StudioChatStream
+        messages={[
+          {
+            id: 'markdown',
+            sender: 'assistant',
+            text: '**Metric doanh thu**\n\n- Chọn `revenue`\n- Nhóm theo `created_at`\n\n| Metric | Dimension |\n| --- | --- |\n| Revenue | Month |',
+            timestamp: '10:00',
+          },
+        ]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={[]}
+      />,
+    );
+
+    expect(screen.getByText('Metric doanh thu')).toBeInTheDocument();
+    expect(screen.getByText('revenue')).toHaveClass('text-primary');
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.getByText('Month')).toBeInTheDocument();
+  });
+
   it('renders assistant message with icon container and AI agent label', () => {
     render(
       <StudioChatStream
@@ -73,6 +96,21 @@ describe('StudioChatStream', () => {
     // Assistant message should have AI agent label
     expect(screen.getByText('AI Semantic Agent')).toBeInTheDocument();
     expect(screen.getByText('Tôi đã phân tích schema')).toBeInTheDocument();
+  });
+
+  it('shows read-only permission notice in Data Assistant mode', () => {
+    render(
+      <StudioChatStream
+        messages={[]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={[]}
+        mode="data_assistant"
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(/không có quyền tạo, sửa hoặc lưu metric/i);
+    expect(screen.getByText(/GỢI Ý CÂU HỎI VỀ DỮ LIỆU/i)).toBeInTheDocument();
   });
 
   it('renders user message with user label', () => {

@@ -32,6 +32,7 @@ interface MetricsCatalogViewProps {
   onOpenStudio?: () => void;
   onApproveAll?: () => Promise<void>;
   onApproveMetric?: (id: number) => Promise<void> | void;
+  canManageMetrics?: boolean;
   database?: WorkspaceDatabase | null;
 }
 
@@ -114,6 +115,12 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
         }
       />
 
+      {props.canManageMetrics === false && (
+        <div role="status" className="border-b border-amber-500/30 bg-amber-500/10 px-6 py-2.5 text-xs text-amber-700 dark:text-amber-300">
+          Chế độ chỉ xem: bạn không có quyền lưu, chỉnh sửa, xóa hoặc phê duyệt metric. Hãy liên hệ Data Lead nếu cần thay đổi.
+        </div>
+      )}
+
       {/* Search & Filter Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-3">
         <div className="relative flex-1 max-w-sm">
@@ -159,7 +166,9 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
             <div>
               <p className="font-semibold text-foreground text-sm">Chưa có Metric Definition nào</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Hãy sử dụng AI Studio để tự động phân tích schema và đề xuất các chỉ số.
+                {props.canManageMetrics === false
+                  ? 'Chưa có metric đã phê duyệt để xem. Hãy liên hệ Data Lead để tạo và phê duyệt metric.'
+                  : 'Hãy sử dụng Metric Studio để tự động phân tích schema và đề xuất các chỉ số.'}
               </p>
             </div>
             {props.onOpenStudio && (

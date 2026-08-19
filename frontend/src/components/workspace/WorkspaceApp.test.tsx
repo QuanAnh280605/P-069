@@ -114,6 +114,7 @@ describe('WorkspaceApp route composition', () => {
       theme: 'light' as const,
       pendingCount: 0,
       collapsed: false,
+      canChat: true,
       onSelectView: vi.fn(),
       onToggleCollapse: vi.fn(),
       onToggleTheme: vi.fn(),

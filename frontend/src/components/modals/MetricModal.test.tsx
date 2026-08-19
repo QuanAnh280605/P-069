@@ -167,4 +167,22 @@ describe('MetricModal', () => {
     // YAML preview section should be visible
     expect(screen.getByText(/Preview chỉ đọc/i)).toBeInTheDocument();
   });
+
+  it('explains that non-authorized users cannot save a metric', () => {
+    const onSave = vi.fn();
+    render(
+      <MetricModal
+        isOpen
+        onClose={vi.fn()}
+        onSave={onSave}
+        tables={mockTables}
+        initialDefinition={mockDefinition}
+        canSave={false}
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/Chỉ Data Lead/i);
+    expect(screen.getByRole('button', { name: 'Lưu metric' })).toBeDisabled();
+    expect(onSave).not.toHaveBeenCalled();
+  });
 });

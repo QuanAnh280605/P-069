@@ -14,6 +14,8 @@ import {
   User,
 } from 'lucide-react';
 import React, { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 import { Button } from '@/components/ui/button';
 import { MetricSuggestion } from '@/lib/api';
@@ -41,6 +43,7 @@ interface StudioChatStreamProps {
   activePromptText?: string;
   theme?: 'light' | 'dark';
   onOpenCatalog?: () => void;
+  mode?: 'data_assistant' | 'metric_studio';
 }
 
 interface PromptSuggestionItem {
@@ -73,7 +76,32 @@ const DEFAULT_SUGGESTIONS: PromptSuggestionItem[] = [
   },
 ];
 
+const DATA_ASSISTANT_SUGGESTIONS: PromptSuggestionItem[] = [
+  {
+    icon: '🔎',
+    title: 'Tìm metric doanh thu đã duyệt',
+    prompt: 'Có những metric doanh thu nào đã được phê duyệt? Giải thích ngắn gọn từng metric.',
+  },
+  {
+    icon: '🧭',
+    title: 'Tìm bảng khách hàng',
+    prompt: 'Bảng hoặc cột nào liên quan đến khách hàng trong semantic layer này?',
+  },
+  {
+    icon: '🧩',
+    title: 'Hướng dẫn chọn dữ liệu',
+    prompt: 'Nếu muốn xem doanh thu theo tháng và cửa hàng, tôi nên chọn metric và dimension nào?',
+  },
+  {
+    icon: '📖',
+    title: 'Giải thích metric',
+    prompt: 'Giải thích công thức và phạm vi dữ liệu của metric doanh thu đã được duyệt.',
+  },
+];
+
 export function StudioChatStream(props: StudioChatStreamProps) {
+  const mode = props.mode || 'metric_studio';
+  const canGenerateMetrics = mode === 'metric_studio';
   const [input, setInput] = useState(props.activePromptText || '');
   const [saved, setSaved] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(true);
@@ -119,16 +147,18 @@ export function StudioChatStream(props: StudioChatStreamProps) {
   };
 
   const contextualSuggestions = useMemo(() => {
-    const list = [...DEFAULT_SUGGESTIONS];
+    const list = [
+      ...(canGenerateMetrics ? DEFAULT_SUGGESTIONS : DATA_ASSISTANT_SUGGESTIONS),
+    ];
     const tableStr = props.tableNames.join(' ').toLowerCase();
-    if (tableStr.includes('order') || tableStr.includes('don_hang')) {
+    if (canGenerateMetrics && (tableStr.includes('order') || tableStr.includes('don_hang'))) {
       list.unshift({
         icon: '📈',
         title: 'Tỷ lệ hủy đơn hàng',
         prompt: 'Định nghĩa chỉ số tỷ lệ đơn hàng bị hủy so với tổng đơn',
       });
     }
-    if (tableStr.includes('product') || tableStr.includes('san_pham')) {
+    if (canGenerateMetrics && (tableStr.includes('product') || tableStr.includes('san_pham'))) {
       list.push({
         icon: '🏷️',
         title: 'Top sản phẩm bán chạy',
@@ -136,7 +166,7 @@ export function StudioChatStream(props: StudioChatStreamProps) {
       });
     }
     return list;
-  }, [props.tableNames]);
+  }, [canGenerateMetrics, props.tableNames]);
 
   const hasUserSentMessage = useMemo(
     () => props.messages.some((m) => m.sender === 'user'),
@@ -148,6 +178,11 @@ export function StudioChatStream(props: StudioChatStreamProps) {
       {/* 💬 Messages Stream */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-8">
+          {!canGenerateMetrics && (
+            <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-700 dark:text-amber-300">
+              Chế độ chỉ đọc: bạn có thể hỏi về schema và metric đã phê duyệt, nhưng không có quyền tạo, sửa hoặc lưu metric. Hãy liên hệ Data Lead nếu cần thay đổi.
+            </div>
+          )}
           {props.messages.map((message) => (
             <MessageBubble
               key={message.id}
@@ -168,7 +203,11 @@ export function StudioChatStream(props: StudioChatStreamProps) {
               <div className="flex flex-col gap-2 rounded-lg border border-border bg-card px-4 py-3.5 shadow-xs">
                 <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
                   <Sparkles className="h-3.5 w-3.5 animate-spin text-primary" />
-                  <span>AI đang phân tích cấu trúc Schema & quan hệ...</span>
+                  <span>
+                    {canGenerateMetrics
+                      ? 'AI đang phân tích cấu trúc Schema & quan hệ...'
+                      : 'AI đang đọc semantic layer và metric đã phê duyệt...'}
+                  </span>
                 </div>
                 <div className="flex items-center gap-1.5 pt-1">
                   <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
@@ -192,7 +231,7 @@ export function StudioChatStream(props: StudioChatStreamProps) {
                 <div className="flex items-center gap-2">
                   <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
                   <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                    GỢI Ý CÂU HỎI TẠO METRIC
+                    {canGenerateMetrics ? 'GỢI Ý CÂU HỎI TẠO METRIC' : 'GỢI Ý CÂU HỎI VỀ DỮ LIỆU'}
                   </span>
                   {showSuggestions && (
                     <span className="font-mono text-[10px] text-muted-foreground/70">
@@ -237,7 +276,11 @@ export function StudioChatStream(props: StudioChatStreamProps) {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={2}
-              placeholder="Mô tả chỉ số bạn muốn tạo hoặc đặt câu hỏi về schema..."
+              placeholder={
+                canGenerateMetrics
+                  ? 'Mô tả chỉ số bạn muốn tạo hoặc đặt câu hỏi về schema...'
+                  : 'Hỏi về schema, metric đã duyệt hoặc cách chọn dữ liệu...'
+              }
               className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
             />
             <Button
@@ -251,7 +294,9 @@ export function StudioChatStream(props: StudioChatStreamProps) {
             </Button>
           </div>
           <p className="text-center font-mono text-[10px] text-muted-foreground">
-            AI can make mistakes. Every generated metric requires human approval before use.
+            {canGenerateMetrics
+              ? 'AI can make mistakes. Every generated metric requires human approval before use.'
+              : 'AI chỉ trả lời dựa trên semantic layer và metric đã được cấp quyền.'}
           </p>
         </div>
       </div>
@@ -300,14 +345,14 @@ function MessageBubble({
 
         <div
           className={cn(
-            'inline-block max-w-full rounded-lg px-4 py-3 text-sm leading-relaxed shadow-2xs',
+            'inline-block rounded-xl px-4 py-3 text-sm leading-relaxed shadow-2xs',
             isUser
-              ? 'bg-secondary text-secondary-foreground'
-              : 'border border-border bg-card text-card-foreground',
+              ? 'max-w-full bg-secondary text-secondary-foreground'
+              : 'max-w-4xl border border-border bg-card text-card-foreground',
             message.isError && 'border-destructive/30 bg-destructive/10 text-destructive',
           )}
         >
-          {message.text}
+          {isUser ? message.text : <AssistantMarkdown content={message.text} />}
         </div>
 
         {message.suggestions && message.suggestions.length > 0 && (
@@ -326,6 +371,53 @@ function MessageBubble({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function AssistantMarkdown({ content }: { content: string }) {
+  return (
+    <div className="prose prose-sm max-w-none text-card-foreground prose-headings:font-display prose-headings:text-foreground prose-p:my-2 prose-p:leading-7 prose-strong:text-foreground prose-li:my-1 prose-li:leading-6 prose-a:text-primary prose-a:underline prose-blockquote:border-primary/40 prose-blockquote:text-muted-foreground">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold first:mt-0">{children}</h3>,
+          h2: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold first:mt-0">{children}</h3>,
+          h3: ({ children }) => <h4 className="mb-2 mt-3 text-sm font-semibold">{children}</h4>,
+          p: ({ children }) => <p className="my-2 leading-7 first:mt-0 last:mb-0">{children}</p>,
+          strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+          em: ({ children }) => <em className="text-muted-foreground">{children}</em>,
+          ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>,
+          ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>,
+          blockquote: ({ children }) => (
+            <blockquote className="my-3 border-l-2 pl-3 italic">{children}</blockquote>
+          ),
+          code: ({ className, children, ...props }) => (
+            <code
+              className={cn(
+                className
+                  ? 'block overflow-x-auto rounded-md bg-secondary/80 p-3 font-mono text-xs leading-5'
+                  : 'rounded bg-secondary px-1.5 py-0.5 font-mono text-[0.85em] text-primary',
+              )}
+              {...props}
+            >
+              {children}
+            </code>
+          ),
+          pre: ({ children }) => <pre className="my-3 overflow-x-auto rounded-md">{children}</pre>,
+          table: ({ children }) => (
+            <div className="my-3 overflow-x-auto rounded-md border border-border">
+              <table className="w-full min-w-[520px] border-collapse text-left text-xs">{children}</table>
+            </div>
+          ),
+          thead: ({ children }) => <thead className="bg-secondary/70">{children}</thead>,
+          th: ({ children }) => <th className="border-b border-border px-3 py-2 font-semibold">{children}</th>,
+          td: ({ children }) => <td className="border-b border-border px-3 py-2 align-top last:border-b-0">{children}</td>,
+          hr: () => <hr className="my-4 border-border" />,
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }

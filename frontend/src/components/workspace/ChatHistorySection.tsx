@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import {
   Check,
   Edit2,
-  MessageSquare,
+  History,
   MessageSquarePlus,
   Pencil,
   Plus,
@@ -261,7 +261,7 @@ export function ChatHistorySection({
                 <div className="flex items-start justify-between gap-1">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <MessageSquare
+                      <History
                         className={cn(
                           'h-3.5 w-3.5 shrink-0',
                           isActive ? 'text-sidebar-primary' : 'text-sidebar-foreground/50',

@@ -1,6 +1,13 @@
+import pytest
 from sqlalchemy import select
 
-from src.models.db import ChatMessageModel, LiveTargetDbModel, SemanticDatabaseModel, UserModel
+from src.models.db import (
+    ChatMessageModel,
+    LiveTargetDbModel,
+    OrganizationMemberModel,
+    SemanticDatabaseModel,
+    UserModel,
+)
 from src.services.chat_service import (
     ChatAuthorizationError,
     create_chat_session,
@@ -11,6 +18,7 @@ from src.services.chat_service import (
     save_chat_message,
     update_chat_session_title,
 )
+from src.services.organization_service import create_organization
 
 
 async def _seed_live_database(async_session):
@@ -83,3 +91,62 @@ async def test_chat_service_enforces_database_ownership(async_session):
         raise AssertionError("Expected database ownership check to reject another user")
 
     assert await list_chat_sessions(async_session, 1, db_id) == []
+
+
+async def test_workspace_admin_can_use_data_chat(async_session):
+    """Workspace Admin can use read-only data assistance without metric authoring."""
+    organization = await create_organization(async_session, 1, "Acme", "acme")
+    database = SemanticDatabaseModel(
+        org_id=organization.id,
+        created_by=1,
+        display_name="Workspace Chat DB",
+        db_type="sqlite",
+        conn_url_enc="encrypted",
+    )
+    async_session.add(database)
+    await async_session.flush()
+    async_session.add(
+        LiveTargetDbModel(
+            created_by=1,
+            display_name="Workspace Chat source",
+            dialect="sqlite",
+            conn_url_enc="encrypted",
+            schema_metadata={},
+            semantic_db_id=database.id,
+        )
+    )
+    await async_session.commit()
+
+    session = await create_chat_session(async_session, 1, database.id, org_id=organization.id)
+    assert session.db_id == database.id
+
+
+async def test_workspace_member_cannot_use_chat_without_live_data_permission(async_session):
+    """A Workspace member still needs a live data source to start the assistant."""
+    other = UserModel(
+        id=2,
+        email="member@company.com",
+        username="member",
+        full_name="Member",
+        hashed_password="hash",
+        role="analyst",
+        status="active",
+    )
+    async_session.add(other)
+    await async_session.commit()
+    organization = await create_organization(async_session, 1, "Acme", "acme")
+    async_session.add(OrganizationMemberModel(org_id=organization.id, user_id=2, role="member"))
+    await async_session.commit()
+
+    database = SemanticDatabaseModel(
+        org_id=organization.id,
+        created_by=1,
+        display_name="Member Chat DB",
+        db_type="sqlite",
+        conn_url_enc="encrypted",
+    )
+    async_session.add(database)
+    await async_session.commit()
+
+    with pytest.raises(ChatAuthorizationError, match="only supported for live"):
+        await create_chat_session(async_session, 2, database.id, org_id=organization.id)

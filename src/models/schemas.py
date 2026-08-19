@@ -647,10 +647,10 @@ class ChatSessionUpdateRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Response từ chatbot orchestrator sau khi phân loại intent."""
 
-    intent: str = Field(..., description="'chitchat' hoặc 'metric_query'")
+    intent: str = Field(..., description="'chitchat', 'data_question' hoặc 'metric_query'")
     chat_response: str | None = Field(
         default=None,
-        description="Câu trả lời ngôn ngữ tự nhiên (khi intent = 'chitchat')",
+        description="Câu trả lời ngôn ngữ tự nhiên cho chitchat/data_question",
     )
     suggestions: list[Any] | None = Field(
         default=None,

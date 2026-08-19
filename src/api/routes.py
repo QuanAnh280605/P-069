@@ -92,7 +92,12 @@ from src.services.live_db_service import (
     list_live_target_dbs,
 )
 from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
-from src.services.organization_service import require_permission, resolve_membership
+from src.services.organization_service import (
+    ROLE_PERMISSIONS,
+    get_membership,
+    require_permission,
+    resolve_membership,
+)
 from src.services.query_compiler import SemanticQueryCompiler
 from src.services.query_execution import execute_compiled_query
 from src.services.schema_ingestion import parse_sql_dump_preview
@@ -138,9 +143,7 @@ async def _request_org_id(db: AsyncSession, user_id: int, org_id: int | None) ->
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
-async def _require_org_permission(
-    db: AsyncSession, user_id: int, org_id: int | None, permission: str
-) -> None:
+async def _require_org_permission(db: AsyncSession, user_id: int, org_id: int | None, permission: str) -> None:
     """Enforce a Workspace permission for the selected Workspace."""
     try:
         _, membership = await resolve_membership(db, user_id, org_id)
@@ -179,6 +182,7 @@ async def _require_resource_permission(
     except PermissionError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
     return resource
+
 
 DEMO_RETAIL_SCHEMA: dict[str, Any] = {
     "order_header": {
@@ -729,6 +733,24 @@ async def _load_schema_context_for_db(db: AsyncSession, db_id: Any) -> dict[str,
     return DEMO_RETAIL_SCHEMA
 
 
+async def _load_approved_metric_context(db: AsyncSession, db_id: int) -> list[dict[str, Any]]:
+    """Return safe approved metric context for the read-only data assistant."""
+    stmt = select(SemanticMetricModel).where(
+        SemanticMetricModel.db_id == db_id,
+        SemanticMetricModel.status == "approved",
+    )
+    metrics = (await db.execute(stmt)).scalars().all()
+    return [{"name": metric.name, "definition": _safe_metric_definition(metric.definition)} for metric in metrics]
+
+
+async def _chat_can_generate_metrics(db: AsyncSession, database: SemanticDatabaseModel, user_id: int) -> bool:
+    """Resolve metric-authoring capability from Workspace membership."""
+    if database.org_id is None:
+        return True
+    membership = await get_membership(db, user_id, database.org_id)
+    return bool(membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_use_metric_studio", False))
+
+
 @router.post("/semantic/{db_id}/metrics/generate", response_model=CustomMetricGenerateResponse)
 async def generate_custom_metrics(
     db_id: str,
@@ -828,9 +850,17 @@ async def list_metrics(
     db: AsyncSession = Depends(get_db_session),
 ) -> list[MetricListItem]:
     """Danh sách metrics kèm version, status, approved_by."""
-    if await _owned_semantic_database(db, db_id, current_user.id, org_id) is None:
+    semantic_db = await _owned_semantic_database(db, db_id, current_user.id, org_id)
+    if semantic_db is None:
         raise HTTPException(status_code=404, detail="Semantic database not found")
     stmt = select(SemanticMetricModel).where(SemanticMetricModel.db_id == db_id).order_by(SemanticMetricModel.id)
+    if semantic_db.org_id is not None:
+        membership = await get_membership(db, current_user.id, semantic_db.org_id)
+        can_view_pending = bool(
+            membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_view_pending_metrics", False)
+        )
+        if not can_view_pending:
+            stmt = stmt.where(SemanticMetricModel.status == "approved")
     result = await db.execute(stmt)
     metrics = result.scalars().all()
 
@@ -885,10 +915,7 @@ async def _owned_semantic_database(
         .outerjoin(OrganizationMemberModel, OrganizationMemberModel.org_id == SemanticDatabaseModel.org_id)
         .where(
             SemanticDatabaseModel.id == db_id,
-            (
-                (SemanticDatabaseModel.org_id == organization.id)
-                & (OrganizationMemberModel.user_id == user_id)
-            )
+            ((SemanticDatabaseModel.org_id == organization.id) & (OrganizationMemberModel.user_id == user_id))
             | ((SemanticDatabaseModel.org_id.is_(None)) & (SemanticDatabaseModel.created_by == user_id)),
         )
     )
@@ -969,13 +996,21 @@ async def get_metric_history(
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricHistoryResponse:
     """Lịch sử version của một metric."""
-    if await _owned_semantic_database(db, db_id, current_user.id, org_id) is None:
+    semantic_db = await _owned_semantic_database(db, db_id, current_user.id, org_id)
+    if semantic_db is None:
         raise HTTPException(status_code=404, detail="Semantic database not found")
     metric = await get_metric_with_history(db=db, metric_id=metric_id)
     if not metric:
         raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
     if metric.db_id != db_id:
         raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found in database {db_id}")
+    if semantic_db.org_id is not None and metric.status != "approved":
+        membership = await get_membership(db, current_user.id, semantic_db.org_id)
+        can_view_pending = bool(
+            membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_view_pending_metrics", False)
+        )
+        if not can_view_pending:
+            raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
 
     versions = [
         MetricVersionItem(
@@ -1347,16 +1382,18 @@ async def chat_orchestrator(
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> ChatResponse:
-    """Multi-agent chatbot: route chitchat to natural-language reply or metric generation.
+    """Route read-only data assistance or authorized metric generation.
 
     - 'chitchat' intent  → friendly Vietnamese natural-language response
+    - 'data_question' intent → read-only schema and approved-metric guidance
     - 'metric_query' intent → Business Metric suggestions from schema
     """
     from src.agents.chat_graph import chat_agent
 
     numeric_db_id = _chat_db_id(db_id)
     try:
-        await get_chat_database(db, current_user.id, numeric_db_id, org_id=org_id)
+        chat_database = await get_chat_database(db, current_user.id, numeric_db_id, org_id=org_id)
+        can_generate_metrics = await _chat_can_generate_metrics(db, chat_database, current_user.id)
         session = await _resolve_chat_session(db, body.session_id, current_user.id, numeric_db_id)
         replay = await _replay_chat_response(db, session, current_user.id, body.client_message_id)
         if replay is not None:
@@ -1372,6 +1409,7 @@ async def chat_orchestrator(
         if session.title == "Cuộc trò chuyện mới":
             await update_chat_session_title(db, session.id, current_user.id, auto_generate_session_title(body.message))
         schema_context = await _load_schema_context_for_db(db, str(numeric_db_id))
+        approved_metrics = await _load_approved_metric_context(db, numeric_db_id)
     except ChatAuthorizationError as exc:
         raise HTTPException(status_code=404, detail="Chat session or database not found") from exc
 
@@ -1382,6 +1420,8 @@ async def chat_orchestrator(
                 "user_message": body.message,
                 "chat_history": history,
                 "enriched_schema": schema_context,
+                "approved_metrics": approved_metrics,
+                "can_generate_metrics": can_generate_metrics,
             }
         )
     except Exception as exc:
@@ -1427,7 +1467,7 @@ async def chat_orchestrator(
     assert refreshed is not None
     return ChatResponse(
         intent=intent,
-        chat_response=final_state.get("chat_response") if intent == "chitchat" else response_text,
+        chat_response=(final_state.get("chat_response") if intent in {"chitchat", "data_question"} else response_text),
         suggestions=raw_metrics if intent == "metric_query" else None,
         session_id=session.id,
         user_message_id=user_message.id,
@@ -1467,7 +1507,7 @@ async def _replay_chat_response(
         return None
     return ChatResponse(
         intent=intent,
-        chat_response=assistant.content if intent == "chitchat" else None,
+        chat_response=assistant.content if intent in {"chitchat", "data_question"} else None,
         suggestions=suggestions if intent == "metric_query" else None,
         session_id=session.id,
         user_message_id=user_message.id,

@@ -47,6 +47,8 @@ import {
   MetricDefinition,
   MetricRecord,
   MetricSuggestion,
+  METRIC_WRITE_PERMISSION_MESSAGE,
+  isPermissionDenied,
   SemanticCatalog,
   SemanticLayerData,
   updateChatSessionTitleApi,
@@ -121,7 +123,17 @@ export default function WorkspacePage() {
   );
   const activeLayerId = activeLayer?.id;
   const semanticDbId = activeLayer?.semantic_db_id;
-  const canChat = Boolean(semanticDbId && activeLayer?.source_type === 'live');
+  const canUseDataAssistant = Boolean(permissions.can_use_data_assistant);
+  const canUseMetricStudio = Boolean(permissions.can_use_metric_studio);
+  const canManageMetrics = Boolean(permissions.can_create_metrics);
+  const canApproveMetrics = Boolean(permissions.can_approve_metrics);
+  const canChat = Boolean(
+    permissions.can_use_chat &&
+      (canUseDataAssistant || canUseMetricStudio) &&
+      semanticDbId &&
+      activeLayer?.source_type === 'live',
+  );
+  const studioMode = canUseMetricStudio ? 'metric_studio' : 'data_assistant';
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -136,6 +148,10 @@ export default function WorkspacePage() {
     window.history.replaceState({}, '', url);
   };
 
+
+  useEffect(() => {
+    if (!canChat && tab === 'studio') setTab('metrics');
+  }, [canChat, tab]);
 
   useEffect(() => {
     if (!isLoading && !token) {
@@ -275,12 +291,21 @@ export default function WorkspacePage() {
   }, [refreshSemanticData]);
 
   const saveDefinition = async (definition: MetricDefinition) => {
+    if (!canManageMetrics) {
+      notify(METRIC_WRITE_PERMISSION_MESSAGE);
+      throw new Error(METRIC_WRITE_PERMISSION_MESSAGE);
+    }
     if (!activeLayer?.semantic_db_id) throw new Error('Semantic database chưa sẵn sàng');
     const dbId = String(activeLayer.semantic_db_id);
-    if (editingMetric) await updateMetricApi(dbId, editingMetric.metric_id, definition);
-    else await createMetricApi(dbId, { definition, source: editingSuggestion ? 'ai' : 'manual' });
-    await refreshSemanticData();
-    notify('Đã lưu Metric Definition dạng JSON.');
+    try {
+      if (editingMetric) await updateMetricApi(dbId, editingMetric.metric_id, definition);
+      else await createMetricApi(dbId, { definition, source: editingSuggestion ? 'ai' : 'manual' });
+      await refreshSemanticData();
+      notify('Đã lưu Metric Definition dạng JSON.');
+    } catch (error) {
+      if (isPermissionDenied(error)) notify(METRIC_WRITE_PERMISSION_MESSAGE);
+      throw error;
+    }
   };
 
   const removeMetric = async (metricId: number) => {
@@ -334,13 +359,26 @@ export default function WorkspacePage() {
       chatSessions={sessions}
       activeChatSessionId={activeSessionId}
       loadingChatSessions={loadingSessions}
-      canChat={Boolean(activeLayer?.source_type === 'live' && semanticDbId)}
-      onSelectView={(v) => setTab(viewIdToTab(v))}
+      canChat={canChat}
+      chatMode={studioMode}
+      onSelectView={(v) => {
+        if (v === 'ai-studio' && !canChat) {
+          setTab('metrics');
+          return;
+        }
+        setTab(viewIdToTab(v));
+      }}
       onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
       onToggleTheme={toggleTheme}
       onSelectDatabase={(id) => {
         setSelectedId(id);
-        setTab('studio');
+        const nextLayer = layers.find((item) => item.id === id);
+        const nextCanChat = Boolean(
+          permissions.can_use_chat &&
+            (canUseDataAssistant || canUseMetricStudio) &&
+            nextLayer?.source_type === 'live',
+        );
+        setTab(nextCanChat ? 'studio' : 'metrics');
       }}
       onRemoveDatabase={async (id) => {
         const layer = layers.find((l) => l.id === id);
@@ -351,12 +389,14 @@ export default function WorkspacePage() {
       }}
       onConnectDatabase={() => setConnectOpen(true)}
       onOpenSettings={() => setSettingsOpen(true)}
-      onOpenWorkspaceManagement={() => setWorkspaceManagementOpen(true)}
+      onOpenWorkspaceManagement={
+        permissions.can_manage_members ? () => setWorkspaceManagementOpen(true) : undefined
+      }
       onLogout={logout}
-      onSelectChatSession={selectSession}
-      onNewChatSession={newChat}
-      onDeleteChatSession={removeSession}
-      onRenameChatSession={handleRenameSession}
+      onSelectChatSession={canChat ? selectSession : undefined}
+      onNewChatSession={canChat ? newChat : undefined}
+      onDeleteChatSession={canChat ? removeSession : undefined}
+      onRenameChatSession={canChat ? handleRenameSession : undefined}
     >
       {toast && (
         <div className="fixed right-6 top-6 z-60 rounded-xl bg-card border border-border px-4 py-2.5 text-xs font-semibold text-foreground shadow-2xl animate-in fade-in slide-in-from-top-2">
@@ -376,10 +416,12 @@ export default function WorkspacePage() {
               activeSessionId={activeSessionId}
               setActiveSessionId={setActiveSessionId}
               loadingSessions={loadingSessions}
+              mode={studioMode}
               onSelectSession={selectSession}
-              onNewChat={newChat}
+              onNewChat={canChat ? newChat : undefined}
               onMetricsChanged={refreshSemanticData}
-              onEditMetricRequest={(item) => openEditor(undefined, item)}
+              onNotify={notify}
+              onEditMetricRequest={canManageMetrics ? (item) => openEditor(undefined, item) : undefined}
               onOpenCatalog={() => setTab('metrics')}
             />
           )}
@@ -388,11 +430,12 @@ export default function WorkspacePage() {
               dbId={activeLayer.semantic_db_id}
               metrics={activeLayer.metrics}
               database={layerToDatabase(activeLayer)}
-              onDeleteMetric={removeMetric}
-              onEditMetric={(item) => openEditor(item)}
-              onOpenStudio={() => setTab('studio')}
-              onApproveAll={approve}
-              onApproveMetric={approveSingleMetric}
+              canManageMetrics={canManageMetrics}
+              onDeleteMetric={canManageMetrics ? removeMetric : undefined}
+              onEditMetric={canManageMetrics ? (item) => openEditor(item) : undefined}
+              onOpenStudio={canUseMetricStudio ? () => setTab('studio') : undefined}
+              onApproveAll={canApproveMetrics ? approve : undefined}
+              onApproveMetric={canApproveMetrics ? approveSingleMetric : undefined}
             />
           )}
           {tab === 'explorer' && (
@@ -462,6 +505,8 @@ export default function WorkspacePage() {
         tables={activeLayer?.tables || []}
         initialDefinition={editingMetric?.definition || editingSuggestion?.definition}
         initialName={editingMetric?.name}
+        canSave={canManageMetrics}
+        saveDisabledReason={METRIC_WRITE_PERMISSION_MESSAGE}
       />
       <WorkspaceManagementModal
         isOpen={workspaceManagementOpen}

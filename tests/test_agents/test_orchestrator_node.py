@@ -74,6 +74,19 @@ async def test_classifies_suggest_metric_as_metric() -> None:
 
 
 @pytest.mark.asyncio
+async def test_classifies_schema_question_as_data_question() -> None:
+    """Schema and approved-metric questions use the read-only assistant."""
+    with patch("src.agents.nodes.orchestrator_node.get_llm") as mock_get_llm:
+        llm = AsyncMock()
+        llm.ainvoke.return_value = _mock_llm_response("data_question")
+        mock_get_llm.return_value = llm
+
+        result = await orchestrator_node({"user_message": "Bảng nào chứa thông tin khách hàng?"})
+
+    assert result["intent"] == "data_question"
+
+
+@pytest.mark.asyncio
 async def test_classifies_kpi_question_as_metric() -> None:
     """KPI / chỉ số câu hỏi should be classified as metric_query."""
     with patch("src.agents.nodes.orchestrator_node.get_llm") as mock_get_llm:

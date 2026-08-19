@@ -20,11 +20,11 @@ export function ViewHeader({
   database,
 }: ViewHeaderProps) {
   return (
-    <header className="relative overflow-hidden border-b border-border px-6 py-5">
+    <header className="view-header-container relative overflow-hidden border-b border-border px-4 py-5 sm:px-6">
       {/* Editorial grid backdrop */}
       <div className="ws-grid-bg pointer-events-none absolute inset-0" aria-hidden />
 
-      <div className="relative flex items-start justify-between gap-4">
+      <div className="view-header-layout relative">
         <div className="min-w-0">
           {eyebrow && (
             <span className="ws-reveal mb-2 inline-flex items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -37,7 +37,7 @@ export function ViewHeader({
               {title}
             </h1>
             {database && (
-              <span className="ws-reveal inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary px-2.5 py-1 font-mono text-[11px] text-secondary-foreground [animation-delay:120ms]">
+              <span className="ws-reveal inline-flex max-w-full min-w-0 flex-wrap items-center gap-1.5 rounded-full border border-border bg-secondary px-2.5 py-1 font-mono text-[11px] text-secondary-foreground [animation-delay:120ms]">
                 <span
                   className={
                     database.status === 'connected'
@@ -46,8 +46,8 @@ export function ViewHeader({
                   }
                 />
                 <EngineIcon engine={database.engine} className="h-3 w-3" />
-                {database.name}
-                <span className="text-muted-foreground">· {engineLabels[database.engine]}</span>
+                <span className="min-w-0 truncate">{database.name}</span>
+                <span className="shrink-0 text-muted-foreground">· {engineLabels[database.engine]}</span>
               </span>
             )}
           </div>
@@ -56,7 +56,7 @@ export function ViewHeader({
           </p>
         </div>
         {actions && (
-          <div className="ws-reveal flex shrink-0 items-center gap-2 [animation-delay:200ms]">
+          <div className="view-header-actions ws-reveal [animation-delay:200ms]">
             {actions}
           </div>
         )}

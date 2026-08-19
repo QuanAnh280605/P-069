@@ -398,6 +398,13 @@ export class SemanticApiError extends Error {
   }
 }
 
+export const METRIC_WRITE_PERMISSION_MESSAGE =
+  'Bạn không có quyền lưu hoặc chỉnh sửa metric. Chỉ Data Lead được thực hiện thao tác này.';
+
+export function isPermissionDenied(error: unknown): boolean {
+  return error instanceof SemanticApiError && error.status === 403;
+}
+
 export async function semanticRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -463,7 +470,7 @@ export async function generateCustomMetricsApi(
 }
 
 export interface ChatOrchestratorResponse {
-  intent: 'chitchat' | 'metric_query';
+  intent: 'chitchat' | 'data_question' | 'metric_query';
   chat_response?: string | null;
   suggestions?: MetricSuggestion[] | null;
   session_id: string;

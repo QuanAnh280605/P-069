@@ -10,7 +10,9 @@ import {
   generateCustomMetricsApi,
   getChatSessionDetailApi,
   MetricSuggestion,
+  METRIC_WRITE_PERMISSION_MESSAGE,
   SemanticLayerData,
+  isPermissionDenied,
   sendChatOrchestratorApi,
 } from '@/lib/api';
 import { ChatMessage, StudioChatStream } from '@/components/studio/StudioChatStream';
@@ -27,8 +29,10 @@ interface AIStudioViewProps {
   onSelectSession?: (id: string) => void;
   onNewChat?: () => void;
   onMetricsChanged: () => Promise<void> | void;
-  onEditMetricRequest: (metric: MetricSuggestion) => void;
+  onEditMetricRequest?: (metric: MetricSuggestion) => void;
   onOpenCatalog?: () => void;
+  onNotify?: (message: string) => void;
+  mode?: 'data_assistant' | 'metric_studio';
 }
 
 export function AIStudioView({
@@ -43,11 +47,14 @@ export function AIStudioView({
   onMetricsChanged,
   onEditMetricRequest,
   onOpenCatalog,
+  onNotify,
+  mode = 'metric_studio',
 }: AIStudioViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [activePrompt, setActivePrompt] = useState('');
   const semanticDbId = layer.semantic_db_id;
+  const canGenerateMetrics = mode === 'metric_studio';
   const requestVersion = useRef(0);
 
   const activeSession = useMemo(
@@ -62,7 +69,9 @@ export function AIStudioView({
         sender: 'assistant',
         text:
           error ||
-          `Xin chào! Tôi đã quét schema cho database ${layer.db_name} (${layer.tables.length} bảng). Bạn có thể hỏi bất kỳ câu hỏi nào để tôi tự động đề xuất và định nghĩa các chỉ số kinh doanh (Business Metrics).`,
+          (canGenerateMetrics
+            ? `Xin chào! Tôi đã quét schema cho database ${layer.db_name} (${layer.tables.length} bảng). Bạn có thể hỏi để tôi đề xuất và định nghĩa Business Metrics.`
+            : `Xin chào! Tôi có thể giúp bạn tìm hiểu schema, metric đã phê duyệt và cách chọn dữ liệu trong ${layer.db_name}.`),
         timestamp: now(),
         isError: Boolean(error),
       },
@@ -138,7 +147,7 @@ export function AIStudioView({
             ...current.filter((item) => item.id !== response.session!.id),
           ]);
         }
-        if (response.intent === 'chitchat') {
+        if (response.intent === 'chitchat' || response.intent === 'data_question') {
           setMessages((current) => [
             ...current,
             {
@@ -165,7 +174,8 @@ export function AIStudioView({
             timestamp: now(),
           },
         ]);
-      } catch {
+      } catch (error) {
+        if (!canGenerateMetrics) throw error;
         const res = await generateCustomMetricsApi(String(semanticDbId), prompt, _targetTables);
         suggestions = res.suggestions || [];
         setMessages((current) => [
@@ -203,11 +213,14 @@ export function AIStudioView({
       });
       await onMetricsChanged();
     } catch (error) {
+      if (isPermissionDenied(error)) onNotify?.(METRIC_WRITE_PERMISSION_MESSAGE);
       appendError(
         setMessages,
-        `Không thể lưu chỉ số "${suggestion.definition.metric.name}": ${
-          error instanceof Error ? error.message : 'Lỗi không xác định'
-        }`,
+        isPermissionDenied(error)
+          ? METRIC_WRITE_PERMISSION_MESSAGE
+          : `Không thể lưu chỉ số "${suggestion.definition.metric.name}": ${
+              error instanceof Error ? error.message : 'Lỗi không xác định'
+            }`,
       );
       throw error;
     }
@@ -224,9 +237,13 @@ export function AIStudioView({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       <ViewHeader
-        eyebrow="Generate"
-        title="AI Studio"
-        description="Chat with the assistant to explore your schema and auto-generate business metric definitions."
+        eyebrow={canGenerateMetrics ? 'Generate' : 'Explore'}
+        title={canGenerateMetrics ? 'Metric Studio' : 'Data Assistant'}
+        description={
+          canGenerateMetrics
+            ? 'Chat with the assistant to explore your schema and generate business metric definitions.'
+            : 'Hỏi về schema, metric đã duyệt và cách khai thác dữ liệu an toàn.'
+        }
         database={dbProp}
         actions={
           activeSession ? (
@@ -266,13 +283,17 @@ export function AIStudioView({
           onSendMessage={send}
           isLoading={loading || loadingSessions}
           tableNames={layer.tables.map((table) => table.table_name)}
-          onAddMetric={save}
-          onEditMetric={onEditMetricRequest}
-          onRefineWithAI={(suggestion) =>
-            setActivePrompt(`Hãy điều chỉnh chỉ số ${suggestion.definition.metric.name}: `)
+          onAddMetric={canGenerateMetrics ? save : undefined}
+          onEditMetric={canGenerateMetrics ? onEditMetricRequest : undefined}
+          onRefineWithAI={
+            canGenerateMetrics
+              ? (suggestion) =>
+                  setActivePrompt(`Hãy điều chỉnh chỉ số ${suggestion.definition.metric.name}: `)
+              : undefined
           }
           activePromptText={activePrompt}
           theme={theme}
+          mode={mode}
           onOpenCatalog={onOpenCatalog}
         />
       </div>

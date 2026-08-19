@@ -17,6 +17,7 @@ import {
   MetricDefinition,
   MetricFilter,
   MetricFunction,
+  METRIC_WRITE_PERMISSION_MESSAGE,
   SemanticTable,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -41,6 +42,8 @@ interface MetricModalProps {
   status?: string;
   onApprove?: () => Promise<void> | void;
   versions?: MetricVersion[];
+  canSave?: boolean;
+  saveDisabledReason?: string;
 }
 
 const FUNCTIONS: MetricFunction[] = ['SUM', 'COUNT', 'COUNT_DISTINCT', 'AVG', 'MIN', 'MAX'];
@@ -84,6 +87,10 @@ export function MetricModal(props: MetricModalProps) {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (props.canSave === false) {
+      setError(props.saveDisabledReason || METRIC_WRITE_PERMISSION_MESSAGE);
+      return;
+    }
     const message = validateDefinition(definition);
     if (message) return setError(message);
     setSaving(true);
@@ -239,6 +246,11 @@ export function MetricModal(props: MetricModalProps) {
                     {error}
                   </div>
                 )}
+                {props.canSave === false && !error && (
+                  <div role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-700 dark:text-amber-300">
+                    {props.saveDisabledReason || METRIC_WRITE_PERMISSION_MESSAGE}
+                  </div>
+                )}
               </div>
 
               {/* YAML Spec Preview Column */}
@@ -279,7 +291,12 @@ export function MetricModal(props: MetricModalProps) {
                   <Button type="button" variant="ghost" onClick={props.onClose}>
                     Hủy
                   </Button>
-                  <Button type="submit" disabled={saving} className="gap-1.5 text-xs">
+                  <Button
+                    type="submit"
+                    disabled={saving || props.canSave === false}
+                    title={props.canSave === false ? props.saveDisabledReason || METRIC_WRITE_PERMISSION_MESSAGE : undefined}
+                    className="gap-1.5 text-xs"
+                  >
                     <Save className="h-3.5 w-3.5" />
                     {saving ? 'Đang lưu...' : 'Lưu metric'}
                   </Button>

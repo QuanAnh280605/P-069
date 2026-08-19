@@ -30,6 +30,7 @@ describe('WorkspaceSidebar', () => {
     theme: 'light' as const,
     pendingCount: 3,
     collapsed: false,
+    canChat: true,
     onSelectView: vi.fn(),
     onToggleCollapse: vi.fn(),
     onToggleTheme: vi.fn(),
@@ -101,6 +102,20 @@ describe('WorkspaceSidebar', () => {
     });
   });
 
+  it('hides AI Studio navigation when the workspace has no chat capability', () => {
+    render(<WorkspaceSidebar {...defaultProps} canChat={false} />);
+
+    expect(screen.queryByRole('button', { name: 'AI Studio' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Metrics Catalog/ })).toBeInTheDocument();
+  });
+
+  it('labels the restricted chat mode as Data Assistant', () => {
+    render(<WorkspaceSidebar {...defaultProps} chatMode="data_assistant" />);
+
+    expect(screen.getByRole('button', { name: 'Data Assistant' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'AI Studio' })).not.toBeInTheDocument();
+  });
+
   describe('collapsed layout', () => {
     it('renders collapsed rail at 50px width (w-14)', () => {
       render(<WorkspaceSidebar {...defaultProps} collapsed={true} />);
@@ -130,11 +145,12 @@ describe('WorkspaceSidebar', () => {
       const nav = screen.getByRole('navigation');
       const buttons = within(nav).getAllByRole('button');
 
-      expect(buttons).toHaveLength(4);
+      expect(buttons).toHaveLength(5);
       expect(buttons[0]).toHaveAttribute('aria-label', 'AI Studio');
       expect(buttons[1]).toHaveAttribute('aria-label', 'Metrics Catalog');
       expect(buttons[2]).toHaveAttribute('aria-label', 'Metric Explorer');
       expect(buttons[3]).toHaveAttribute('aria-label', 'Export Playground');
+      expect(buttons[4]).toHaveAttribute('aria-label', 'Mở lịch sử trò chuyện');
     });
   });
 
@@ -260,22 +276,25 @@ describe('WorkspaceSidebar', () => {
       expect(onSelectChatSession).toHaveBeenCalledWith('chat-1');
     });
 
-    it('shows new chat button in collapsed rail when canChat is true', () => {
-      const onNewChatSession = vi.fn();
+    it('opens chat history from the collapsed rail when canChat is true', () => {
+      const onSelectView = vi.fn();
+      const onToggleCollapse = vi.fn();
       render(
         <WorkspaceSidebar
           {...defaultProps}
           collapsed={true}
           canChat={true}
           chatSessions={mockChatSessions}
-          onNewChatSession={onNewChatSession}
+          onSelectView={onSelectView}
+          onToggleCollapse={onToggleCollapse}
         />,
       );
 
-      const newChatBtn = screen.getByLabelText('Tạo cuộc trò chuyện mới');
-      expect(newChatBtn).toBeInTheDocument();
-      fireEvent.click(newChatBtn);
-      expect(onNewChatSession).toHaveBeenCalledTimes(1);
+      const historyBtn = screen.getByLabelText('Mở lịch sử trò chuyện');
+      expect(historyBtn).toBeInTheDocument();
+      fireEvent.click(historyBtn);
+      expect(onSelectView).toHaveBeenCalledWith('ai-studio');
+      expect(onToggleCollapse).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -321,22 +340,25 @@ describe('WorkspaceSidebar', () => {
       expect(onSelectChatSession).toHaveBeenCalledWith('chat-1');
     });
 
-    it('shows new chat button in collapsed rail when canChat is true', () => {
-      const onNewChatSession = vi.fn();
+    it('opens chat history from the collapsed rail when canChat is true', () => {
+      const onSelectView = vi.fn();
+      const onToggleCollapse = vi.fn();
       render(
         <WorkspaceSidebar
           {...defaultProps}
           collapsed={true}
           canChat={true}
           chatSessions={mockChatSessions}
-          onNewChatSession={onNewChatSession}
+          onSelectView={onSelectView}
+          onToggleCollapse={onToggleCollapse}
         />,
       );
 
-      const newChatBtn = screen.getByLabelText('Tạo cuộc trò chuyện mới');
-      expect(newChatBtn).toBeInTheDocument();
-      fireEvent.click(newChatBtn);
-      expect(onNewChatSession).toHaveBeenCalledTimes(1);
+      const historyBtn = screen.getByLabelText('Mở lịch sử trò chuyện');
+      expect(historyBtn).toBeInTheDocument();
+      fireEvent.click(historyBtn);
+      expect(onSelectView).toHaveBeenCalledWith('ai-studio');
+      expect(onToggleCollapse).toHaveBeenCalledTimes(1);
     });
   });
 });

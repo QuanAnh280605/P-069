@@ -17,6 +17,7 @@ from src.models.db import (
     OrganizationMemberModel,
     SemanticDatabaseModel,
 )
+from src.services.organization_service import require_permission
 
 DEFAULT_SESSION_TITLE = "Cuộc trò chuyện mới"
 ALLOWED_SENDERS = {"user", "assistant", "system"}
@@ -30,9 +31,11 @@ async def get_chat_database(
     db: AsyncSession, user_id: int, db_id: int, require_live: bool = True, org_id: int | None = None
 ) -> SemanticDatabaseModel:
     """Return an owned semantic database and optionally require a live source."""
-    stmt = select(SemanticDatabaseModel).outerjoin(
-        OrganizationMemberModel, OrganizationMemberModel.org_id == SemanticDatabaseModel.org_id
-    ).where(SemanticDatabaseModel.id == db_id)
+    stmt = (
+        select(SemanticDatabaseModel)
+        .outerjoin(OrganizationMemberModel, OrganizationMemberModel.org_id == SemanticDatabaseModel.org_id)
+        .where(SemanticDatabaseModel.id == db_id)
+    )
     if org_id is not None:
         stmt = stmt.where(
             SemanticDatabaseModel.org_id == org_id,
@@ -52,8 +55,11 @@ async def get_chat_database(
             OrganizationMemberModel.user_id == user_id,
         )
     )
-    if membership is not None and membership.role == "member":
-        raise ChatAuthorizationError("Member accounts cannot use AI Chat")
+    if membership is not None:
+        try:
+            require_permission(membership, "can_use_chat")
+        except PermissionError as exc:
+            raise ChatAuthorizationError("Workspace role cannot use AI Chat") from exc
     if require_live and not await _has_live_source(db, db_id):
         raise ChatAuthorizationError("Chat is only supported for live databases")
     return database

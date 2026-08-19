@@ -17,6 +17,7 @@ interface WorkspaceAppProps {
   activeChatSessionId?: string | null;
   loadingChatSessions?: boolean;
   canChat?: boolean;
+  chatMode?: 'data_assistant' | 'metric_studio';
   onSelectView: (view: ViewId) => void;
   onToggleCollapse: () => void;
   onToggleTheme: () => void;
@@ -45,6 +46,7 @@ export function WorkspaceApp({
   activeChatSessionId,
   loadingChatSessions,
   canChat,
+  chatMode,
   onSelectView,
   onToggleCollapse,
   onToggleTheme,
@@ -81,6 +83,7 @@ export function WorkspaceApp({
         activeChatSessionId={activeChatSessionId}
         loadingChatSessions={loadingChatSessions}
         canChat={canChat}
+        chatMode={chatMode}
         onSelectView={onSelectView}
         onToggleCollapse={onToggleCollapse}
         onToggleTheme={onToggleTheme}

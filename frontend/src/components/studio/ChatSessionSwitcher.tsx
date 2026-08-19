@@ -362,7 +362,7 @@ export function ChatSessionSwitcher({
                     <div className="flex items-start justify-between gap-1 pl-1">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
-                          <MessageSquare
+                          <History
                             className={`h-3.5 w-3.5 shrink-0 ${
                               isActive
                                 ? 'text-indigo-600 dark:text-indigo-400'

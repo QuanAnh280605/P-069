@@ -8,8 +8,8 @@ import {
   ChevronDown,
   ChevronLeft,
   Compass,
+  History,
   LogOut,
-  MessageSquare,
   Moon,
   PanelLeftClose,
   Plus,
@@ -39,6 +39,7 @@ interface WorkspaceSidebarProps {
   activeChatSessionId?: string | null;
   loadingChatSessions?: boolean;
   canChat?: boolean;
+  chatMode?: 'data_assistant' | 'metric_studio';
   onSelectView: (view: ViewId) => void;
   onToggleCollapse: () => void;
   onToggleTheme: () => void;
@@ -73,6 +74,7 @@ export function WorkspaceSidebar({
   activeChatSessionId = null,
   loadingChatSessions = false,
   canChat = false,
+  chatMode = 'metric_studio',
   onSelectView,
   onToggleCollapse,
   onToggleTheme,
@@ -89,6 +91,9 @@ export function WorkspaceSidebar({
 }: WorkspaceSidebarProps) {
   const { workspaces, currentWorkspace, role, switchWorkspace } = useWorkspace();
   const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
+  const visibleNavItems = navItems.filter((item) => item.id !== 'ai-studio' || canChat);
+  const getNavLabel = (id: ViewId, label: string) =>
+    id === 'ai-studio' && chatMode === 'data_assistant' ? 'Data Assistant' : label;
 
   if (collapsed) {
     return (
@@ -113,14 +118,14 @@ export function WorkspaceSidebar({
           </button>
         )}
         <nav className="flex flex-1 flex-col gap-1">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             return (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => onSelectView(item.id)}
-                aria-label={item.label}
+                aria-label={getNavLabel(item.id, item.label)}
                 aria-current={view === item.id ? 'page' : undefined}
                 className={cn(
                   'relative rounded-md p-2 transition-colors',
@@ -133,18 +138,18 @@ export function WorkspaceSidebar({
               </button>
             );
           })}
-          {canChat && onNewChatSession && (
+          {canChat && (
             <button
               type="button"
               onClick={() => {
                 onSelectView('ai-studio');
-                onNewChatSession();
+                onToggleCollapse();
               }}
               className="relative rounded-md p-2 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground cursor-pointer"
-              aria-label="Tạo cuộc trò chuyện mới"
-              title="Tạo cuộc trò chuyện mới"
+              aria-label="Mở lịch sử trò chuyện"
+              title="Mở lịch sử trò chuyện"
             >
-              <MessageSquare className="h-4 w-4" />
+              <History className="h-4 w-4" />
               {chatSessions.length > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-sidebar-primary text-[9px] font-mono font-bold text-sidebar-primary-foreground">
                   {chatSessions.length}
@@ -260,7 +265,7 @@ export function WorkspaceSidebar({
 
       {/* Navigation */}
       <nav className="flex flex-col gap-0.5 px-3 py-2">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const Icon = item.icon;
           const active = view === item.id;
           return (
@@ -277,7 +282,7 @@ export function WorkspaceSidebar({
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              <span className="flex-1 text-sm">{item.label}</span>
+              <span className="flex-1 text-sm">{getNavLabel(item.id, item.label)}</span>
               {item.id === 'catalog' && pendingCount > 0 && (
                 <span
                   className={cn(

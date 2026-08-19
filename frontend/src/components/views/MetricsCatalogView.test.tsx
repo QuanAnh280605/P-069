@@ -175,4 +175,17 @@ describe('MetricsCatalogView', () => {
 
     expect(handleEdit).toHaveBeenCalledWith(mockMetrics[1]);
   });
+
+  it('shows a read-only notice when metric management is not allowed', () => {
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={mockMetrics}
+        canManageMetrics={false}
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(/không có quyền lưu, chỉnh sửa, xóa hoặc phê duyệt/i);
+    expect(screen.queryByRole('button', { name: /Sinh với AI/i })).not.toBeInTheDocument();
+  });
 });
