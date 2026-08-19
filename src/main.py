@@ -10,6 +10,7 @@ from src.api.routes import router
 from src.config import get_settings
 from src.models.db import Base
 from src.services.database import get_async_engine
+from src.services.rate_limiter import RateLimitMiddleware
 
 # Configure application-wide logging
 logging.basicConfig(
@@ -46,6 +47,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RateLimitMiddleware)
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(query_clarify_router, prefix="/api/v1")

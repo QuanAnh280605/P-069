@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Bot, BookMarked, ChevronLeft, Compass, LogOut, Moon, PanelLeftClose, Plus, Settings, Sun, Trash2, Upload } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -97,10 +98,9 @@ export function WorkspaceSidebar({
     <aside className="flex h-full w-72 flex-col border-r border-sidebar-border bg-sidebar">
       {/* Brand */}
       <div className="flex items-center justify-between px-4 py-4">
-        <div className="flex items-baseline gap-1.5">
-          <span className="font-display text-2xl tracking-tight text-sidebar-foreground">S206</span>
-          <span className="font-mono text-[10px] text-sidebar-foreground/50">SEMANTIC</span>
-        </div>
+        <Link href="/" className="flex items-center gap-2 group">
+          <span className="font-display text-2xl tracking-tight text-sidebar-foreground">SemanticLayer</span>
+        </Link>
         <button
           type="button"
           onClick={onToggleCollapse}
