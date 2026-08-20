@@ -3,19 +3,15 @@
 import {
   CheckCircle2,
   Database,
+  Loader2,
   Plus,
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { ConnectDbModal } from '@/components/modals/ConnectDbModal';
-import { MetricModal } from '@/components/modals/MetricModal';
-import { SettingsModal } from '@/components/modals/SettingsModal';
-import { WorkspaceManagementModal } from '@/components/modals/WorkspaceManagementModal';
 import { AIStudioView } from '@/components/views/AIStudioView';
-import { ExportPlaygroundView } from '@/components/views/ExportPlaygroundView';
-import { MetricExplorerView } from '@/components/views/MetricExplorerView';
 import { MetricsCatalogView } from '@/components/views/MetricsCatalogView';
 import { WorkspaceApp } from '@/components/workspace/WorkspaceApp';
 import type { ViewId, WorkspaceDatabase } from '@/components/workspace/shared';
@@ -54,6 +50,53 @@ import {
   updateMetricApi,
 } from '@/lib/api';
 
+// Dynamic imports for heavy views & modals to optimize initial bundle size & LCP
+const MetricExplorerView = dynamic(
+  () => import('@/components/views/MetricExplorerView').then((m) => m.MetricExplorerView),
+  {
+    loading: () => (
+      <div className="flex flex-1 items-center justify-center p-8 text-xs font-semibold text-muted-foreground gap-2">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Đang tải Trình khám phá chỉ số...
+      </div>
+    ),
+    ssr: false,
+  },
+);
+
+const ExportPlaygroundView = dynamic(
+  () => import('@/components/views/ExportPlaygroundView').then((m) => m.ExportPlaygroundView),
+  {
+    loading: () => (
+      <div className="flex flex-1 items-center justify-center p-8 text-xs font-semibold text-muted-foreground gap-2">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Đang tải Xuất dữ liệu...
+      </div>
+    ),
+    ssr: false,
+  },
+);
+
+const ConnectDbModal = dynamic(
+  () => import('@/components/modals/ConnectDbModal').then((m) => m.ConnectDbModal),
+  { ssr: false },
+);
+
+const SettingsModal = dynamic(
+  () => import('@/components/modals/SettingsModal').then((m) => m.SettingsModal),
+  { ssr: false },
+);
+
+const WorkspaceManagementModal = dynamic(
+  () => import('@/components/modals/WorkspaceManagementModal').then((m) => m.WorkspaceManagementModal),
+  { ssr: false },
+);
+
+const MetricModal = dynamic(
+  () => import('@/components/modals/MetricModal').then((m) => m.MetricModal),
+  { ssr: false },
+);
+
 type WorkspaceTab = 'studio' | 'metrics' | 'explorer' | 'export';
 
 function layerToDatabase(layer: SemanticLayerData): WorkspaceDatabase {
@@ -62,7 +105,7 @@ function layerToDatabase(layer: SemanticLayerData): WorkspaceDatabase {
     name: layer.db_name,
     engine: layer.db_type === 'auto' ? 'dump' : layer.db_type,
     status: 'connected',
-    tables: layer.tables.length,
+    tables: layer.tables?.length || layer.table_count || 0,
   };
 }
 
@@ -138,7 +181,6 @@ export default function WorkspacePage() {
     window.setTimeout(() => setToast(''), 3000);
   }, []);
 
-
   useEffect(() => {
     if (!canChat && tab === 'studio') setTab('metrics');
   }, [canChat, tab]);
@@ -149,20 +191,33 @@ export default function WorkspacePage() {
     }
   }, [isLoading, token, router]);
 
+  // Load summary connections list quickly
   useEffect(() => {
     if (!token || !currentWorkspace) return;
     setLayers([]);
     setSelectedId(null);
     setCatalog(null);
-    void loadConnections(token)
+    void loadConnectionSummaries(token)
       .then((items) => {
         setLayers(items);
-        setSelectedId(items[0]?.id || null);
+        if (items.length > 0) {
+          setSelectedId(items[0].id);
+        }
       })
       .catch((error) =>
         notify(error instanceof Error ? error.message : 'Không thể tải danh sách database'),
       );
   }, [currentWorkspace?.id, notify, token]);
+
+  // Lazy-load details for active database if not loaded
+  useEffect(() => {
+    if (!token || !activeLayer || activeLayer.is_loaded) return;
+    void loadLayerDetail(activeLayer, token).then((detailed) => {
+      setLayers((current) =>
+        current.map((item) => (item.id === detailed.id ? detailed : item)),
+      );
+    });
+  }, [token, activeLayer, activeLayerId]);
 
   const loadSessions = useCallback(
     async (dbId: string) => {
@@ -262,22 +317,30 @@ export default function WorkspacePage() {
     if (!activeLayerId || !semanticDbId) return;
     const dbId = String(semanticDbId);
     try {
-      const [metrics, nextCatalog] = await Promise.all([
-        listMetricsApi(dbId),
-        getSemanticCatalogApi(dbId),
-      ]);
-      setCatalog(nextCatalog);
+      const metrics = await listMetricsApi(dbId);
       setLayers((current) =>
         current.map((item) => (item.id === activeLayerId ? { ...item, metrics } : item)),
       );
+      if (tab === 'explorer') {
+        const nextCatalog = await getSemanticCatalogApi(dbId);
+        setCatalog(nextCatalog);
+      }
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Không thể tải Semantic Layer');
     }
-  }, [activeLayerId, semanticDbId, notify]);
+  }, [activeLayerId, semanticDbId, notify, tab]);
 
+  // Load catalog on-demand when user opens Explorer tab
   useEffect(() => {
-    void refreshSemanticData();
-  }, [refreshSemanticData]);
+    if (tab === 'explorer' && semanticDbId) {
+      const dbId = String(semanticDbId);
+      if (!catalog || catalog.db_id !== Number(semanticDbId)) {
+        void getSemanticCatalogApi(dbId)
+          .then((nextCatalog) => setCatalog(nextCatalog))
+          .catch(() => {});
+      }
+    }
+  }, [tab, semanticDbId, catalog]);
 
   const saveDefinition = async (definition: MetricDefinition) => {
     if (!canManageMetrics) {
@@ -463,93 +526,130 @@ export default function WorkspacePage() {
         </div>
       )}
 
-      <ConnectDbModal
-        isOpen={connectOpen}
-        onClose={() => setConnectOpen(false)}
-        onSuccess={async () => {
-          if (!token) return;
-          const items = await loadConnections(token);
-          setLayers(items);
-          if (items.length) setSelectedId(items[items.length - 1].id);
-        }}
-      />
-      <SettingsModal
-        isOpen={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        databaseCount={layers.length}
-        metricCount={activeLayer?.metrics.length}
-      />
-      <MetricModal
-        isOpen={metricOpen}
-        onClose={() => {
-          setMetricOpen(false);
-          setEditingMetric(null);
-          setEditingSuggestion(null);
-        }}
-        onSave={saveDefinition}
-        tables={activeLayer?.tables || []}
-        initialDefinition={editingMetric?.definition || editingSuggestion?.definition}
-        initialName={editingMetric?.name}
-        canSave={canManageMetrics}
-        saveDisabledReason={METRIC_WRITE_PERMISSION_MESSAGE}
-      />
-      <WorkspaceManagementModal
-        isOpen={workspaceManagementOpen}
-        onClose={() => setWorkspaceManagementOpen(false)}
-      />
+      {connectOpen && (
+        <ConnectDbModal
+          isOpen={connectOpen}
+          onClose={() => setConnectOpen(false)}
+          onSuccess={async () => {
+            if (!token) return;
+            const items = await loadConnectionSummaries(token);
+            setLayers(items);
+            if (items.length) setSelectedId(items[items.length - 1].id);
+          }}
+        />
+      )}
+      {settingsOpen && (
+        <SettingsModal
+          isOpen={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          databaseCount={layers.length}
+          metricCount={activeLayer?.metrics.length}
+        />
+      )}
+      {metricOpen && (
+        <MetricModal
+          isOpen={metricOpen}
+          onClose={() => {
+            setMetricOpen(false);
+            setEditingMetric(null);
+            setEditingSuggestion(null);
+          }}
+          onSave={saveDefinition}
+          tables={activeLayer?.tables || []}
+          initialDefinition={editingMetric?.definition || editingSuggestion?.definition}
+          initialName={editingMetric?.name}
+          canSave={canManageMetrics}
+          saveDisabledReason={METRIC_WRITE_PERMISSION_MESSAGE}
+        />
+      )}
+      {workspaceManagementOpen && (
+        <WorkspaceManagementModal
+          isOpen={workspaceManagementOpen}
+          onClose={() => setWorkspaceManagementOpen(false)}
+        />
+      )}
     </WorkspaceApp>
   );
 }
 
-async function loadConnections(token: string): Promise<SemanticLayerData[]> {
+// Fast summary connection loader: only 2 parallel API calls instead of N+1 cascade
+async function loadConnectionSummaries(token: string): Promise<SemanticLayerData[]> {
   const [liveDbs, dumpSchemas] = await Promise.all([
     listLiveTargetDbs(token).catch(() => [] as LiveDbSummary[]),
     listImportedSchemas(token).catch(() => [] as ImportedSchemaSummary[]),
   ]);
 
-  const liveLayers = await Promise.all(
-    liveDbs.map(async (db) => {
-      try {
-        const detail: LiveDbRecord = await getLiveTargetDb(db.id, token);
-        const semanticDbId = detail.semantic_db_id;
-        const metrics = semanticDbId ? await listMetricsApi(String(semanticDbId)) : [];
-        return convertRawSchemaToLayer(
-          detail.id,
-          detail.display_name,
-          detail.dialect,
-          detail.raw_schema,
-          undefined,
-          detail.updated_at,
-          semanticDbId,
-          'live',
-        );
-      } catch {
-        return null;
-      }
-    }),
-  );
+  const liveStubs: SemanticLayerData[] = liveDbs.map((db) => ({
+    id: String(db.id),
+    db_name: db.display_name,
+    db_type: db.dialect,
+    status: 'Saved',
+    updated_at: db.updated_at,
+    tables: [],
+    semantic_db_id: db.semantic_db_id,
+    source_type: 'live',
+    metrics: [],
+    table_count: db.table_count,
+    is_loaded: false,
+  }));
 
-  const dumpLayers = await Promise.all(
-    dumpSchemas.map(async (dump) => {
-      try {
-        const detail: ImportedSchemaRecord = await getImportedSchema(dump.id, token);
-        const semanticDbId = detail.semantic_db_id;
-        const metrics = semanticDbId ? await listMetricsApi(String(semanticDbId)) : [];
-        return convertRawSchemaToLayer(
-          dump.id,
-          dump.display_name,
-          'auto',
-          detail.raw_schema,
-          undefined,
-          detail.updated_at,
-          semanticDbId,
-          'sql_dump',
-        );
-      } catch {
-        return null;
-      }
-    }),
-  );
+  const dumpStubs: SemanticLayerData[] = dumpSchemas.map((dump) => ({
+    id: String(dump.id),
+    db_name: dump.display_name,
+    db_type: 'auto',
+    status: 'Saved',
+    updated_at: dump.updated_at,
+    tables: [],
+    semantic_db_id: dump.semantic_db_id,
+    source_type: 'sql_dump',
+    metrics: [],
+    table_count: dump.table_count,
+    is_loaded: false,
+  }));
 
-  return [...liveLayers, ...dumpLayers].filter(Boolean) as SemanticLayerData[];
+  return [...liveStubs, ...dumpStubs];
+}
+
+// On-demand detail loader for selected database
+async function loadLayerDetail(layer: SemanticLayerData, token: string): Promise<SemanticLayerData> {
+  if (layer.is_loaded) return layer;
+  try {
+    let fullLayer = layer;
+    if (layer.source_type === 'live') {
+      const detail: LiveDbRecord = await getLiveTargetDb(Number(layer.id), token);
+      fullLayer = convertRawSchemaToLayer(
+        detail.id,
+        detail.display_name,
+        detail.dialect,
+        detail.raw_schema,
+        undefined,
+        detail.updated_at,
+        detail.semantic_db_id,
+        'live',
+      );
+    } else {
+      const detail: ImportedSchemaRecord = await getImportedSchema(Number(layer.id), token);
+      fullLayer = convertRawSchemaToLayer(
+        detail.id,
+        detail.display_name,
+        'auto',
+        detail.raw_schema,
+        undefined,
+        detail.updated_at,
+        detail.semantic_db_id,
+        'sql_dump',
+      );
+    }
+    const metrics = fullLayer.semantic_db_id
+      ? await listMetricsApi(String(fullLayer.semantic_db_id)).catch(() => [])
+      : [];
+    return {
+      ...fullLayer,
+      table_count: fullLayer.tables.length,
+      metrics,
+      is_loaded: true,
+    };
+  } catch {
+    return { ...layer, is_loaded: true };
+  }
 }

@@ -69,6 +69,8 @@ export interface SemanticLayerData {
   semantic_db_id?: number | null;
   source_type?: 'live' | 'sql_dump';
   metrics: MetricRecord[];
+  table_count?: number;
+  is_loaded?: boolean;
 }
 
 export interface MetricSuggestion {

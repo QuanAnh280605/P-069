@@ -85,7 +85,9 @@ async def list_imported_schemas(
     org_id: int | None = None,
 ) -> list[ImportedSchemaSummaryResponse]:
     """List persisted schemas owned by one authenticated user."""
-    statement = select(ImportedSchemaModel).order_by(ImportedSchemaModel.updated_at.desc(), ImportedSchemaModel.id.desc())
+    statement = select(ImportedSchemaModel).order_by(
+        ImportedSchemaModel.updated_at.desc(), ImportedSchemaModel.id.desc()
+    )
     if org_id is None:
         statement = statement.where(ImportedSchemaModel.created_by == owner_id)
     else:
