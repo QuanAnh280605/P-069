@@ -7,6 +7,7 @@ import {
   ChatMessageItem,
   ChatSessionItem,
   createMetricApi,
+  DuplicateMetricNotice,
   generateCustomMetricsApi,
   getChatSessionDetailApi,
   MetricSuggestion,
@@ -17,6 +18,7 @@ import {
 } from '@/lib/api';
 import { ChatMessage, StudioChatStream } from '@/components/studio/StudioChatStream';
 import { ViewHeader } from '@/components/workspace/ViewHeader';
+import { applySuggestedName } from '@/lib/metrics';
 
 interface AIStudioViewProps {
   layer: SemanticLayerData;
@@ -108,6 +110,19 @@ export function AIStudioView({
     void loadDetail();
   }, [activeSessionId, layer.db_name, layer.source_type, semanticDbId]);
 
+  const appendDedupeWarning = (dedupeSkipped: boolean) => {
+    if (!dedupeSkipped) return;
+    setMessages((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        sender: 'assistant',
+        text: '⚠️ Không kiểm tra được trùng lặp (dedupe unavailable) — danh sách chưa so với metric đã lưu.',
+        timestamp: now(),
+      },
+    ]);
+  };
+
   const send = async (prompt: string, _targetTables: string[]) => {
     const clientMessageId = crypto.randomUUID();
     const requestSessionId = activeSessionId;
@@ -125,6 +140,8 @@ export function AIStudioView({
     setLoading(true);
     try {
       let suggestions: MetricSuggestion[] = [];
+      let duplicates: DuplicateMetricNotice[] = [];
+      let dedupeSkipped = false;
       try {
         const response = await sendChatOrchestratorApi(
           String(semanticDbId),
@@ -160,6 +177,8 @@ export function AIStudioView({
           return;
         }
         suggestions = response.suggestions || [];
+        duplicates = response.duplicates ?? [];
+        dedupeSkipped = response.dedupe_performed === false;
         setMessages((current) => [
           ...current,
           {
@@ -169,8 +188,11 @@ export function AIStudioView({
               response.chat_response ||
               (suggestions.length
                 ? `Dựa trên schema của bạn, tôi đề xuất ${suggestions.length} Metric Definition dưới đây. Bạn có thể xem trước YAML và lưu vào catalog để duyệt:`
-                : 'Không sinh được metric phù hợp từ schema.'),
+                : duplicates.length
+                  ? 'Không có metric mới — các chỉ số đề xuất đã tồn tại trong hệ thống:'
+                  : 'Không sinh được metric phù hợp từ schema.'),
             suggestions,
+            duplicates,
             timestamp: now(),
           },
         ]);
@@ -178,6 +200,8 @@ export function AIStudioView({
         if (!canGenerateMetrics) throw error;
         const res = await generateCustomMetricsApi(String(semanticDbId), prompt, _targetTables);
         suggestions = res.suggestions || [];
+        duplicates = res.duplicates ?? [];
+        dedupeSkipped = res.dedupe_performed === false;
         setMessages((current) => [
           ...current,
           {
@@ -185,18 +209,54 @@ export function AIStudioView({
             sender: 'assistant',
             text: suggestions.length
               ? `Dựa trên schema của bạn, tôi đề xuất ${suggestions.length} Metric Definition dưới đây. Bạn có thể xem trước YAML và lưu vào catalog để duyệt:`
-              : 'Không sinh được metric phù hợp từ schema.',
+              : duplicates.length
+                ? 'Không có metric mới — các chỉ số đề xuất đã tồn tại trong hệ thống:'
+                : 'Không sinh được metric phù hợp từ schema.',
             suggestions,
+            duplicates,
             timestamp: now(),
           },
         ]);
       }
+      appendDedupeWarning(dedupeSkipped);
     } catch (error) {
       appendError(setMessages, error instanceof Error ? error.message : 'Không thể xử lý yêu cầu');
     } finally {
       setLoading(false);
     }
   };
+
+  const updateMessage = (messageId: string, updater: (message: ChatMessage) => ChatMessage): void => {
+    setMessages((current) => current.map((message) => (message.id === messageId ? updater(message) : message)));
+  };
+
+  const renameSuggestion = (messageId: string, index: number): void =>
+    updateMessage(messageId, (message) => ({
+      ...message,
+      suggestions: message.suggestions?.map((item, i) => (i === index ? applySuggestedName(item) : item)),
+    }));
+
+  const discardSuggestion = (messageId: string, index: number): void =>
+    updateMessage(messageId, (message) => ({
+      ...message,
+      suggestions: message.suggestions?.filter((_, i) => i !== index),
+    }));
+
+  const dismissDuplicate = (messageId: string, index: number): void =>
+    updateMessage(messageId, (message) => ({
+      ...message,
+      duplicates: message.duplicates?.filter((_, i) => i !== index),
+    }));
+
+  const useExistingDuplicate = (messageId: string, index: number): void =>
+    updateMessage(messageId, (message) => {
+      if (!message.duplicates?.[index]) return message;
+      const duplicates = message.duplicates.map((item, i) => (i === index ? { ...item, resolved: true } : item));
+      const allSettled = duplicates.length > 0 && duplicates.every((item) => item.resolved);
+      const hasSuggestions = (message.suggestions?.length ?? 0) > 0;
+      // Description line is stale once every notice is resolved and nothing else shows.
+      return { ...message, duplicates, text: allSettled && !hasSuggestions ? '' : message.text };
+    });
 
   const save = async (suggestion: MetricSuggestion) => {
     if (!semanticDbId) {
@@ -285,6 +345,10 @@ export function AIStudioView({
           tableNames={layer.tables.map((table) => table.table_name)}
           onAddMetric={canGenerateMetrics ? save : undefined}
           onEditMetric={canGenerateMetrics ? onEditMetricRequest : undefined}
+          onRenameSuggestion={renameSuggestion}
+          onDiscardSuggestion={discardSuggestion}
+          onDismissDuplicate={dismissDuplicate}
+          onUseExistingDuplicate={useExistingDuplicate}
           onRefineWithAI={
             canGenerateMetrics
               ? (suggestion) =>
@@ -307,6 +371,8 @@ function toChatMessage(message: ChatMessageItem): ChatMessage {
     sender: message.sender === 'user' ? 'user' : 'assistant',
     text: message.content,
     suggestions: message.metadata_json?.suggestions,
+    duplicates: message.metadata_json?.duplicates,
+    dedupeSkipped: message.metadata_json?.dedupe_performed === false,
     timestamp: new Date(message.created_at).toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',

@@ -235,17 +235,54 @@ class CustomMetricGenerateRequest(BaseModel):
     target_tables: list[str] | None = Field(default=None, description="Danh sách bảng giới hạn phạm vi")
 
 
+class MetricConflictInfo(BaseModel):
+    """Clarify request: same name as an existing metric but different formula."""
+
+    proposed_metric_name: str  # join key với suggestion (so tên sau normalize)
+    existing_metric_id: int | None = None
+    existing_metric_name: str
+    existing_metric_status: str | None = None
+    suggested_name: str = ""
+    clarify_question: str = ""
+
+
 class MetricSuggestionItem(BaseModel):
     """An unsaved metric definition with a server-rendered YAML preview."""
 
     definition: MetricDefinition
     yaml_preview: str
+    conflict: MetricConflictInfo | None = None
+
+
+class DuplicateMetricNotice(BaseModel):
+    """Advisory notice: a proposed metric duplicates an existing saved metric."""
+
+    # Join key với suggestion (so tên sau normalize) — dùng để loại bỏ đề xuất bị flag trùng.
+    proposed_metric_name: str | None = None
+    existing_metric_id: int | None = None
+    existing_metric_name: str
+    existing_metric_status: str | None = None
+    user_message: str
+    similarity_reason: str = ""
+    # Read-only preview of the saved metric — attached from DB truth by merge_dedupe.
+    existing_definition: MetricDefinition | None = None
+    existing_yaml: str = ""
+
+
+class MetricSuggestionsV2(BaseModel):
+    """Structured output V2: metric definitions + dedupe judgments in one call."""
+
+    metrics: list[MetricDefinition] = Field(default_factory=list)
+    duplicates: list[DuplicateMetricNotice] = Field(default_factory=list)
+    conflicts: list[MetricConflictInfo] = Field(default_factory=list)
 
 
 class CustomMetricGenerateResponse(BaseModel):
     """Response chứa danh sách các gợi ý metric từ prompt tùy biến."""
 
     suggestions: list[MetricSuggestionItem] = Field(default_factory=list)
+    duplicates: list[DuplicateMetricNotice] = Field(default_factory=list)
+    dedupe_performed: bool = True
 
 
 class GeneratedMetric(MetricDefinition):
@@ -704,6 +741,8 @@ class ChatResponse(BaseModel):
         default=None,
         description="Danh sách Business Metrics JSON (khi intent = 'metric_query')",
     )
+    duplicates: list[DuplicateMetricNotice] = Field(default_factory=list)
+    dedupe_performed: bool = True
     session_id: str
     user_message_id: str
     assistant_message_id: str

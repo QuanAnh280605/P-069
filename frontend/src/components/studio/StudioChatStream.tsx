@@ -22,15 +22,25 @@ import { MetricSuggestion } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { YamlCodeViewer } from '@/components/studio/YamlCodeViewer';
 import { StatusPill } from '@/components/workspace/shared';
+import {
+  ChatDuplicateNotice,
+  ConflictWarningStrip,
+  DuplicateNoticeCard,
+} from '@/components/studio/DedupeWarnings';
 
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'assistant';
   text: string;
   suggestions?: MetricSuggestion[];
+  duplicates?: ChatDuplicateNotice[];
+  dedupeSkipped?: boolean;
   timestamp: string;
   isError?: boolean;
 }
+
+/** Dedupe-related message actions, addressed by (messageId, suggestion index). */
+type SuggestionIndexHandler = (messageId: string, index: number) => void;
 
 interface StudioChatStreamProps {
   messages: ChatMessage[];
@@ -44,6 +54,10 @@ interface StudioChatStreamProps {
   theme?: 'light' | 'dark';
   onOpenCatalog?: () => void;
   mode?: 'data_assistant' | 'metric_studio';
+  onRenameSuggestion?: SuggestionIndexHandler;
+  onDiscardSuggestion?: SuggestionIndexHandler;
+  onDismissDuplicate?: SuggestionIndexHandler;
+  onUseExistingDuplicate?: SuggestionIndexHandler;
 }
 
 interface PromptSuggestionItem {
@@ -192,6 +206,10 @@ export function StudioChatStream(props: StudioChatStreamProps) {
               onEdit={props.onEditMetric}
               onRefine={props.onRefineWithAI}
               onOpenCatalog={props.onOpenCatalog}
+              onRenameSuggestion={props.onRenameSuggestion}
+              onDiscardSuggestion={props.onDiscardSuggestion}
+              onDismissDuplicate={props.onDismissDuplicate}
+              onUseExistingDuplicate={props.onUseExistingDuplicate}
             />
           ))}
 
@@ -311,6 +329,10 @@ function MessageBubble({
   onEdit,
   onRefine,
   onOpenCatalog,
+  onRenameSuggestion,
+  onDiscardSuggestion,
+  onDismissDuplicate,
+  onUseExistingDuplicate,
 }: {
   message: ChatMessage;
   saved: string[];
@@ -318,6 +340,10 @@ function MessageBubble({
   onEdit?: (suggestion: MetricSuggestion) => void;
   onRefine?: (suggestion: MetricSuggestion) => void;
   onOpenCatalog?: () => void;
+  onRenameSuggestion?: SuggestionIndexHandler;
+  onDiscardSuggestion?: SuggestionIndexHandler;
+  onDismissDuplicate?: SuggestionIndexHandler;
+  onUseExistingDuplicate?: SuggestionIndexHandler;
 }) {
   const isUser = message.sender === 'user';
 
@@ -343,17 +369,29 @@ function MessageBubble({
           <span>{message.timestamp}</span>
         </div>
 
-        <div
-          className={cn(
-            'inline-block rounded-xl px-4 py-3 text-sm leading-relaxed shadow-2xs',
-            isUser
-              ? 'max-w-full bg-secondary text-secondary-foreground'
-              : 'max-w-4xl border border-border bg-card text-card-foreground',
-            message.isError && 'border-destructive/30 bg-destructive/10 text-destructive',
-          )}
-        >
-          {isUser ? message.text : <AssistantMarkdown content={message.text} />}
-        </div>
+        {/* The description line is hidden once every duplicate notice is settled. */}
+        {message.text ? (
+          <div
+            className={cn(
+              'inline-block rounded-xl px-4 py-3 text-sm leading-relaxed shadow-2xs',
+              isUser
+                ? 'max-w-full bg-secondary text-secondary-foreground'
+                : 'max-w-4xl border border-border bg-card text-card-foreground',
+              message.isError && 'border-destructive/30 bg-destructive/10 text-destructive',
+            )}
+          >
+            {isUser ? message.text : <AssistantMarkdown content={message.text} />}
+          </div>
+        ) : null}
+
+        {message.dedupeSkipped && (
+          <div
+            role="status"
+            className="w-full rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 font-mono text-[11px] text-amber-700 dark:text-amber-300"
+          >
+            ⚠️ Không kiểm tra được trùng lặp (dedupe unavailable) — danh sách chưa so với metric đã lưu.
+          </div>
+        )}
 
         {message.suggestions && message.suggestions.length > 0 && (
           <div className="w-full space-y-4 pt-1">
@@ -366,6 +404,21 @@ function MessageBubble({
                 onEdit={() => onEdit?.(sug)}
                 onRefine={() => onRefine?.(sug)}
                 onOpenCatalog={onOpenCatalog}
+                onRename={() => onRenameSuggestion?.(message.id, idx)}
+                onUseExisting={() => onDiscardSuggestion?.(message.id, idx)}
+              />
+            ))}
+          </div>
+        )}
+
+        {message.duplicates && message.duplicates.length > 0 && (
+          <div className="w-full space-y-3 pt-1">
+            {message.duplicates.map((notice, idx) => (
+              <DuplicateNoticeCard
+                key={`${message.id}-dup-${idx}`}
+                notice={notice}
+                onDismiss={() => onDismissDuplicate?.(message.id, idx)}
+                onUseExisting={() => onUseExistingDuplicate?.(message.id, idx)}
               />
             ))}
           </div>
@@ -429,6 +482,8 @@ function SuggestionCard({
   onEdit,
   onRefine,
   onOpenCatalog,
+  onRename,
+  onUseExisting,
 }: {
   suggestion: MetricSuggestion;
   isSaved: boolean;
@@ -436,6 +491,8 @@ function SuggestionCard({
   onEdit?: () => void;
   onRefine?: () => void;
   onOpenCatalog?: () => void;
+  onRename?: () => void;
+  onUseExisting?: () => void;
 }) {
   const [showYaml, setShowYaml] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -461,6 +518,17 @@ function SuggestionCard({
 
   return (
     <div className="w-full overflow-hidden rounded-lg border border-border bg-card shadow-xs">
+      {/* ⚠️ Conflict clarify strip — same name as a saved metric, different formula */}
+      {suggestion.conflict && (
+        <div className="border-b border-border bg-secondary/20 p-3">
+          <ConflictWarningStrip
+            conflict={suggestion.conflict}
+            onRename={() => onRename?.()}
+            onUseExisting={() => onUseExisting?.()}
+          />
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-secondary/30 px-4 py-2.5">
         <div className="min-w-0">
@@ -583,30 +651,34 @@ function SuggestionCard({
       {/* Footer */}
       <div className="flex items-center justify-between gap-2 border-t border-border bg-secondary/20 px-4 py-2.5">
         <span className="font-mono text-[11px] text-muted-foreground">
-          Pending status · Phê duyệt trong catalog trước khi truy vấn
+          {suggestion.conflict
+            ? 'Xử lý cảnh báo trùng tên trước khi lưu'
+            : 'Pending status · Phê duyệt trong catalog trước khi truy vấn'}
         </span>
 
-        {isSaved ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            className="h-8 gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 cursor-pointer"
-            onClick={onOpenCatalog}
-          >
-            <Check className="h-3.5 w-3.5" />
-            Đã lưu — mở catalog
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            className="h-8 gap-1.5 text-xs cursor-pointer"
-            onClick={() => void handleSave()}
-            disabled={saving}
-          >
-            <Save className="h-3.5 w-3.5" />
-            {saving ? 'Đang lưu...' : 'Lưu vào Semantic Layer'}
-          </Button>
-        )}
+        {/* ⛔ No Save while the conflict strip is unresolved — user must clarify first */}
+        {!suggestion.conflict &&
+          (isSaved ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-8 gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 cursor-pointer"
+              onClick={onOpenCatalog}
+            >
+              <Check className="h-3.5 w-3.5" />
+              Đã lưu — mở catalog
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 text-xs cursor-pointer"
+              onClick={() => void handleSave()}
+              disabled={saving}
+            >
+              <Save className="h-3.5 w-3.5" />
+              {saving ? 'Đang lưu...' : 'Lưu vào Semantic Layer'}
+            </Button>
+          ))}
       </div>
     </div>
   );

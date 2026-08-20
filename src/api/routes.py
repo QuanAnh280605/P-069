@@ -93,6 +93,7 @@ from src.services.live_db_service import (
     get_live_target_db,
     list_live_target_dbs,
 )
+from src.services.metric_dedupe import load_existing_for_dedupe
 from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
 from src.services.organization_service import (
     ROLE_PERMISSIONS,
@@ -774,14 +775,20 @@ async def generate_custom_metrics(
     await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_create_metrics")
 
     schema_context = await _load_schema_context_for_db(db, db_id)
+    existing, dedupe_performed = await load_existing_for_dedupe(db, db_id)
 
     try:
-        suggestions = await generate_metrics_from_prompt(
+        suggestions, duplicates = await generate_metrics_from_prompt(
             prompt=clean_prompt,
             schema_context=schema_context,
             target_tables=body.target_tables,
+            existing_metrics=existing or None,
         )
-        return CustomMetricGenerateResponse(suggestions=suggestions)
+        return CustomMetricGenerateResponse(
+            suggestions=suggestions,
+            duplicates=duplicates,
+            dedupe_performed=dedupe_performed,
+        )
     except Exception as exc:
         logger.error(f"Lỗi khi sinh metrics từ prompt: {exc}", exc_info=True)
         raise HTTPException(
@@ -1315,9 +1322,21 @@ def _message_response(message: ChatMessageModel) -> ChatMessageResponse:
     return ChatMessageResponse.model_validate(message)
 
 
-def _assistant_metadata(suggestions: list[Any] | None, status_name: str = "completed") -> dict[str, Any]:
+def _assistant_metadata(
+    suggestions: list[Any] | None,
+    duplicates: list[Any] | None = None,
+    dedupe_performed: bool = True,
+    status_name: str = "completed",
+) -> dict[str, Any]:
     """Build the versioned assistant message metadata contract."""
-    return {"schema_version": 1, "status": status_name, "suggestions": suggestions or [], "error": None}
+    return {
+        "schema_version": 1,
+        "status": status_name,
+        "suggestions": suggestions or [],
+        "duplicates": duplicates or [],
+        "dedupe_performed": dedupe_performed,
+        "error": None,
+    }
 
 
 @router.get("/semantic/{db_id}/chat/sessions", response_model=list[ChatSessionSummaryResponse])
@@ -1460,6 +1479,7 @@ async def chat_orchestrator(
             await update_chat_session_title(db, session.id, current_user.id, auto_generate_session_title(body.message))
         schema_context = await _load_schema_context_for_db(db, str(numeric_db_id))
         approved_metrics = await _load_approved_metric_context(db, numeric_db_id)
+        existing, dedupe_performed = await load_existing_for_dedupe(db, str(numeric_db_id))
     except ChatAuthorizationError as exc:
         raise HTTPException(status_code=404, detail="Chat session or database not found") from exc
 
@@ -1472,6 +1492,8 @@ async def chat_orchestrator(
                 "enriched_schema": schema_context,
                 "approved_metrics": approved_metrics,
                 "can_generate_metrics": can_generate_metrics,
+                "existing_metrics": existing,
+                "dedupe_performed": dedupe_performed,
             }
         )
     except Exception as exc:
@@ -1497,20 +1519,23 @@ async def chat_orchestrator(
     intent = final_state.get("intent", "chitchat")
 
     raw_metrics = final_state.get("suggested_metrics") or []
+    notices = final_state.get("duplicate_notices") or []
+    performed = final_state.get("dedupe_performed", True)
     response_text = final_state.get("chat_response", "")
     if intent == "metric_query":
-        response_text = (
-            f"Đã đề xuất {len(raw_metrics)} Metric Definition."
-            if raw_metrics
-            else "Không sinh được metric phù hợp với schema."
-        )
+        if raw_metrics:
+            response_text = f"Đã đề xuất {len(raw_metrics)} Metric Definition."
+        elif notices:
+            response_text = "Không có metric mới — các chỉ số đề xuất đã tồn tại trong hệ thống."
+        else:
+            response_text = "Không sinh được metric phù hợp với schema."
     assistant = await save_chat_message(
         db,
         session.id,
         "assistant",
         response_text,
         intent=intent,
-        metadata_json=_assistant_metadata(raw_metrics),
+        metadata_json=_assistant_metadata(raw_metrics, duplicates=notices, dedupe_performed=performed),
         client_message_id=f"{body.client_message_id}:assistant" if body.client_message_id else None,
     )
     refreshed = await get_chat_session_with_messages(db, session.id, current_user.id)
@@ -1519,6 +1544,8 @@ async def chat_orchestrator(
         intent=intent,
         chat_response=(final_state.get("chat_response") if intent in {"chitchat", "data_question"} else response_text),
         suggestions=raw_metrics if intent == "metric_query" else None,
+        duplicates=notices if intent == "metric_query" else [],
+        dedupe_performed=performed,
         session_id=session.id,
         user_message_id=user_message.id,
         assistant_message_id=assistant.id,
@@ -1551,6 +1578,7 @@ async def _replay_chat_response(
         return None
     metadata = assistant.metadata_json if isinstance(assistant.metadata_json, dict) else {}
     suggestions = metadata.get("suggestions") or []
+    duplicates = metadata.get("duplicates") or []
     intent = assistant.intent or "chitchat"
     refreshed = await get_chat_session_with_messages(db, session.id, user_id)
     if refreshed is None:
@@ -1559,6 +1587,8 @@ async def _replay_chat_response(
         intent=intent,
         chat_response=assistant.content if intent in {"chitchat", "data_question"} else None,
         suggestions=suggestions if intent == "metric_query" else None,
+        duplicates=duplicates if intent == "metric_query" else [],
+        dedupe_performed=bool(metadata.get("dedupe_performed", True)),
         session_id=session.id,
         user_message_id=user_message.id,
         assistant_message_id=assistant.id,

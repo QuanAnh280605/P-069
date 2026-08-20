@@ -160,3 +160,27 @@ def test_metric_system_prompt_contains_all_rules() -> None:
         "PHẢI dùng đúng 1 giá trị trong danh sách values",
     ]:
         assert rule_text in prompt
+
+
+# ---------------------------------------------------------------------------
+# build_metric_system_prompt — V1/V2 dedupe behavior
+# ---------------------------------------------------------------------------
+
+
+def test_build_metric_system_prompt_v1_unchanged_without_existing() -> None:
+    """Without existing metrics the prompt stays V1 (no dedupe artifacts)."""
+    text = build_metric_system_prompt("Entity `orders`: ...")
+    assert "CÁC METRIC ĐANG TỒN TẠI" not in text
+    assert "duplicates" not in text  # V1 output format nguyên vẹn
+
+
+def test_build_metric_system_prompt_v2_includes_dedupe_rules() -> None:
+    """With existing metrics the prompt gains dedupe rules and V2 output format."""
+    text = build_metric_system_prompt(
+        "Entity `orders`: ...",
+        existing_metrics_text='CÁC METRIC ĐANG TỒN TẠI TRONG HỆ THỐNG:\n- [ID 12 | approved] "Doanh thu" = SUM(x)',
+    )
+    assert "TỒN TẠI TỒN TẠI" not in text  # header không bị lặp 2 lần
+    assert "[ID 12 | approved]" in text
+    assert "duplicates" in text and "conflicts" in text
+    assert "90%" in text  # ngưỡng semantics ≥90% xuất hiện trong rule
