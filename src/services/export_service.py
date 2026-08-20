@@ -31,14 +31,12 @@ async def _load_database(db: AsyncSession, db_id: int) -> SemanticDatabaseModel 
 
 
 async def _load_tables(db: AsyncSession, db_id: int) -> list[SemanticTableModel]:
-    """Fetch all enriched tables for a given database."""
-    result = await db.execute(select(SemanticTableModel).where(SemanticTableModel.db_id == db_id))
-    return list(result.scalars().all())
-
-
-async def _load_columns(db: AsyncSession, table_id: int) -> list[SemanticColumnModel]:
-    """Fetch all enriched columns for a given table."""
-    result = await db.execute(select(SemanticColumnModel).where(SemanticColumnModel.table_id == table_id))
+    """Fetch all enriched tables with their columns eagerly loaded."""
+    result = await db.execute(
+        select(SemanticTableModel)
+        .where(SemanticTableModel.db_id == db_id)
+        .options(selectinload(SemanticTableModel.columns))
+    )
     return list(result.scalars().all())
 
 
@@ -184,8 +182,10 @@ async def build_semantic_layer_dict(db: AsyncSession, db_id: int) -> dict[str, A
 
     # Build canonical_entities (tables with nested columns)
     entity_list: list[dict[str, Any]] = []
+    all_columns: list[SemanticColumnModel] = []
     for table in tables:
-        columns = await _load_columns(db, table.id)
+        columns = sorted(table.columns, key=lambda col: col.id)
+        all_columns.extend(columns)
         entity_list.append(
             {
                 "table_name": table.table_name,
@@ -196,12 +196,6 @@ async def build_semantic_layer_dict(db: AsyncSession, db_id: int) -> dict[str, A
                 "columns": [_column_to_dict(c) for c in columns],
             }
         )
-
-    # Build canonical_dimensions (all columns flattened)
-    all_columns: list[SemanticColumnModel] = []
-    for table in tables:
-        columns = await _load_columns(db, table.id)
-        all_columns.extend(columns)
 
     return {
         "database": {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
+import time
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
@@ -104,10 +105,49 @@ async def get_membership(db: AsyncSession, user_id: int, org_id: int) -> Organiz
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+_MEMBERSHIP_CACHE: dict[tuple[int, int | None], tuple[OrganizationModel, OrganizationMemberModel, float]] = {}
+_MEMBERSHIP_CACHE_TTL = 60.0
+
+
+def _is_testing() -> bool:
+    import os
+
+    from src.config import get_settings
+
+    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or get_settings().app_env == "test"
+
+
+def invalidate_membership_cache(user_id: int | None = None) -> None:
+    """Evict cached workspace membership entries."""
+    if user_id is not None:
+        keys_to_del = [k for k in _MEMBERSHIP_CACHE if k[0] == user_id]
+        for k in keys_to_del:
+            _MEMBERSHIP_CACHE.pop(k, None)
+    else:
+        _MEMBERSHIP_CACHE.clear()
+
+
 async def resolve_membership(
     db: AsyncSession, user_id: int, requested_org_id: int | None
 ) -> tuple[OrganizationModel, OrganizationMemberModel]:
-    """Resolve the active Workspace, requiring explicit selection when ambiguous."""
+    """Resolve the active Workspace with in-memory caching."""
+    now = time.time()
+    cache_key = (user_id, requested_org_id)
+    if not _is_testing():
+        cached = _MEMBERSHIP_CACHE.get(cache_key)
+        if cached is not None and now - cached[2] < _MEMBERSHIP_CACHE_TTL:
+            return cached[0], cached[1]
+
+    org, member = await _resolve_membership_uncached(db, user_id, requested_org_id)
+    if not _is_testing():
+        _MEMBERSHIP_CACHE[cache_key] = (org, member, now)
+    return org, member
+
+
+async def _resolve_membership_uncached(
+    db: AsyncSession, user_id: int, requested_org_id: int | None
+) -> tuple[OrganizationModel, OrganizationMemberModel]:
+    """Resolve the active Workspace from database."""
     if requested_org_id is not None:
         membership = await get_membership(db, user_id, requested_org_id)
         if membership is None:

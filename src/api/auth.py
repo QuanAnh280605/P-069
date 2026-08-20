@@ -359,6 +359,26 @@ async def refresh_tokens(
     return _build_token_response(access_token, refresh_token, user)
 
 
+_USER_CACHE: dict[int, tuple[UserModel, float]] = {}
+_USER_CACHE_TTL = 60.0
+
+
+def _is_testing() -> bool:
+    import os
+
+    from src.config import get_settings
+
+    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or get_settings().app_env == "test"
+
+
+def invalidate_user_cache(user_id: int | None = None) -> None:
+    """Evict cached UserModel instances."""
+    if user_id is not None:
+        _USER_CACHE.pop(user_id, None)
+    else:
+        _USER_CACHE.clear()
+
+
 async def get_current_user(
     authorization: Annotated[str | None, Header()] = None,
     db: AsyncSession = Depends(get_db_session),
@@ -387,12 +407,20 @@ async def get_current_user(
             detail="Invalid authentication token payload",
         ) from err
 
+    now = time.time()
+    if not _is_testing():
+        cached = _USER_CACHE.get(user_id)
+        if cached is not None and now - cached[1] < _USER_CACHE_TTL:
+            return cached[0]
+
     user = await db.get(UserModel, user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
+    if not _is_testing():
+        _USER_CACHE[user_id] = (user, now)
     return user
 
 

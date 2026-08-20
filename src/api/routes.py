@@ -526,10 +526,7 @@ async def approve_semantic_layer(
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> SemanticApproveV2Response:
-    """Approve all draft metrics for a semantic database.
-
-    Checks ownership: only metrics created by the current user can be approved.
-    """
+    """Approve all draft metrics for a semantic database."""
     db_id = request.db_id
     sem_db = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_approve_metrics")
 
@@ -857,7 +854,7 @@ async def list_metrics(
         raise HTTPException(status_code=404, detail="Semantic database not found")
     stmt = select(SemanticMetricModel).where(SemanticMetricModel.db_id == db_id).order_by(SemanticMetricModel.id)
     if semantic_db.org_id is not None:
-        membership = await get_membership(db, current_user.id, semantic_db.org_id)
+        _, membership = await resolve_membership(db, current_user.id, org_id)
         can_view_pending = bool(
             membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_view_pending_metrics", False)
         )
@@ -866,21 +863,19 @@ async def list_metrics(
     result = await db.execute(stmt)
     metrics = result.scalars().all()
 
-    items: list[MetricListItem] = []
-    for m in metrics:
-        items.append(
-            MetricListItem(
-                metric_id=m.id,
-                name=m.name,
-                definition=_safe_metric_definition(m.definition),
-                source=m.source or "manual",
-                version=m.version or 1,
-                status=m.status or "needs_review",
-                approved_by=m.approved_by,
-                created_at=m.created_at,
-            )
+    return [
+        MetricListItem(
+            metric_id=m.id,
+            name=m.name,
+            definition=_safe_metric_definition(m.definition),
+            source=m.source or "manual",
+            version=m.version or 1,
+            status=m.status or "needs_review",
+            approved_by=m.approved_by,
+            created_at=m.created_at,
         )
-    return items
+        for m in metrics
+    ]
 
 
 @router.get("/semantic/{db_id}/catalog", response_model=SemanticCatalogResponse)

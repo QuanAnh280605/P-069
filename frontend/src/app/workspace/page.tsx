@@ -363,21 +363,45 @@ export default function WorkspacePage() {
   const removeMetric = async (metricId: number) => {
     if (!activeLayer?.semantic_db_id) return;
     await deleteMetricApi(String(activeLayer.semantic_db_id), metricId);
-    await refreshSemanticData();
+    setLayers((current) =>
+      current.map((item) =>
+        item.id === activeLayerId
+          ? { ...item, metrics: item.metrics.filter((m) => m.metric_id !== metricId) }
+          : item,
+      ),
+    );
     notify('Đã xóa metric.');
   };
 
   const approve = async () => {
     if (!activeLayer?.semantic_db_id) return;
     const response = await approveMetricsApi(activeLayer.semantic_db_id);
-    await refreshSemanticData();
+    setLayers((current) =>
+      current.map((item) =>
+        item.id === activeLayerId
+          ? {
+              ...item,
+              metrics: item.metrics.map((m) => ({ ...m, status: 'approved' })),
+            }
+          : item,
+      ),
+    );
     notify(`Đã phê duyệt ${response.approved_count} metric.`);
   };
 
   const approveSingleMetric = async (metricId: number) => {
     if (!activeLayer?.semantic_db_id) return;
     await approveSingleMetricApi(String(activeLayer.semantic_db_id), metricId);
-    await refreshSemanticData();
+    setLayers((current) =>
+      current.map((item) =>
+        item.id === activeLayerId
+          ? {
+              ...item,
+              metrics: item.metrics.map((m) => (m.metric_id === metricId ? { ...m, status: 'approved' } : m)),
+            }
+          : item,
+      ),
+    );
     notify('Đã phê duyệt chỉ số thành công.');
   };
 
