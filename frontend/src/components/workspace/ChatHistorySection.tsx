@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Check,
-  Edit2,
   History,
   MessageSquarePlus,
   Pencil,
@@ -43,6 +42,8 @@ export function ChatHistorySection({
   const [draftTitle, setDraftTitle] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isStartingNewChat, setIsStartingNewChat] = useState(false);
+  const newChatLockRef = useRef(false);
 
   const filteredSessions = useMemo(() => {
     if (!searchQuery.trim()) return sessions;
@@ -96,6 +97,21 @@ export function ChatHistorySection({
     setDeletingId(null);
   };
 
+  const handleNewChat = () => {
+    if (newChatLockRef.current) return;
+    newChatLockRef.current = true;
+    setIsStartingNewChat(true);
+    const unlock = () => {
+      newChatLockRef.current = false;
+      setIsStartingNewChat(false);
+    };
+    try {
+      void Promise.resolve(onNewChat?.()).then(unlock, unlock);
+    } catch {
+      unlock();
+    }
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col px-3 pt-3">
       {/* Header */}
@@ -111,7 +127,8 @@ export function ChatHistorySection({
         {onNewChat && (
           <button
             type="button"
-            onClick={onNewChat}
+            onClick={handleNewChat}
+            disabled={isStartingNewChat}
             className="rounded p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground cursor-pointer"
             aria-label="Tạo cuộc trò chuyện mới"
             title="Tạo cuộc trò chuyện mới"
@@ -162,7 +179,8 @@ export function ChatHistorySection({
             {onNewChat && (
               <button
                 type="button"
-                onClick={onNewChat}
+                onClick={handleNewChat}
+                disabled={isStartingNewChat}
                 className="mt-2 inline-flex items-center gap-1 rounded bg-sidebar-primary px-2.5 py-1 font-sans text-[11px] font-medium text-sidebar-primary-foreground transition-opacity hover:opacity-90 cursor-pointer"
               >
                 <Plus className="h-3 w-3" />

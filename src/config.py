@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     cors_origins: str = "http://localhost:3000"
+    frontend_app_url: str = "http://localhost:3000"
     secret_key: str = "dev-secret-key-change-in-prod-semantic-layer-2026"
 
     # Rate Limiting Guardrails

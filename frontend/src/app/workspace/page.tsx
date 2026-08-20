@@ -27,7 +27,6 @@ import {
   approveSingleMetricApi,
   ChatSessionItem,
   convertRawSchemaToLayer,
-  createChatSessionApi,
   createMetricApi,
   deleteChatSessionApi,
   deleteDatabaseApi,
@@ -106,7 +105,6 @@ export default function WorkspacePage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceManagementOpen, setWorkspaceManagementOpen] = useState(false);
   const [metricOpen, setMetricOpen] = useState(false);
-  const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
   const [editingMetric, setEditingMetric] = useState<MetricRecord | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<MetricSuggestion | null>(null);
   const [toast, setToast] = useState('');
@@ -139,14 +137,6 @@ export default function WorkspacePage() {
     setToast(message);
     window.setTimeout(() => setToast(''), 3000);
   }, []);
-
-  const updateChatUrl = (sessionId: string | null) => {
-    if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    if (sessionId) url.searchParams.set('chat', sessionId);
-    else url.searchParams.delete('chat');
-    window.history.replaceState({}, '', url);
-  };
 
 
   useEffect(() => {
@@ -216,16 +206,15 @@ export default function WorkspacePage() {
     [],
   );
 
-  const newChat = useCallback(async () => {
-    if (!semanticDbId) return;
-    try {
-      const created = await createChatSessionApi(String(semanticDbId), 'Cuộc trò chuyện mới');
-      setSessions((current) => [created, ...current.filter((item) => item.id !== created.id)]);
-      selectSession(created.id);
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'Không thể tạo cuộc trò chuyện mới');
+  const newChat = useCallback(() => {
+    setActiveSessionId(null);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('chat');
+      window.history.replaceState({}, '', url);
     }
-  }, [notify, selectSession, semanticDbId]);
+    setTab('studio');
+  }, []);
 
   const removeSession = useCallback(
     async (sessionId: string) => {
@@ -489,10 +478,6 @@ export default function WorkspacePage() {
         onClose={() => setSettingsOpen(false)}
         databaseCount={layers.length}
         metricCount={activeLayer?.metrics.length}
-      />
-      <WorkspaceManagementModal
-        isOpen={workspaceModalOpen}
-        onClose={() => setWorkspaceModalOpen(false)}
       />
       <MetricModal
         isOpen={metricOpen}

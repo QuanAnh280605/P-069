@@ -192,6 +192,25 @@ describe('ChatHistorySection', () => {
     expect(handleNewChat).toHaveBeenCalledTimes(1);
   });
 
+  it('ignores repeated new-chat clicks while the action is in flight', () => {
+    const handleNewChat = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ChatHistorySection
+        sessions={mockSessions}
+        activeSessionId="s-1"
+        loadingSessions={false}
+        canChat={true}
+        onNewChat={handleNewChat}
+      />,
+    );
+
+    const newChatButton = screen.getByRole('button', { name: 'Tạo cuộc trò chuyện mới' });
+    fireEvent.click(newChatButton);
+    fireEvent.click(newChatButton);
+
+    expect(handleNewChat).toHaveBeenCalledTimes(1);
+  });
+
   it('returns null when canChat is false', () => {
     const { container } = render(
       <ChatHistorySection

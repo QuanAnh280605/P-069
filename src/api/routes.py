@@ -31,7 +31,6 @@ from src.models.schemas import (
     ChatMessageResponse,
     ChatRequest,
     ChatResponse,
-    ChatSessionCreateRequest,
     ChatSessionDetailResponse,
     ChatSessionSummaryResponse,
     ChatSessionUpdateRequest,
@@ -1341,22 +1340,13 @@ async def get_chat_sessions(
     return [_session_summary(session) for session in sessions]
 
 
-@router.post("/semantic/{db_id}/chat/sessions", response_model=ChatSessionSummaryResponse, status_code=201)
-async def create_chat_session_route(
-    db_id: str,
-    body: ChatSessionCreateRequest | None = None,
-    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_session),
-) -> ChatSessionSummaryResponse:
-    """Create an empty chat session for an owned live database."""
-    try:
-        session = await create_chat_session(
-            db, current_user.id, _chat_db_id(db_id), body.title if body else None, org_id
-        )
-    except (ChatAuthorizationError, ValueError) as exc:
-        raise HTTPException(status_code=404, detail="Chat database not found") from exc
-    return _session_summary(session)
+@router.post("/semantic/{db_id}/chat/sessions", status_code=400)
+async def create_chat_session_route() -> None:
+    """Reject empty session creation; a session starts with its first query."""
+    raise HTTPException(
+        status_code=400,
+        detail="Query is required to create a conversation.",
+    )
 
 
 @router.get("/semantic/{db_id}/chat/sessions/{session_id}", response_model=ChatSessionDetailResponse)

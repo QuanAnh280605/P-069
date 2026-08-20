@@ -9,6 +9,8 @@ from src.models.metric_definition import FilterOperator, MetricDefinition
 from src.models.raw_schema import RawSchema
 from src.models.schema_metadata import ParseDiagnostic, RawSchemaMetadata, SchemaDialect
 
+WorkspaceRole = Literal["data_lead", "member"]
+
 # ---------------------------------------------------------------------------
 # User Authentication & RBAC Schemas
 # ---------------------------------------------------------------------------
@@ -78,7 +80,7 @@ class OrganizationSummaryResponse(BaseModel):
     id: int
     name: str
     slug: str
-    role: Literal["admin", "data_lead", "member"]
+    role: WorkspaceRole
     permissions: dict[str, bool] = Field(default_factory=dict)
     created_at: datetime
 
@@ -90,21 +92,20 @@ class OrganizationMemberResponse(BaseModel):
     email: str
     username: str
     full_name: str
-    role: Literal["admin", "data_lead", "member"]
+    role: WorkspaceRole
     joined_at: datetime
 
 
 class OrganizationRoleUpdateRequest(BaseModel):
     """Request to change a Workspace member role."""
 
-    role: Literal["admin", "data_lead", "member"]
+    role: WorkspaceRole
 
 
 class OrganizationInviteCreateRequest(BaseModel):
     """Request to create a one-time Workspace invitation."""
 
     role: Literal["data_lead", "member"] = "member"
-    invitee_email: EmailStr | None = None
 
 
 class OrganizationInviteResponse(BaseModel):
@@ -113,7 +114,6 @@ class OrganizationInviteResponse(BaseModel):
     id: int
     org_id: int
     role: Literal["data_lead", "member"]
-    invitee_email: str | None = None
     status: Literal["pending", "accepted", "revoked", "expired"]
     expires_at: datetime
     invite_url: str | None = None
@@ -125,7 +125,6 @@ class OrganizationInvitePreviewResponse(BaseModel):
     organization_name: str
     organization_slug: str
     role: Literal["data_lead", "member"]
-    invitee_email: str | None = None
     expires_at: datetime
 
 
@@ -676,12 +675,6 @@ class ChatSessionDetailResponse(ChatSessionSummaryResponse):
 
     messages: list[ChatMessageResponse] = Field(default_factory=list)
     next_before_sequence: int | None = None
-
-
-class ChatSessionCreateRequest(BaseModel):
-    """Request to create an empty chat session."""
-
-    title: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class ChatSessionUpdateRequest(BaseModel):
