@@ -153,6 +153,54 @@ describe('StudioChatStream', () => {
     expect(screen.queryByRole('button', { name: /Lưu vào Semantic Layer/i })).not.toBeInTheDocument();
   });
 
+  it('shows a disabled sent button once the request is pending review', () => {
+    render(
+      <StudioChatStream
+        messages={[{
+          id: 'assistant-message', sender: 'assistant', text: 'Gợi ý', timestamp: '10:00',
+          suggestionAction: 'submit_metric_request',
+          suggestions: [{ definition: { metric: { name: 'Doanh thu trước thuế', formula: { function: 'SUM', expression: 'amount' }, base_entity: 'orders', filters: [], status: 'pending_approval', confidence: 'high', excluded_notes: '' } }, yaml_preview: '' }],
+        }]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={[]}
+        mode="data_assistant"
+        submittedRequestKeys={new Set(['assistant-message:0'])}
+      />,
+    );
+
+    const sentBtn = screen.getByRole('button', { name: /Đã gửi cho Data Lead/i });
+    expect(sentBtn).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Gửi Data Lead xem xét/i })).not.toBeInTheDocument();
+  });
+
+  it('ignores a second click while the request is still being sent', () => {
+    let resolveSubmit: (() => void) | undefined;
+    const submit = vi.fn(
+      () => new Promise<void>((resolve) => { resolveSubmit = resolve; }),
+    );
+    render(
+      <StudioChatStream
+        messages={[{
+          id: 'assistant-message', sender: 'assistant', text: 'Gợi ý', timestamp: '10:00',
+          suggestionAction: 'submit_metric_request',
+          suggestions: [{ definition: { metric: { name: 'Doanh thu trước thuế', formula: { function: 'SUM', expression: 'amount' }, base_entity: 'orders', filters: [], status: 'pending_approval', confidence: 'high', excluded_notes: '' } }, yaml_preview: '' }],
+        }]}
+        onSendMessage={vi.fn()}
+        onSubmitMetricRequest={submit}
+        isLoading={false}
+        tableNames={[]}
+        mode="data_assistant"
+      />,
+    );
+
+    const sendBtn = screen.getByRole('button', { name: /Gửi Data Lead xem xét/i });
+    fireEvent.click(sendBtn);
+    fireEvent.click(sendBtn);
+    expect(submit).toHaveBeenCalledTimes(1);
+    resolveSubmit?.();
+  });
+
   it('renders user message with user label', () => {
     render(
       <StudioChatStream

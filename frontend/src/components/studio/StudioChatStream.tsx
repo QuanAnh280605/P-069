@@ -60,6 +60,12 @@ interface StudioChatStreamProps {
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
   onSubmitMetricRequest?: (messageId: string, suggestionIndex: number) => Promise<void>;
+  savedMetricNames?: string[];
+  submittedRequestKeys?: ReadonlySet<string>;
+}
+
+export function metricRequestKey(messageId: string, suggestionIndex: number): string {
+  return `${messageId}:${suggestionIndex}`;
 }
 
 interface PromptSuggestionItem {
@@ -213,6 +219,7 @@ export function StudioChatStream(props: StudioChatStreamProps) {
               onDismissDuplicate={props.onDismissDuplicate}
               onUseExistingDuplicate={props.onUseExistingDuplicate}
               onSubmitMetricRequest={props.onSubmitMetricRequest}
+              submittedKeys={props.submittedRequestKeys || new Set()}
             />
           ))}
 
@@ -337,6 +344,7 @@ function MessageBubble({
   onDismissDuplicate,
   onUseExistingDuplicate,
   onSubmitMetricRequest,
+  submittedKeys,
 }: {
   message: ChatMessage;
   saved: string[];
@@ -349,6 +357,7 @@ function MessageBubble({
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
   onSubmitMetricRequest?: (messageId: string, suggestionIndex: number) => Promise<void>;
+  submittedKeys: ReadonlySet<string>;
 }) {
   const isUser = message.sender === 'user';
 
@@ -413,6 +422,7 @@ function MessageBubble({
                 onUseExisting={() => onDiscardSuggestion?.(message.id, idx)}
                 action={message.suggestionAction}
                 onSubmitRequest={onSubmitMetricRequest ? () => onSubmitMetricRequest(message.id, idx) : undefined}
+                isSubmitted={submittedKeys.has(metricRequestKey(message.id, idx))}
               />
             ))}
           </div>
@@ -525,6 +535,7 @@ function SuggestionCard({
   onRename,
   onUseExisting,
   action,
+  isSubmitted,
   onSubmitRequest,
 }: {
   suggestion: MetricSuggestion;
@@ -536,6 +547,7 @@ function SuggestionCard({
   onRename?: () => void;
   onUseExisting?: () => void;
   action?: 'save_metric' | 'submit_metric_request' | null;
+  isSubmitted?: boolean;
   onSubmitRequest?: () => Promise<void>;
 }) {
   const [showYaml, setShowYaml] = useState(false);
@@ -708,6 +720,17 @@ function SuggestionCard({
 
         {/* ⛔ No Save while the conflict strip is unresolved — user must clarify first */}
         {action === 'submit_metric_request' ? (
+          isSubmitted ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-8 gap-1.5 text-xs text-emerald-600 dark:text-emerald-400"
+              disabled
+            >
+              <Check className="h-3.5 w-3.5" />
+              Đã gửi cho Data Lead
+            </Button>
+          ) : (
           <Button
             size="sm"
             className="h-8 gap-1.5 text-xs cursor-pointer"

@@ -28,6 +28,7 @@ async def create_metric_request(
 ) -> MetricRequestModel:
     """Create a request from one immutable assistant suggestion."""
     suggestion = await _owned_suggestion(db, db_id, requester_id, assistant_message_id, suggestion_index)
+    await _reject_duplicate_pending(db, db_id, requester_id, assistant_message_id, suggestion_index)
     request = MetricRequestModel(
         db_id=db_id,
         requester_id=requester_id,
@@ -41,6 +42,21 @@ async def create_metric_request(
     await db.commit()
     await db.refresh(request)
     return request
+
+
+async def _reject_duplicate_pending(
+    db: AsyncSession, db_id: int, requester_id: int, message_id: str, index: int
+) -> None:
+    """Refuse a second pending request for the same suggestion."""
+    stmt = select(MetricRequestModel).where(
+        MetricRequestModel.db_id == db_id,
+        MetricRequestModel.requester_id == requester_id,
+        MetricRequestModel.assistant_message_id == message_id,
+        MetricRequestModel.suggestion_index == index,
+        MetricRequestModel.status == "pending",
+    )
+    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+        raise MetricRequestError("Metric request already pending review")
 
 
 async def _owned_suggestion(db: AsyncSession, db_id: int, user_id: int, message_id: str, index: int) -> dict:
@@ -97,7 +113,7 @@ async def reject_metric_request(
     request = await _pending_request(db, request_id)
     request.status, request.reviewed_by, request.review_note = "rejected", reviewer_id, note
     request.reviewed_at = datetime.now(UTC)
-    await _notify_requester(db, request, "metric_request_rejected", "Metric request chưa được duyệt")
+    await _notify_requester(db, request, "metric_request_rejected", "Metric request đã bị từ chối")
     await db.commit()
     await db.refresh(request)
     return request

@@ -2,7 +2,6 @@
 
 import {
   CheckCircle2,
-  Bell,
   Database,
   Loader2,
   Plus,
@@ -14,12 +13,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { AIStudioView } from '@/components/views/AIStudioView';
 import { MetricsCatalogView } from '@/components/views/MetricsCatalogView';
+import { NotificationCenter } from '@/components/workspace/NotificationCenter';
 import { WorkspaceApp } from '@/components/workspace/WorkspaceApp';
 import type { ViewId, WorkspaceDatabase } from '@/components/workspace/shared';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import {
+  AppNotification,
   approveMetricsApi,
   approveSingleMetricApi,
   ChatSessionItem,
@@ -155,9 +156,8 @@ export default function WorkspacePage() {
   const [editingSuggestion, setEditingSuggestion] = useState<MetricSuggestion | null>(null);
   const [toast, setToast] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const [notifications, setNotifications] = useState<Array<{ id: number; title: string; body: string; read_at?: string | null }>>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
-  const [showNotifications, setShowNotifications] = useState(false);
 
   // Chat sessions state lifted to page level
   const [sessions, setSessions] = useState<ChatSessionItem[]>([]);
@@ -195,14 +195,13 @@ export default function WorkspacePage() {
     });
   }, [token, currentWorkspace?.id]);
 
-  const openNotifications = async () => {
-    setShowNotifications((current) => !current);
-    if (unreadNotifications) {
-      await markNotificationsReadApi();
-      setUnreadNotifications(0);
-      setNotifications((current) => current.map((item) => ({ ...item, read_at: item.read_at || new Date().toISOString() })));
-    }
-  };
+  const markAllNotificationsRead = useCallback(async () => {
+    await markNotificationsReadApi();
+    setUnreadNotifications(0);
+    setNotifications((current) =>
+      current.map((item) => ({ ...item, read_at: item.read_at || new Date().toISOString() })),
+    );
+  }, []);
 
   useEffect(() => {
     if (!canChat && tab === 'studio') setTab('metrics');
@@ -497,18 +496,12 @@ export default function WorkspacePage() {
       onDeleteChatSession={canChat ? removeSession : undefined}
       onRenameChatSession={canChat ? handleRenameSession : undefined}
     >
-      <div className="fixed right-6 top-16 z-60">
-        <Button size="icon" variant="outline" className="relative" onClick={() => void openNotifications()} aria-label="Thông báo">
-          <Bell className="h-4 w-4" />
-          {unreadNotifications > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">{unreadNotifications}</span>}
-        </Button>
-        {showNotifications && (
-          <div className="absolute right-0 mt-2 w-80 rounded-lg border border-border bg-card p-3 shadow-xl">
-            <p className="mb-2 text-sm font-semibold">Thông báo</p>
-            {notifications.length ? notifications.map((item) => <div key={item.id} className="border-t border-border py-2 text-xs"><p className="font-medium">{item.title}</p><p className="text-muted-foreground">{item.body}</p></div>) : <p className="text-xs text-muted-foreground">Chưa có thông báo.</p>}
-          </div>
-        )}
-      </div>
+      <NotificationCenter
+        items={notifications}
+        unreadCount={unreadNotifications}
+        onOpenCatalog={() => setTab('metrics')}
+        onMarkAllRead={markAllNotificationsRead}
+      />
       {toast && (
         <div className="fixed right-6 top-6 z-60 rounded-xl bg-card border border-border px-4 py-2.5 text-xs font-semibold text-foreground shadow-2xl animate-in fade-in slide-in-from-top-2">
           <CheckCircle2 className="mr-2 inline h-4 w-4 text-emerald-500" />

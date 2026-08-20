@@ -17,7 +17,7 @@ import {
   listMetricRequestsApi,
   submitMetricRequestApi,
 } from '@/lib/api';
-import { ChatMessage, StudioChatStream } from '@/components/studio/StudioChatStream';
+import { ChatMessage, metricRequestKey, StudioChatStream } from '@/components/studio/StudioChatStream';
 import { ViewHeader } from '@/components/workspace/ViewHeader';
 import { applySuggestedName } from '@/lib/metrics';
 
@@ -60,6 +60,16 @@ export function AIStudioView({
   const semanticDbId = layer.semantic_db_id;
   const canGenerateMetrics = mode === 'metric_studio';
   const requestVersion = useRef(0);
+
+  const submittedRequestKeys = useMemo(
+    () =>
+      new Set(
+        metricRequests
+          .filter((item) => item.status === 'pending')
+          .map((item) => metricRequestKey(item.assistant_message_id, item.suggestion_index)),
+      ),
+    [metricRequests],
+  );
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) || null,
@@ -338,6 +348,7 @@ export function AIStudioView({
           onDismissDuplicate={dismissDuplicate}
           onUseExistingDuplicate={useExistingDuplicate}
           onSubmitMetricRequest={!canGenerateMetrics ? submitRequest : undefined}
+          submittedRequestKeys={submittedRequestKeys}
           savedMetricNames={layer.metrics.map((metric) => metric.name)}
         />
       </div>
