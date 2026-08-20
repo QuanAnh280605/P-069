@@ -99,14 +99,14 @@ def merge_dedupe(
 
     - Drop LLM notices/conflicts that reference non-existent existing metrics.
     - Enrich valid notices with the DB metric preview (id, status, definition, YAML).
-    - Suggestions named by a valid LLM duplicate notice are REMOVED — a metric
-      the LLM judged a duplicate has no save path, even under a different name.
-    - Safety-net only inspects suggestions whose normalized name exactly
-      matches an existing metric the LLM did not already flag as conflict.
     - Exact name match + same logic → suggestion REMOVED + forced duplicate notice
       previewing the saved metric (the dropped proposal is never resurrected).
-    - Exact name match + different logic → suggestion KEPT + forced conflict attached.
-    - Never reverses an LLM duplicate verdict into a conflict.
+    - Exact name match + different logic → suggestion KEPT + forced conflict attached,
+      even when the LLM mislabeled it a duplicate.
+    - An LLM duplicate verdict is verified deterministically: when the notice's
+      existing metric has provably different logic, the suggestion is upgraded to a
+      forced conflict (Clarify) and the superseded notice is dropped.
+    - A verified-true LLM duplicate (same logic) still REMOVES the suggestion.
     - Collapse notices so one existing metric yields at most one notice.
     """
     by_name = {_norm_name(item["name"]): item for item in (existing or [])}
@@ -114,38 +114,63 @@ def merge_dedupe(
     notices = list(valid_notices)
     valid_conflicts = _valid_conflicts(llm_conflicts, by_name)
     flagged = {_norm_name(c.proposed_metric_name) for c in valid_conflicts}
-    dup_flagged = {_norm_name(n.proposed_metric_name) for n in valid_notices if n.proposed_metric_name}
+    notice_by_proposed = {
+        _norm_name(n.proposed_metric_name): n for n in valid_notices if n.proposed_metric_name
+    }
     kept: list[MetricSuggestionItem] = []
+    superseded: set[int | str] = set()
     for item in suggestions:
-        result, notice = _process_suggestion(item, by_name, flagged, dup_flagged, valid_conflicts)
+        result, notice, dropped_key = _process_suggestion(
+            item, by_name, flagged, notice_by_proposed, valid_conflicts
+        )
         if result is not None:
             kept.append(result)
         if notice is not None:
             notices.append(notice)
-    return kept, _collapse_notices(notices)
+        if dropped_key is not None:
+            superseded.add(dropped_key)
+    surviving = [notice for notice in notices if _notice_key(notice) not in superseded]
+    return kept, _collapse_notices(surviving)
 
 
 def _process_suggestion(
     item: MetricSuggestionItem,
     by_name: dict[str, dict[str, Any]],
     flagged: set[str],
-    dup_flagged: set[str],
+    notice_by_proposed: dict[str, DuplicateMetricNotice],
     conflicts: list[MetricConflictInfo],
-) -> tuple[MetricSuggestionItem | None, DuplicateMetricNotice | None]:
-    """Apply LLM flags then the deterministic safety-net to one suggestion."""
+) -> tuple[MetricSuggestionItem | None, DuplicateMetricNotice | None, int | str | None]:
+    """Apply LLM flags then the deterministic safety-net to one suggestion.
+
+    Returns (kept_suggestion, new_notice, notice_key_superseded_by_a_conflict).
+    """
     name_key = _norm_name(item.definition.metric.name)
-    match = by_name.get(name_key)
     if name_key in flagged:
-        return _attach_conflict(item, _find_conflict(conflicts, name_key, by_name)), None
-    if name_key in dup_flagged:
-        # LLM judged this proposal a duplicate — drop it; the notice above
-        # already previews the existing metric it duplicates.
-        return None, None
-    if match is None:
-        return item, None
-    if _same_logic(item.definition, match):
-        return None, _forced_duplicate(match)
-    return _attach_conflict(item, _forced_conflict(item, match, by_name)), None
+        return _attach_conflict(item, _find_conflict(conflicts, name_key, by_name)), None, None
+    match = by_name.get(name_key)
+    if match is not None:
+        if _same_logic(item.definition, match):
+            return None, _forced_duplicate(match), None
+        drop = _dup_notice_key(name_key, notice_by_proposed)
+        return _attach_conflict(item, _forced_conflict(item, match, by_name)), None, drop
+    if name_key not in notice_by_proposed:
+        return item, None, None
+    notice = notice_by_proposed[name_key]
+    target = by_name.get(_norm_name(notice.existing_metric_name))
+    if target is None or _same_logic(item.definition, target):
+        # Verified-true duplicate (or unverifiable) — drop; the notice previews it.
+        return None, None, None
+    # The LLM's duplicate claim contradicts the formulas — ask the user instead.
+    conflict = _attach_conflict(item, _forced_conflict(item, target, by_name))
+    return conflict, None, _notice_key(notice)
+
+
+def _dup_notice_key(
+    name_key: str, notice_by_proposed: dict[str, DuplicateMetricNotice]
+) -> int | str | None:
+    """Notice superseded when an exact-name conflict overrides its duplicate verdict."""
+    notice = notice_by_proposed.get(name_key)
+    return _notice_key(notice) if notice is not None else None
 
 
 def _valid_notices(
@@ -296,17 +321,29 @@ def _forced_conflict(
     existing: dict[str, Any],
     by_name: dict[str, dict[str, Any]],
 ) -> MetricConflictInfo:
-    """Build a clarify request for a same-name different-logic suggestion."""
+    """Build a clarify request for a near-duplicate suggestion with different logic."""
     status = existing.get("status") or "draft"
     name = item.definition.metric.name
+    existing_name = existing["name"]
     taken = {entry["name"] for entry in by_name.values()}
+    suggested = _fresh_suggested_name(name, taken)
+    if _norm_name(name) == _norm_name(existing_name):
+        question = (
+            f'Tên "{name}" đã được dùng cho một metric khác công thức. '
+            f'Đổi tên (gợi ý: "{suggested}") hay dùng metric có sẵn?'
+        )
+    else:
+        question = (
+            f'Metric "{existing_name}" đã có với ý nghĩa gần giống nhưng khác công thức. '
+            f'Giữ metric mới với tên khác (gợi ý: "{suggested}") hay dùng metric có sẵn?'
+        )
     return MetricConflictInfo(
         proposed_metric_name=name,
         existing_metric_id=existing.get("id"),
-        existing_metric_name=existing["name"],
+        existing_metric_name=existing_name,
         existing_metric_status=status,
-        suggested_name=_ensure_unique_suggested_name(name, taken),
-        clarify_question=(f'Tên "{name}" đã được dùng cho một metric khác công thức. Bạn muốn đổi tên hay giữ nguyên?'),
+        suggested_name=suggested,
+        clarify_question=question,
     )
 
 
@@ -315,6 +352,17 @@ def _ensure_unique_suggested_name(base: str, taken: set[str]) -> str:
     taken_norm = {_norm_name(name) for name in taken}
     if _norm_name(base) not in taken_norm:
         return base
+    candidate = f"{base} (mới)"
+    counter = 2
+    while _norm_name(candidate) in taken_norm:
+        candidate = f"{base} (mới {counter})"
+        counter += 1
+    return candidate
+
+
+def _fresh_suggested_name(base: str, taken: set[str]) -> str:
+    """Always append a distinguishing suffix — a clarify rename must change the name."""
+    taken_norm = {_norm_name(name) for name in taken}
     candidate = f"{base} (mới)"
     counter = 2
     while _norm_name(candidate) in taken_norm:

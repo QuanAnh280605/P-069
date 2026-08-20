@@ -56,7 +56,6 @@ interface StudioChatStreamProps {
   mode?: 'data_assistant' | 'metric_studio';
   onRenameSuggestion?: SuggestionIndexHandler;
   onDiscardSuggestion?: SuggestionIndexHandler;
-  onKeepName?: SuggestionIndexHandler;
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
 }
@@ -209,7 +208,6 @@ export function StudioChatStream(props: StudioChatStreamProps) {
               onOpenCatalog={props.onOpenCatalog}
               onRenameSuggestion={props.onRenameSuggestion}
               onDiscardSuggestion={props.onDiscardSuggestion}
-              onKeepName={props.onKeepName}
               onDismissDuplicate={props.onDismissDuplicate}
               onUseExistingDuplicate={props.onUseExistingDuplicate}
             />
@@ -333,7 +331,6 @@ function MessageBubble({
   onOpenCatalog,
   onRenameSuggestion,
   onDiscardSuggestion,
-  onKeepName,
   onDismissDuplicate,
   onUseExistingDuplicate,
 }: {
@@ -345,7 +342,6 @@ function MessageBubble({
   onOpenCatalog?: () => void;
   onRenameSuggestion?: SuggestionIndexHandler;
   onDiscardSuggestion?: SuggestionIndexHandler;
-  onKeepName?: SuggestionIndexHandler;
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
 }) {
@@ -410,7 +406,6 @@ function MessageBubble({
                 onOpenCatalog={onOpenCatalog}
                 onRename={() => onRenameSuggestion?.(message.id, idx)}
                 onUseExisting={() => onDiscardSuggestion?.(message.id, idx)}
-                onKeepName={() => onKeepName?.(message.id, idx)}
               />
             ))}
           </div>
@@ -489,7 +484,6 @@ function SuggestionCard({
   onOpenCatalog,
   onRename,
   onUseExisting,
-  onKeepName,
 }: {
   suggestion: MetricSuggestion;
   isSaved: boolean;
@@ -499,7 +493,6 @@ function SuggestionCard({
   onOpenCatalog?: () => void;
   onRename?: () => void;
   onUseExisting?: () => void;
-  onKeepName?: () => void;
 }) {
   const [showYaml, setShowYaml] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -532,7 +525,6 @@ function SuggestionCard({
             conflict={suggestion.conflict}
             onRename={() => onRename?.()}
             onUseExisting={() => onUseExisting?.()}
-            onKeepName={() => onKeepName?.()}
           />
         </div>
       )}

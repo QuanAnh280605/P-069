@@ -239,6 +239,41 @@ def test_llm_flagged_duplicate_suggestion_is_dropped() -> None:
     assert notices[0].existing_definition is not None
 
 
+def test_llm_duplicate_with_different_formula_upgrades_to_conflict() -> None:
+    """LLM judged duplicate but formulas provably differ → Clarify conflict, notice dropped."""
+    notice = DuplicateMetricNotice(
+        existing_metric_name="Doanh thu",
+        user_message="Trùng metric đã có",
+        similarity_reason="Ý nghĩa khác với công thức",
+        proposed_metric_name="Tổng doanh thu",
+    )
+    suggestion = _suggestion("Tổng doanh thu", expr="unit_price * (1 - discount_rate)")
+    kept, notices = merge_dedupe([suggestion], [notice], [], [_existing()])
+    assert len(kept) == 1
+    conflict = kept[0].conflict
+    assert conflict is not None
+    assert conflict.existing_metric_name == "Doanh thu"
+    assert conflict.existing_metric_id == 12
+    assert conflict.suggested_name != "Tổng doanh thu"  # rename must actually change the name
+    assert conflict.clarify_question  # AI proactively asks the user
+    assert notices == []  # the superseded duplicate notice is gone
+
+
+def test_exact_name_diff_formula_wins_over_llm_duplicate_verdict() -> None:
+    """Exact-name + different logic always becomes a conflict, even when LLM said duplicate."""
+    notice = DuplicateMetricNotice(
+        existing_metric_name="Doanh thu",
+        user_message="Trùng metric đã có",
+        proposed_metric_name="Doanh thu",
+    )
+    suggestion = _suggestion("Doanh thu", expr="quantity + unit_price")
+    kept, notices = merge_dedupe([suggestion], [notice], [], [_existing()])
+    assert len(kept) == 1
+    assert kept[0].conflict is not None
+    assert kept[0].conflict.suggested_name == "Doanh thu (mới)"
+    assert notices == []
+
+
 def test_flagged_drop_requires_valid_notice() -> None:
     """A flag referencing a non-existent metric drops nothing (no silent loss)."""
     notice = DuplicateMetricNotice(

@@ -27,10 +27,9 @@ interface ConflictWarningStripProps {
   conflict: MetricConflictInfo;
   onRename: () => void;
   onUseExisting: () => void;
-  onKeepName: () => void;
 }
 
-export function ConflictWarningStrip({ conflict, onRename, onUseExisting, onKeepName }: ConflictWarningStripProps) {
+export function ConflictWarningStrip({ conflict, onRename, onUseExisting }: ConflictWarningStripProps) {
   const suggestedName = conflict.suggested_name?.trim() || '';
   return (
     <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
@@ -63,13 +62,6 @@ export function ConflictWarningStrip({ conflict, onRename, onUseExisting, onKeep
           className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-amber-500/40 bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-xs transition-all hover:bg-accent"
         >
           Dùng metric có sẵn
-        </button>
-        <button
-          type="button"
-          onClick={onKeepName}
-          className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-amber-700 underline-offset-2 transition-all hover:underline dark:text-amber-300"
-        >
-          Giữ nguyên tên
         </button>
       </div>
     </div>

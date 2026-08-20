@@ -242,12 +242,6 @@ export function AIStudioView({
       suggestions: message.suggestions?.filter((_, i) => i !== index),
     }));
 
-  const keepName = (messageId: string, index: number): void =>
-    updateMessage(messageId, (message) => ({
-      ...message,
-      suggestions: message.suggestions?.map((item, i) => (i === index ? stripConflict(item) : item)),
-    }));
-
   const dismissDuplicate = (messageId: string, index: number): void =>
     updateMessage(messageId, (message) => ({
       ...message,
@@ -353,7 +347,6 @@ export function AIStudioView({
           onEditMetric={canGenerateMetrics ? onEditMetricRequest : undefined}
           onRenameSuggestion={renameSuggestion}
           onDiscardSuggestion={discardSuggestion}
-          onKeepName={keepName}
           onDismissDuplicate={dismissDuplicate}
           onUseExistingDuplicate={useExistingDuplicate}
           onRefineWithAI={
@@ -396,11 +389,6 @@ function appendError(
     ...current,
     { id: crypto.randomUUID(), sender: 'assistant', text, timestamp: now(), isError: true },
   ]);
-}
-
-function stripConflict(suggestion: MetricSuggestion): MetricSuggestion {
-  const { conflict: _resolved, ...rest } = suggestion;
-  return rest;
 }
 
 function now(): string {
