@@ -8,6 +8,8 @@ from src.models.db import (
     ChatSessionModel,
     MetricRequestModel,
     NotificationModel,
+    OrganizationMemberModel,
+    OrganizationModel,
     SemanticDatabaseModel,
 )
 from src.services.metric_request_service import (
@@ -17,6 +19,7 @@ from src.services.metric_request_service import (
     mark_notifications_read,
     reject_metric_request,
 )
+from src.services.notification_bus import clear_subscribers, subscribe, unsubscribe
 
 
 def _suggestion_metadata() -> dict:
@@ -179,6 +182,69 @@ async def test_reject_notifies_requester_of_rejection(async_session) -> None:
     ).scalar_one()
     assert notification.title == "Metric request đã bị từ chối"
     assert notification.body == "Doanh thu trước thuế"
+
+
+@pytest.mark.asyncio
+async def test_submit_wakes_data_lead_subscribers(async_session) -> None:
+    """Submitting a request pushes a wake-up to every Data Lead listener."""
+    org = OrganizationModel(name="Org", slug="org-stream")
+    async_session.add(org)
+    await async_session.flush()
+    async_session.add(OrganizationMemberModel(org_id=org.id, user_id=99, role="data_lead"))
+    database = SemanticDatabaseModel(
+        created_by=1, display_name="DB", db_type="sqlite", conn_url_enc="enc", org_id=org.id
+    )
+    async_session.add(database)
+    await async_session.flush()
+    session = ChatSessionModel(id="session-6", user_id=1, db_id=database.id)
+    message = ChatMessageModel(
+        id="message-6",
+        session_id=session.id,
+        sequence_no=1,
+        sender="assistant",
+        content="Proposal",
+        metadata_json=_suggestion_metadata(),
+    )
+    async_session.add_all([session, message])
+    await async_session.commit()
+
+    clear_subscribers()
+    queue = subscribe(99)
+    try:
+        await create_metric_request(async_session, database.id, 1, message.id, 0)
+        assert queue.get_nowait() is None
+    finally:
+        unsubscribe(99, queue)
+        clear_subscribers()
+
+
+@pytest.mark.asyncio
+async def test_reject_wakes_requester_subscriber(async_session) -> None:
+    """Rejecting a request pushes a wake-up to its requester's listener."""
+    database = SemanticDatabaseModel(created_by=1, display_name="DB", db_type="sqlite", conn_url_enc="enc")
+    async_session.add(database)
+    await async_session.flush()
+    session = ChatSessionModel(id="session-7", user_id=1, db_id=database.id)
+    message = ChatMessageModel(
+        id="message-7",
+        session_id=session.id,
+        sequence_no=1,
+        sender="assistant",
+        content="Proposal",
+        metadata_json=_suggestion_metadata(),
+    )
+    async_session.add_all([session, message])
+    await async_session.commit()
+    request = await create_metric_request(async_session, database.id, 1, message.id, 0)
+
+    clear_subscribers()
+    queue = subscribe(1)
+    try:
+        await reject_metric_request(async_session, request.id, 2, None)
+        assert queue.get_nowait() is None
+    finally:
+        unsubscribe(1, queue)
+        clear_subscribers()
 
 
 @pytest.mark.asyncio

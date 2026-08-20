@@ -4,7 +4,7 @@ import logging
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -85,7 +85,7 @@ from src.services.chat_service import (
     save_chat_message,
     update_chat_session_title,
 )
-from src.services.database import decrypt_conn_url, get_db_session
+from src.services.database import decrypt_conn_url, get_db_session, get_session_factory
 from src.services.dimension_recommender import get_dimensions_for_metric, get_filter_columns_for_metric
 from src.services.export_service import build_semantic_layer_dict, serialize_to_json, serialize_to_yaml
 from src.services.imported_schema_service import (
@@ -112,6 +112,7 @@ from src.services.metric_request_service import (
     reject_metric_request,
 )
 from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
+from src.services.notification_stream import notification_event_stream
 from src.services.organization_service import (
     ROLE_PERMISSIONS,
     get_membership,
@@ -1469,6 +1470,18 @@ async def read_notifications(
 ) -> None:
     """Mark all in-app notifications as read for the current user."""
     await mark_notifications_read(db, current_user.id)
+
+
+@router.get("/notifications/stream")
+async def stream_notifications(
+    current_user: UserModel = Depends(get_current_user),
+) -> StreamingResponse:
+    """Stream the caller's notification snapshots over server-sent events."""
+    return StreamingResponse(
+        notification_event_stream(current_user.id, get_session_factory()),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/semantic/{db_id}/chat/sessions", response_model=list[ChatSessionSummaryResponse])

@@ -74,11 +74,17 @@ def get_async_engine(db_url: str | None = None) -> AsyncEngine:
     return engine
 
 
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Yield an async database session for FastAPI dependencies or background jobs."""
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Return the global session factory, initializing the engine if needed."""
     global _global_session_factory
     if _global_session_factory is None:
         get_async_engine()
     assert _global_session_factory is not None
-    async with _global_session_factory() as session:
+    return _global_session_factory
+
+
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Yield an async database session for FastAPI dependencies or background jobs."""
+    factory = get_session_factory()
+    async with factory() as session:
         yield session

@@ -16,6 +16,7 @@ import { MetricsCatalogView } from '@/components/views/MetricsCatalogView';
 import { NotificationCenter } from '@/components/workspace/NotificationCenter';
 import { WorkspaceApp } from '@/components/workspace/WorkspaceApp';
 import type { ViewId, WorkspaceDatabase } from '@/components/workspace/shared';
+import { streamNotifications } from '@/lib/notificationStream';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useWorkspace } from '@/context/WorkspaceContext';
@@ -194,6 +195,14 @@ export default function WorkspacePage() {
       setUnreadNotifications(data.unread_count);
     });
   }, [token, currentWorkspace?.id]);
+
+  useEffect(() => {
+    if (!token) return;
+    return streamNotifications((payload) => {
+      setNotifications(payload.items);
+      setUnreadNotifications(payload.unread_count);
+    });
+  }, [token]);
 
   const markAllNotificationsRead = useCallback(async () => {
     await markNotificationsReadApi();

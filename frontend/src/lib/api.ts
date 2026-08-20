@@ -371,7 +371,7 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   'http://localhost:8000';
-const API_BASE = API_BASE_URL;
+export const API_BASE = API_BASE_URL;
 
 export type WorkspaceRole = 'admin' | 'data_lead' | 'member';
 
@@ -415,7 +415,7 @@ function getWorkspaceHeader(): Record<string, string> {
   return id ? { 'X-Organization-ID': id } : {};
 }
 
-function getAuthHeader(): Record<string, string> {
+export function getAuthHeader(): Record<string, string> {
   const token =
     getStoredToken() ||
     (typeof window !== 'undefined'

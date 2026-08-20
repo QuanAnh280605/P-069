@@ -16,6 +16,7 @@ from src.models.db import (
     SemanticDatabaseModel,
 )
 from src.models.metric_definition import MetricDefinition
+from src.services.notification_bus import publish
 from src.services.semantic_service import approve_metric, create_metric
 
 
@@ -38,9 +39,10 @@ async def create_metric_request(
     )
     db.add(request)
     await db.flush()
-    await _notify_data_leads(db, db_id, request)
+    recipients = await _notify_data_leads(db, db_id, request)
     await db.commit()
     await db.refresh(request)
+    publish(recipients)
     return request
 
 
@@ -103,6 +105,7 @@ async def approve_metric_request(
     await _notify_requester(db, request, "metric_request_approved", "Metric request đã được duyệt")
     await db.commit()
     await db.refresh(request)
+    publish([request.requester_id])
     return request
 
 
@@ -116,6 +119,7 @@ async def reject_metric_request(
     await _notify_requester(db, request, "metric_request_rejected", "Metric request đã bị từ chối")
     await db.commit()
     await db.refresh(request)
+    publish([request.requester_id])
     return request
 
 
@@ -127,14 +131,15 @@ async def _pending_request(db: AsyncSession, request_id: int) -> MetricRequestMo
     return request
 
 
-async def _notify_data_leads(db: AsyncSession, db_id: int, request: MetricRequestModel) -> None:
+async def _notify_data_leads(db: AsyncSession, db_id: int, request: MetricRequestModel) -> list[int]:
     """Create a notification for every current Data Lead in the workspace."""
     stmt = (
         select(OrganizationMemberModel.user_id)
         .join(SemanticDatabaseModel, SemanticDatabaseModel.org_id == OrganizationMemberModel.org_id)
         .where(SemanticDatabaseModel.id == db_id, OrganizationMemberModel.role == "data_lead")
     )
-    for recipient_id in (await db.execute(stmt)).scalars():
+    recipients = list((await db.execute(stmt)).scalars())
+    for recipient_id in recipients:
         db.add(
             NotificationModel(
                 recipient_id=recipient_id,
@@ -144,6 +149,7 @@ async def _notify_data_leads(db: AsyncSession, db_id: int, request: MetricReques
                 metric_request_id=request.id,
             )
         )
+    return recipients
 
 
 async def _notify_requester(db: AsyncSession, request: MetricRequestModel, kind: str, title: str) -> None:
