@@ -22,7 +22,7 @@ interface ChatSessionSwitcherProps {
   activeSessionId: string | null;
   loadingSessions: boolean;
   onSelectSession: (sessionId: string) => void;
-  onNewChat: () => void;
+  onNewChat: () => void | Promise<void>;
   onDeleteSession: (sessionId: string) => void;
   onRenameSession: (sessionId: string, newTitle: string) => Promise<void> | void;
 }
@@ -42,9 +42,11 @@ export function ChatSessionSwitcher({
   const [draftTitle, setDraftTitle] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isStartingNewChat, setIsStartingNewChat] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const newChatLockRef = useRef(false);
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) || null,
@@ -126,6 +128,22 @@ export function ChatSessionSwitcher({
     setDeletingId(null);
   };
 
+  const handleNewChat = () => {
+    if (newChatLockRef.current) return;
+    newChatLockRef.current = true;
+    setIsStartingNewChat(true);
+    setIsOpen(false);
+    const unlock = () => {
+      newChatLockRef.current = false;
+      setIsStartingNewChat(false);
+    };
+    try {
+      void Promise.resolve(onNewChat()).then(unlock, unlock);
+    } catch {
+      unlock();
+    }
+  };
+
   return (
     <div ref={containerRef} className="relative flex items-center gap-2">
       {/* 1. Main Session Selector Trigger Button */}
@@ -165,9 +183,9 @@ export function ChatSessionSwitcher({
       <button
         type="button"
         onClick={() => {
-          setIsOpen(false);
-          onNewChat();
+          handleNewChat();
         }}
+        disabled={isStartingNewChat}
         className="group flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-indigo-500/20 hover:shadow-md hover:shadow-indigo-500/30 hover:brightness-105 active:scale-95 transition-all cursor-pointer shrink-0"
         title="Tạo cuộc trò chuyện mới"
       >
@@ -245,10 +263,8 @@ export function ChatSessionSwitcher({
                 </p>
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsOpen(false);
-                    onNewChat();
-                  }}
+                  onClick={handleNewChat}
+                  disabled={isStartingNewChat}
                   className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/60 px-3 py-1.5 text-[11px] font-bold text-indigo-600 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-400 dark:hover:bg-indigo-900/50 transition-all cursor-pointer"
                 >
                   <Sparkles className="h-3 w-3" />

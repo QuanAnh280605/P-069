@@ -31,7 +31,6 @@ from src.models.schemas import (
     ChatMessageResponse,
     ChatRequest,
     ChatResponse,
-    ChatSessionCreateRequest,
     ChatSessionDetailResponse,
     ChatSessionSummaryResponse,
     ChatSessionUpdateRequest,
@@ -528,10 +527,7 @@ async def approve_semantic_layer(
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> SemanticApproveV2Response:
-    """Approve all draft metrics for a semantic database.
-
-    Checks ownership: only metrics created by the current user can be approved.
-    """
+    """Approve all draft metrics for a semantic database."""
     db_id = request.db_id
     sem_db = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_approve_metrics")
 
@@ -865,7 +861,7 @@ async def list_metrics(
         raise HTTPException(status_code=404, detail="Semantic database not found")
     stmt = select(SemanticMetricModel).where(SemanticMetricModel.db_id == db_id).order_by(SemanticMetricModel.id)
     if semantic_db.org_id is not None:
-        membership = await get_membership(db, current_user.id, semantic_db.org_id)
+        _, membership = await resolve_membership(db, current_user.id, org_id)
         can_view_pending = bool(
             membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_view_pending_metrics", False)
         )
@@ -874,21 +870,19 @@ async def list_metrics(
     result = await db.execute(stmt)
     metrics = result.scalars().all()
 
-    items: list[MetricListItem] = []
-    for m in metrics:
-        items.append(
-            MetricListItem(
-                metric_id=m.id,
-                name=m.name,
-                definition=_safe_metric_definition(m.definition),
-                source=m.source or "manual",
-                version=m.version or 1,
-                status=m.status or "needs_review",
-                approved_by=m.approved_by,
-                created_at=m.created_at,
-            )
+    return [
+        MetricListItem(
+            metric_id=m.id,
+            name=m.name,
+            definition=_safe_metric_definition(m.definition),
+            source=m.source or "manual",
+            version=m.version or 1,
+            status=m.status or "needs_review",
+            approved_by=m.approved_by,
+            created_at=m.created_at,
         )
-    return items
+        for m in metrics
+    ]
 
 
 @router.get("/semantic/{db_id}/catalog", response_model=SemanticCatalogResponse)
@@ -1360,22 +1354,13 @@ async def get_chat_sessions(
     return [_session_summary(session) for session in sessions]
 
 
-@router.post("/semantic/{db_id}/chat/sessions", response_model=ChatSessionSummaryResponse, status_code=201)
-async def create_chat_session_route(
-    db_id: str,
-    body: ChatSessionCreateRequest | None = None,
-    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_session),
-) -> ChatSessionSummaryResponse:
-    """Create an empty chat session for an owned live database."""
-    try:
-        session = await create_chat_session(
-            db, current_user.id, _chat_db_id(db_id), body.title if body else None, org_id
-        )
-    except (ChatAuthorizationError, ValueError) as exc:
-        raise HTTPException(status_code=404, detail="Chat database not found") from exc
-    return _session_summary(session)
+@router.post("/semantic/{db_id}/chat/sessions", status_code=400)
+async def create_chat_session_route() -> None:
+    """Reject empty session creation; a session starts with its first query."""
+    raise HTTPException(
+        status_code=400,
+        detail="Query is required to create a conversation.",
+    )
 
 
 @router.get("/semantic/{db_id}/chat/sessions/{session_id}", response_model=ChatSessionDetailResponse)

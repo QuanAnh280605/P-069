@@ -69,6 +69,8 @@ export interface SemanticLayerData {
   semantic_db_id?: number | null;
   source_type?: 'live' | 'sql_dump';
   metrics: MetricRecord[];
+  table_count?: number;
+  is_loaded?: boolean;
 }
 
 export interface MetricConflictInfo {
@@ -310,7 +312,7 @@ const API_BASE_URL =
   'http://localhost:8000';
 const API_BASE = API_BASE_URL;
 
-export type WorkspaceRole = 'admin' | 'data_lead' | 'member';
+export type WorkspaceRole = 'data_lead' | 'member';
 
 export interface WorkspaceSummary {
   id: number;
@@ -334,7 +336,6 @@ export interface WorkspaceInvite {
   id: number;
   org_id: number;
   role: 'member' | 'data_lead';
-  invitee_email?: string | null;
   status: 'pending' | 'accepted' | 'revoked' | 'expired';
   expires_at: string;
   invite_url?: string | null;
@@ -344,7 +345,6 @@ export interface WorkspaceInvitePreview {
   organization_name: string;
   organization_slug: string;
   role: 'member' | 'data_lead';
-  invitee_email?: string | null;
   expires_at: string;
 }
 
@@ -396,11 +396,10 @@ export function removeWorkspaceMemberApi(userId: number): Promise<void> {
 
 export function createWorkspaceInviteApi(
   role: 'member' | 'data_lead',
-  inviteeEmail?: string,
 ): Promise<WorkspaceInvite> {
   return semanticRequest<WorkspaceInvite>('/api/v1/org/invite', {
     method: 'POST',
-    body: JSON.stringify({ role, invitee_email: inviteeEmail || null }),
+    body: JSON.stringify({ role }),
   });
 }
 
@@ -568,13 +567,6 @@ async function chatRequest<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function listChatSessionsApi(dbId: string): Promise<ChatSessionItem[]> {
   return chatRequest<ChatSessionItem[]>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions`);
-}
-
-export async function createChatSessionApi(dbId: string, title?: string): Promise<ChatSessionItem> {
-  return chatRequest<ChatSessionItem>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions`, {
-    method: 'POST',
-    body: JSON.stringify(title ? { title } : {}),
-  });
 }
 
 export async function getChatSessionDetailApi(

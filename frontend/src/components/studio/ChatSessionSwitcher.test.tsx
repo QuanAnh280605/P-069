@@ -166,4 +166,25 @@ describe('ChatSessionSwitcher', () => {
 
     expect(handleNewChat).toHaveBeenCalledTimes(1);
   });
+
+  it('ignores repeated new-chat clicks while the action is in flight', () => {
+    const handleNewChat = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ChatSessionSwitcher
+        sessions={mockSessions}
+        activeSessionId="s-1"
+        loadingSessions={false}
+        onSelectSession={vi.fn()}
+        onNewChat={handleNewChat}
+        onDeleteSession={vi.fn()}
+        onRenameSession={vi.fn()}
+      />,
+    );
+
+    const newChatBtn = screen.getByRole('button', { name: /Cuộc trò chuyện mới/i });
+    fireEvent.click(newChatBtn);
+    fireEvent.click(newChatBtn);
+
+    expect(handleNewChat).toHaveBeenCalledTimes(1);
+  });
 });

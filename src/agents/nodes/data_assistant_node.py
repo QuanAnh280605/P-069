@@ -1,4 +1,4 @@
-"""Read-only data guidance node for Workspace members and administrators."""
+"""Read-only data guidance node for Workspace members and Data Leads."""
 
 from __future__ import annotations
 

@@ -93,8 +93,8 @@ async def test_chat_service_enforces_database_ownership(async_session):
     assert await list_chat_sessions(async_session, 1, db_id) == []
 
 
-async def test_workspace_admin_can_use_data_chat(async_session):
-    """Workspace Admin can use read-only data assistance without metric authoring."""
+async def test_workspace_data_lead_can_use_data_chat(async_session):
+    """Workspace Data Lead can use the data assistant."""
     organization = await create_organization(async_session, 1, "Acme", "acme")
     database = SemanticDatabaseModel(
         org_id=organization.id,

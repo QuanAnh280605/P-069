@@ -360,7 +360,9 @@ async def create_live_target_db(
     return _model_to_response(model, raw_schema)
 
 
-async def list_live_target_dbs(db: AsyncSession, user_id: int, org_id: int | None = None) -> list[LiveDbSummaryResponse]:
+async def list_live_target_dbs(
+    db: AsyncSession, user_id: int, org_id: int | None = None
+) -> list[LiveDbSummaryResponse]:
     """List live target databases owned by a user."""
     stmt = select(LiveTargetDbModel).order_by(LiveTargetDbModel.updated_at.desc())
     if org_id is None:
@@ -463,9 +465,7 @@ async def get_live_target_db(
     return _model_to_response(record, raw_schema)
 
 
-async def delete_live_target_db(
-    db: AsyncSession, user_id: int, db_id: int, org_id: int | None = None
-) -> bool:
+async def delete_live_target_db(db: AsyncSession, user_id: int, db_id: int, org_id: int | None = None) -> bool:
     """Delete a user-owned live target database record and all related semantic layer metadata."""
     stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.id == db_id)
     if org_id is None:
