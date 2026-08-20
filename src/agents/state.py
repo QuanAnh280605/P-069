@@ -86,6 +86,15 @@ class AgentState(TypedDict, total=False):
     approved_metrics: list[dict[str, Any]]
     """Approved metric context available to the read-only data assistant."""
 
+    metric_decision: dict[str, Any]
+    """Validated metric availability and schema-support decision for one chat turn."""
+
+    suggestion_action: str
+    """Server-derived action for metric suggestions: save or submit for review."""
+
+    context_diagnostic: dict[str, Any]
+    """Safe Metric AI context status for the current chat turn."""
+
     # Chitchat Agent — Output
     chat_response: str
     """Câu trả lời ngôn ngữ tự nhiên khi intent = 'chitchat', 'data_question', hoặc 'out_of_scope'."""

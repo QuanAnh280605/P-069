@@ -7,12 +7,15 @@ import {
   ChatMessageItem,
   ChatSessionItem,
   createMetricApi,
-  DuplicateMetricNotice,
-  generateCustomMetricsApi,
   getChatSessionDetailApi,
   MetricSuggestion,
+  MetricRequest,
+  METRIC_WRITE_PERMISSION_MESSAGE,
   SemanticLayerData,
+  isPermissionDenied,
   sendChatOrchestratorApi,
+  listMetricRequestsApi,
+  submitMetricRequestApi,
 } from '@/lib/api';
 import { ChatMessage, StudioChatStream } from '@/components/studio/StudioChatStream';
 import { ViewHeader } from '@/components/workspace/ViewHeader';
@@ -53,6 +56,7 @@ export function AIStudioView({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [activePrompt, setActivePrompt] = useState('');
+  const [metricRequests, setMetricRequests] = useState<MetricRequest[]>([]);
   const semanticDbId = layer.semantic_db_id;
   const canGenerateMetrics = mode === 'metric_studio';
   const requestVersion = useRef(0);
@@ -71,7 +75,7 @@ export function AIStudioView({
           error ||
           (canGenerateMetrics
             ? `Xin chào! Tôi đã quét schema cho database ${layer.db_name} (${layer.tables.length} bảng). Bạn có thể hỏi để tôi đề xuất và định nghĩa Business Metrics.`
-            : `Xin chào! Tôi có thể giúp bạn tìm hiểu schema, tra cứu dữ liệu qua các metric đã duyệt (chỉ áp dụng cho kết nối Live DB) hoặc đề xuất Business Metrics mới cho ${layer.db_name}.`),
+            : `Xin chào! Tôi có thể giúp bạn tìm hiểu schema, metric đã phê duyệt và cách chọn dữ liệu trong ${layer.db_name}.`),
         timestamp: now(),
         isError: Boolean(error),
       },
@@ -108,18 +112,10 @@ export function AIStudioView({
     void loadDetail();
   }, [activeSessionId, layer.db_name, layer.source_type, semanticDbId]);
 
-  const appendDedupeWarning = (dedupeSkipped: boolean) => {
-    if (!dedupeSkipped) return;
-    setMessages((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        sender: 'assistant',
-        text: '⚠️ Không kiểm tra được trùng lặp (dedupe unavailable) — danh sách chưa so với metric đã lưu.',
-        timestamp: now(),
-      },
-    ]);
-  };
+  useEffect(() => {
+    if (!semanticDbId || canGenerateMetrics) return;
+    void listMetricRequestsApi(String(semanticDbId)).then(setMetricRequests).catch(() => setMetricRequests([]));
+  }, [canGenerateMetrics, semanticDbId]);
 
   const send = async (prompt: string, _targetTables: string[]) => {
     const clientMessageId = crypto.randomUUID();
@@ -137,16 +133,12 @@ export function AIStudioView({
     }
     setLoading(true);
     try {
-      let suggestions: MetricSuggestion[] = [];
-      let duplicates: DuplicateMetricNotice[] = [];
-      let dedupeSkipped = false;
-      try {
-        const response = await sendChatOrchestratorApi(
-          String(semanticDbId),
-          prompt,
-          requestSessionId,
-          clientMessageId,
-        );
+      const response = await sendChatOrchestratorApi(
+        String(semanticDbId),
+        prompt,
+        requestSessionId,
+        clientMessageId,
+      );
         if (requestSessionId && activeSessionId !== requestSessionId) return;
         if (response.session_id) {
           setActiveSessionId?.(response.session_id);
@@ -162,11 +154,7 @@ export function AIStudioView({
             ...current.filter((item) => item.id !== response.session!.id),
           ]);
         }
-        if (
-          response.intent === 'chitchat' ||
-          response.intent === 'data_question' ||
-          response.intent === 'out_of_scope'
-        ) {
+        if (response.intent === 'chitchat' || response.intent === 'data_question' || response.intent === 'out_of_scope') {
           setMessages((current) => [
             ...current,
             {
@@ -178,48 +166,24 @@ export function AIStudioView({
           ]);
           return;
         }
-        suggestions = response.suggestions || [];
-        duplicates = response.duplicates ?? [];
-        dedupeSkipped = response.dedupe_performed === false;
-        setMessages((current) => [
-          ...current,
-          {
-            id: response.assistant_message_id || crypto.randomUUID(),
-            sender: 'assistant',
-            text:
-              response.chat_response ||
-              (suggestions.length
-                ? `Dựa trên schema của bạn, tôi đề xuất ${suggestions.length} Metric Definition dưới đây. Bạn có thể xem trước YAML và lưu vào catalog để duyệt:`
-                : duplicates.length
-                  ? 'Không có metric mới — các chỉ số đề xuất đã tồn tại trong hệ thống:'
-                  : 'Không sinh được metric phù hợp từ schema.'),
-            suggestions,
-            duplicates,
-            timestamp: now(),
-          },
-        ]);
-      } catch (error) {
-        const res = await generateCustomMetricsApi(String(semanticDbId), prompt, _targetTables);
-        suggestions = res.suggestions || [];
-        duplicates = res.duplicates ?? [];
-        dedupeSkipped = res.dedupe_performed === false;
-        setMessages((current) => [
-          ...current,
-          {
-            id: crypto.randomUUID(),
-            sender: 'assistant',
-            text: suggestions.length
+      const suggestions = response.suggestions || [];
+      setMessages((current) => [
+        ...current,
+        {
+          id: response.assistant_message_id || crypto.randomUUID(),
+          sender: 'assistant',
+          text:
+            response.chat_response ||
+            (suggestions.length
               ? `Dựa trên schema của bạn, tôi đề xuất ${suggestions.length} Metric Definition dưới đây. Bạn có thể xem trước YAML và lưu vào catalog để duyệt:`
-              : duplicates.length
-                ? 'Không có metric mới — các chỉ số đề xuất đã tồn tại trong hệ thống:'
-                : 'Không sinh được metric phù hợp từ schema.',
-            suggestions,
-            duplicates,
-            timestamp: now(),
-          },
-        ]);
-      }
-      appendDedupeWarning(dedupeSkipped);
+              : 'Không sinh được metric phù hợp từ schema.'),
+          suggestions,
+          duplicates: response.duplicates,
+          dedupeSkipped: response.dedupe_performed === false,
+          suggestionAction: response.suggestion_action,
+          timestamp: now(),
+        },
+      ]);
     } catch (error) {
       appendError(setMessages, error instanceof Error ? error.message : 'Không thể xử lý yêu cầu');
     } finally {
@@ -227,49 +191,37 @@ export function AIStudioView({
     }
   };
 
-  const updateMessage = (
-    messageId: string,
-    updater: (message: ChatMessage) => ChatMessage,
-  ): void => {
-    setMessages((current) =>
-      current.map((message) => (message.id === messageId ? updater(message) : message)),
-    );
+  const updateMessage = (messageId: string, updater: (message: ChatMessage) => ChatMessage): void => {
+    setMessages((current) => current.map((message) => (message.id === messageId ? updater(message) : message)));
   };
 
   const renameSuggestion = (messageId: string, index: number): void =>
     updateMessage(messageId, (message) => ({
       ...message,
-      suggestions: message.suggestions?.map((item, i) =>
-        i === index ? applySuggestedName(item) : item,
+      suggestions: message.suggestions?.map((item, itemIndex) =>
+        itemIndex === index ? applySuggestedName(item) : item,
       ),
     }));
 
   const discardSuggestion = (messageId: string, index: number): void =>
     updateMessage(messageId, (message) => ({
       ...message,
-      suggestions: message.suggestions?.filter((_, i) => i !== index),
+      suggestions: message.suggestions?.filter((_, itemIndex) => itemIndex !== index),
     }));
 
   const dismissDuplicate = (messageId: string, index: number): void =>
     updateMessage(messageId, (message) => ({
       ...message,
-      duplicates: message.duplicates?.filter((_, i) => i !== index),
+      duplicates: message.duplicates?.filter((_, itemIndex) => itemIndex !== index),
     }));
 
   const useExistingDuplicate = (messageId: string, index: number): void =>
     updateMessage(messageId, (message) => {
       if (!message.duplicates?.[index]) return message;
-      const duplicates = message.duplicates.map((item, i) =>
-        i === index ? { ...item, resolved: true } : item,
+      const duplicates = message.duplicates.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, resolved: true } : item,
       );
-      const allSettled = duplicates.length > 0 && duplicates.every((item) => item.resolved);
-      const hasSuggestions = (message.suggestions?.length ?? 0) > 0;
-      // Description line is stale once every notice is resolved and nothing else shows.
-      return {
-        ...message,
-        duplicates,
-        text: allSettled && !hasSuggestions ? '' : message.text,
-      };
+      return { ...message, duplicates };
     });
 
   const save = async (suggestion: MetricSuggestion) => {
@@ -287,14 +239,24 @@ export function AIStudioView({
       });
       await onMetricsChanged();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Lỗi không xác định';
-      onNotify?.(message);
+      if (isPermissionDenied(error)) onNotify?.(METRIC_WRITE_PERMISSION_MESSAGE);
       appendError(
         setMessages,
-        `Không thể lưu chỉ số "${suggestion.definition.metric.name}": ${message}`,
+        isPermissionDenied(error)
+          ? METRIC_WRITE_PERMISSION_MESSAGE
+          : `Không thể lưu chỉ số "${suggestion.definition.metric.name}": ${
+              error instanceof Error ? error.message : 'Lỗi không xác định'
+            }`,
       );
       throw error;
     }
+  };
+
+  const submitRequest = async (assistantMessageId: string, suggestionIndex: number) => {
+    if (!semanticDbId) throw new Error('Semantic database chưa sẵn sàng.');
+    const request = await submitMetricRequestApi(String(semanticDbId), assistantMessageId, suggestionIndex);
+    setMetricRequests((current) => [request, ...current]);
+    onNotify?.('Đã gửi yêu cầu cho Data Lead xem xét.');
   };
 
   const dbProp = {
@@ -313,7 +275,7 @@ export function AIStudioView({
         description={
           canGenerateMetrics
             ? 'Chat with the assistant to explore your schema and generate business metric definitions.'
-            : 'Hỏi về schema, tra cứu dữ liệu qua metric đã duyệt (chỉ áp dụng cho Live DB) hoặc yêu cầu đề xuất Business Metrics mới.'
+            : 'Hỏi về schema, metric đã duyệt và cách khai thác dữ liệu an toàn.'
         }
         database={dbProp}
         actions={
@@ -349,24 +311,34 @@ export function AIStudioView({
         }
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {!canGenerateMetrics && metricRequests.length > 0 && (
+          <div className="border-b border-border px-6 py-2 text-xs text-muted-foreground">
+            Yêu cầu của bạn: {metricRequests.filter((item) => item.status === 'pending').length} chờ xử lý · {metricRequests.filter((item) => item.status === 'approved').length} đã duyệt.
+          </div>
+        )}
         <StudioChatStream
           messages={messages}
           onSendMessage={send}
           isLoading={loading || loadingSessions}
           tableNames={layer.tables.map((table) => table.table_name)}
-          onAddMetric={save}
-          onEditMetric={onEditMetricRequest}
-          onRenameSuggestion={renameSuggestion}
-          onDiscardSuggestion={discardSuggestion}
-          onDismissDuplicate={dismissDuplicate}
-          onUseExistingDuplicate={useExistingDuplicate}
-          onRefineWithAI={(suggestion) =>
-            setActivePrompt(`Hãy điều chỉnh chỉ số ${suggestion.definition.metric.name}: `)
+          onAddMetric={canGenerateMetrics ? save : undefined}
+          onEditMetric={canGenerateMetrics ? onEditMetricRequest : undefined}
+          onRefineWithAI={
+            canGenerateMetrics
+              ? (suggestion) =>
+                  setActivePrompt(`Hãy điều chỉnh chỉ số ${suggestion.definition.metric.name}: `)
+              : undefined
           }
           activePromptText={activePrompt}
           theme={theme}
           mode={mode}
           onOpenCatalog={onOpenCatalog}
+          onRenameSuggestion={renameSuggestion}
+          onDiscardSuggestion={discardSuggestion}
+          onDismissDuplicate={dismissDuplicate}
+          onUseExistingDuplicate={useExistingDuplicate}
+          onSubmitMetricRequest={!canGenerateMetrics ? submitRequest : undefined}
+          savedMetricNames={layer.metrics.map((metric) => metric.name)}
         />
       </div>
     </div>
@@ -381,6 +353,7 @@ function toChatMessage(message: ChatMessageItem): ChatMessage {
     suggestions: message.metadata_json?.suggestions,
     duplicates: message.metadata_json?.duplicates,
     dedupeSkipped: message.metadata_json?.dedupe_performed === false,
+    suggestionAction: message.metadata_json?.suggestion_action,
     timestamp: new Date(message.created_at).toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
@@ -395,19 +368,10 @@ function appendError(
 ): void {
   setter((current) => [
     ...current,
-    {
-      id: crypto.randomUUID(),
-      sender: 'assistant',
-      text,
-      timestamp: now(),
-      isError: true,
-    },
+    { id: crypto.randomUUID(), sender: 'assistant', text, timestamp: now(), isError: true },
   ]);
 }
 
 function now(): string {
-  return new Date().toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }

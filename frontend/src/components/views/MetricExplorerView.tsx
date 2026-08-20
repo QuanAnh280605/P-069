@@ -405,6 +405,7 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
     return (
       <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
         <ViewHeader
+          eyebrow="Explore"
           title="Metric Explorer"
           description="Compile approved metrics into safe queries — no manual SQL required."
           database={database}
@@ -580,6 +581,7 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
       <ViewHeader
+        eyebrow="Explore"
         title="Metric Explorer"
         description="Compile approved metrics into safe queries — no manual SQL required."
         database={database}

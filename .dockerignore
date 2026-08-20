@@ -14,3 +14,13 @@ eval/
 .dockerignore
 Dockerfile
 docker-compose.yml
+frontend/node_modules
+frontend/.next
+.uv-cache
+.uv-python
+.mypy_cache
+.ai-log
+.codex
+.agents
+.opencode
+data

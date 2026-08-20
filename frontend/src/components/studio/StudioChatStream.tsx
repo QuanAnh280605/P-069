@@ -35,6 +35,7 @@ export interface ChatMessage {
   suggestions?: MetricSuggestion[];
   duplicates?: ChatDuplicateNotice[];
   dedupeSkipped?: boolean;
+  suggestionAction?: 'save_metric' | 'submit_metric_request' | null;
   timestamp: string;
   isError?: boolean;
 }
@@ -58,6 +59,7 @@ interface StudioChatStreamProps {
   onDiscardSuggestion?: SuggestionIndexHandler;
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
+  onSubmitMetricRequest?: (messageId: string, suggestionIndex: number) => Promise<void>;
 }
 
 interface PromptSuggestionItem {
@@ -210,6 +212,7 @@ export function StudioChatStream(props: StudioChatStreamProps) {
               onDiscardSuggestion={props.onDiscardSuggestion}
               onDismissDuplicate={props.onDismissDuplicate}
               onUseExistingDuplicate={props.onUseExistingDuplicate}
+              onSubmitMetricRequest={props.onSubmitMetricRequest}
             />
           ))}
 
@@ -333,6 +336,7 @@ function MessageBubble({
   onDiscardSuggestion,
   onDismissDuplicate,
   onUseExistingDuplicate,
+  onSubmitMetricRequest,
 }: {
   message: ChatMessage;
   saved: string[];
@@ -344,6 +348,7 @@ function MessageBubble({
   onDiscardSuggestion?: SuggestionIndexHandler;
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
+  onSubmitMetricRequest?: (messageId: string, suggestionIndex: number) => Promise<void>;
 }) {
   const isUser = message.sender === 'user';
 
@@ -406,6 +411,8 @@ function MessageBubble({
                 onOpenCatalog={onOpenCatalog}
                 onRename={() => onRenameSuggestion?.(message.id, idx)}
                 onUseExisting={() => onDiscardSuggestion?.(message.id, idx)}
+                action={message.suggestionAction}
+                onSubmitRequest={onSubmitMetricRequest ? () => onSubmitMetricRequest(message.id, idx) : undefined}
               />
             ))}
           </div>
@@ -517,6 +524,8 @@ function SuggestionCard({
   onOpenCatalog,
   onRename,
   onUseExisting,
+  action,
+  onSubmitRequest,
 }: {
   suggestion: MetricSuggestion;
   isSaved: boolean;
@@ -526,6 +535,8 @@ function SuggestionCard({
   onOpenCatalog?: () => void;
   onRename?: () => void;
   onUseExisting?: () => void;
+  action?: 'save_metric' | 'submit_metric_request' | null;
+  onSubmitRequest?: () => Promise<void>;
 }) {
   const [showYaml, setShowYaml] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -538,6 +549,15 @@ function SuggestionCard({
     setSaving(true);
     try {
       await onSave();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSubmitRequest = async () => {
+    setSaving(true);
+    try {
+      await onSubmitRequest?.();
     } finally {
       setSaving(false);
     }
@@ -687,7 +707,17 @@ function SuggestionCard({
         </span>
 
         {/* ⛔ No Save while the conflict strip is unresolved — user must clarify first */}
-        {!suggestion.conflict &&
+        {action === 'submit_metric_request' ? (
+          <Button
+            size="sm"
+            className="h-8 gap-1.5 text-xs cursor-pointer"
+            onClick={() => void handleSubmitRequest()}
+            disabled={saving || !onSubmitRequest}
+          >
+            <Save className="h-3.5 w-3.5" />
+            {saving ? 'Đang gửi...' : 'Gửi Data Lead xem xét'}
+          </Button>
+        ) : !suggestion.conflict &&
           (isSaved ? (
             <Button
               size="sm"

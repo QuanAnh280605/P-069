@@ -3,19 +3,21 @@
 import logging
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.api.auth import get_current_user
+from src.config import get_settings
 from src.models.db import (
     CanonicalRelationshipModel,
     ChatMessageModel,
     ChatSessionModel,
     ImportedSchemaModel,
     LiveTargetDbModel,
+    MetricRequestModel,
     OrganizationMemberModel,
     SemanticColumnModel,
     SemanticDatabaseModel,
@@ -48,9 +50,14 @@ from src.models.schemas import (
     MetricFilterColumnsResponse,
     MetricHistoryResponse,
     MetricListItem,
+    MetricRequestCreate,
+    MetricRequestResponse,
+    MetricRequestReview,
     MetricResponse,
     MetricUpdate,
     MetricVersionItem,
+    NotificationListResponse,
+    NotificationResponse,
     SemanticApproveV2Response,
     SemanticCatalogColumn,
     SemanticCatalogResponse,
@@ -94,8 +101,15 @@ from src.services.live_db_service import (
     list_live_target_dbs,
 )
 from src.services.metric_dedupe import load_existing_for_dedupe
-from src.services.metric_rollback import (
-    rollback_metric as rollback_metric_record,
+from src.services.metric_context import MetricContextResult, build_data_context, build_metric_context
+from src.services.metric_request_service import (
+    MetricRequestError,
+    approve_metric_request,
+    create_metric_request,
+    list_metric_requests,
+    list_notifications,
+    mark_notifications_read,
+    reject_metric_request,
 )
 from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
 from src.services.organization_service import (
@@ -109,6 +123,7 @@ from src.services.query_execution import execute_compiled_query
 from src.services.schema_ingestion import parse_sql_dump_preview
 from src.services.semantic_compile_error import SemanticCompileError
 from src.services.semantic_service import (
+    DuplicateMetricError,
     MetricRequiresReviewError,
     _coerce_metric_definition,
     approve_metric,
@@ -537,7 +552,7 @@ async def approve_semantic_layer(
 
     metrics_stmt = select(SemanticMetricModel).where(
         SemanticMetricModel.db_id == db_id,
-        SemanticMetricModel.status.in_({"pending_approval", "needs_review", "unverified"}),
+        SemanticMetricModel.status == "pending_approval",
     )
     metrics_result = await db.execute(metrics_stmt)
     draft_metrics = metrics_result.scalars().all()
@@ -549,17 +564,8 @@ async def approve_semantic_layer(
     for metric in draft_metrics:
         if sem_db.org_id is None and metric.created_by not in {None, current_user.id}:
             continue
-        try:
-            await approve_metric(db=db, metric_id=metric.id, user_id=current_user.id)
-        except MetricRequiresReviewError:
-            continue
+        await approve_metric(db=db, metric_id=metric.id, user_id=current_user.id)
         approved_count += 1
-
-    if approved_count == 0:
-        raise HTTPException(
-            status_code=422,
-            detail=f"No metrics approved for database {db_id}: all candidates require review",
-        )
 
     sem_db.status = "saved"
     await db.commit()
@@ -600,7 +606,6 @@ async def approve_single_metric_endpoint(
         metric_id=approved.id,
         definition=approved.definition,
         source=approved.source or "manual",
-        status=approved.status,
     )
 
 
@@ -754,7 +759,10 @@ async def _load_approved_metric_context(db: AsyncSession, db_id: int) -> list[di
         SemanticMetricModel.status == "approved",
     )
     metrics = (await db.execute(stmt)).scalars().all()
-    return [{"name": metric.name, "definition": _safe_metric_definition(metric.definition)} for metric in metrics]
+    return [
+        {"id": metric.id, "name": metric.name, "definition": _safe_metric_definition(metric.definition)}
+        for metric in metrics
+    ]
 
 
 async def _chat_can_generate_metrics(db: AsyncSession, database: SemanticDatabaseModel, user_id: int) -> bool:
@@ -762,7 +770,7 @@ async def _chat_can_generate_metrics(db: AsyncSession, database: SemanticDatabas
     if database.org_id is None:
         return True
     membership = await get_membership(db, user_id, database.org_id)
-    return bool(membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_submit_metric", False))
+    return bool(membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_use_metric_studio", False))
 
 
 @router.post("/semantic/{db_id}/metrics/generate", response_model=CustomMetricGenerateResponse)
@@ -787,14 +795,17 @@ async def generate_custom_metrics(
     except ValueError as error:
         raise HTTPException(status_code=404, detail=f"Database with id {db_id} not found") from error
     await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_submit_metric")
-
-    schema_context = await _load_schema_context_for_db(db, db_id)
-    existing, dedupe_performed = await load_existing_for_dedupe(db, db_id)
+    context = await build_metric_context(
+        db, numeric_db_id, clean_prompt, get_settings().metric_context_token_budget, body.target_tables
+    )
+    if context.diagnostic["status"] != "ready":
+        raise HTTPException(status_code=422, detail=context.diagnostic["message"])
 
     try:
+        existing, dedupe_performed = await load_existing_for_dedupe(db, db_id)
         suggestions, duplicates = await generate_metrics_from_prompt(
             prompt=clean_prompt,
-            schema_context=schema_context,
+            schema_context=context.schema,
             target_tables=body.target_tables,
             existing_metrics=existing or None,
         )
@@ -837,6 +848,9 @@ async def create_metric_endpoint(
             user_id=current_user.id,
             status_override="unverified" if membership and membership.role == "member" else None,
         )
+    except DuplicateMetricError as exc:
+        logger.info("Duplicate metric rejected for db_id=%s: %s", db_id, exc)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         logger.warning("create_metric validation error for db_id=%s: %s", db_id, exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -851,6 +865,84 @@ async def create_metric_endpoint(
         source=new_metric.source or "manual",
         status=new_metric.status,
     )
+
+
+@router.post("/semantic/{db_id}/metric-requests", response_model=MetricRequestResponse, status_code=201)
+async def submit_metric_request(
+    db_id: int,
+    body: MetricRequestCreate,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> MetricRequestResponse:
+    """Submit one server-verified AI suggestion for Data Lead review."""
+    database = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_use_data_assistant")
+    if await _chat_can_generate_metrics(db, database, current_user.id):
+        raise HTTPException(status_code=403, detail="Data Leads should save metrics directly")
+    try:
+        request = await create_metric_request(
+            db, db_id, current_user.id, body.assistant_message_id, body.suggestion_index
+        )
+    except (MetricRequestError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return MetricRequestResponse.model_validate(request)
+
+
+@router.get("/semantic/{db_id}/metric-requests", response_model=list[MetricRequestResponse])
+async def get_metric_requests(
+    db_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> list[MetricRequestResponse]:
+    """List pending and resolved requests visible to the active role."""
+    database = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_use_data_assistant")
+    is_lead = await _chat_can_generate_metrics(db, database, current_user.id)
+    requests = await list_metric_requests(db, db_id, current_user.id, is_lead)
+    return [MetricRequestResponse.model_validate(item) for item in requests]
+
+
+@router.post("/semantic/{db_id}/metric-requests/{request_id}/approve", response_model=MetricRequestResponse)
+async def accept_metric_request(
+    db_id: int,
+    request_id: int,
+    body: MetricRequestReview,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> MetricRequestResponse:
+    """Create and approve the reviewed metric in a single transaction."""
+    await _require_resource_permission(db, current_user.id, db_id, org_id, "can_approve_metrics")
+    request = await db.get(MetricRequestModel, request_id)
+    if request is None or request.db_id != db_id:
+        raise HTTPException(status_code=404, detail="Metric request not found")
+    try:
+        reviewed = await approve_metric_request(db, request_id, current_user.id, body.definition, body.review_note)
+    except (MetricRequestError, ValueError) as exc:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return MetricRequestResponse.model_validate(reviewed)
+
+
+@router.post("/semantic/{db_id}/metric-requests/{request_id}/reject", response_model=MetricRequestResponse)
+async def decline_metric_request(
+    db_id: int,
+    request_id: int,
+    body: MetricRequestReview,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> MetricRequestResponse:
+    """Reject a pending metric request and notify its requester."""
+    await _require_resource_permission(db, current_user.id, db_id, org_id, "can_approve_metrics")
+    request = await db.get(MetricRequestModel, request_id)
+    if request is None or request.db_id != db_id:
+        raise HTTPException(status_code=404, detail="Metric request not found")
+    try:
+        reviewed = await reject_metric_request(db, request_id, current_user.id, body.review_note)
+    except MetricRequestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return MetricRequestResponse.model_validate(reviewed)
 
 
 def _safe_metric_definition(definition_raw: Any) -> MetricDefinition | None:
@@ -879,19 +971,11 @@ async def list_metrics(
     stmt = select(SemanticMetricModel).where(SemanticMetricModel.db_id == db_id).order_by(SemanticMetricModel.id)
     if semantic_db.org_id is not None:
         _, membership = await resolve_membership(db, current_user.id, org_id)
-        if membership.role == "admin":
+        can_view_pending = bool(
+            membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_view_pending_metrics", False)
+        )
+        if not can_view_pending:
             stmt = stmt.where(SemanticMetricModel.status == "approved")
-        elif membership.role == "data_lead":
-            stmt = stmt.where(
-                SemanticMetricModel.status.in_({"approved", "pending_approval", "needs_review", "unverified"})
-            )
-        else:
-            stmt = stmt.where(
-                or_(
-                    SemanticMetricModel.status == "approved",
-                    (SemanticMetricModel.status == "unverified") & (SemanticMetricModel.created_by == current_user.id),
-                )
-            )
     result = await db.execute(stmt)
     metrics = result.scalars().all()
 
@@ -949,34 +1033,6 @@ async def _owned_semantic_database(
         )
     )
     return (await db.execute(stmt)).scalar_one_or_none()
-
-
-def _metric_is_visible(metric: SemanticMetricModel, role: str, user_id: int) -> bool:
-    """Apply approved, Data Lead, or own-unverified metric visibility."""
-    return bool(
-        metric.status == "approved"
-        or role == "data_lead"
-        or (role == "member" and metric.status == "unverified" and metric.created_by == user_id)
-    )
-
-
-async def _visible_metric(
-    db: AsyncSession, db_id: int, metric_id: int, user_id: int, org_id: int | None
-) -> SemanticMetricModel:
-    """Authorize a metric's database and lifecycle visibility."""
-    semantic_db = await _owned_semantic_database(db, db_id, user_id, org_id)
-    if semantic_db is None:
-        raise HTTPException(status_code=404, detail="Semantic database not found")
-    metric = await db.scalar(
-        select(SemanticMetricModel).where(SemanticMetricModel.id == metric_id, SemanticMetricModel.db_id == db_id)
-    )
-    if metric is None:
-        raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
-    if semantic_db.org_id is not None:
-        membership = await get_membership(db, user_id, semantic_db.org_id)
-        if membership is None or not _metric_is_visible(metric, membership.role, user_id):
-            raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
-    return metric
 
 
 async def _catalog_tables(db: AsyncSession, db_id: int) -> list[SemanticCatalogTable]:
@@ -1065,8 +1121,10 @@ async def get_metric_history(
         raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found in database {db_id}")
     if semantic_db.org_id is not None and metric.status != "approved":
         membership = await get_membership(db, current_user.id, semantic_db.org_id)
-        can_view = bool(membership and _metric_is_visible(metric, membership.role, current_user.id))
-        if not can_view:
+        can_view_pending = bool(
+            membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_view_pending_metrics", False)
+        )
+        if not can_view_pending:
             raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
 
     versions = [
@@ -1091,12 +1149,18 @@ async def get_metric_history(
 async def get_metric_recommended_dimensions(
     db_id: int,
     metric_id: int,
-    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     db: AsyncSession = Depends(get_db_session),
-    current_user: UserModel = Depends(get_current_user),
+    _user: UserModel = Depends(get_current_user),
 ) -> MetricDimensionsResponse:
     """Recommend high-signal dimensions for a specific metric across Tier A, B, C, and D."""
-    metric = await _visible_metric(db, db_id, metric_id, current_user.id, org_id)
+    stmt_metric = select(SemanticMetricModel).where(
+        SemanticMetricModel.id == metric_id,
+        SemanticMetricModel.db_id == db_id,
+    )
+    metric = (await db.execute(stmt_metric)).scalar_one_or_none()
+    if not metric:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metric {metric_id} not found")
+
     base_table_name = ""
     if metric.base_entity_id:
         stmt_t = select(SemanticTableModel.table_name).where(SemanticTableModel.id == metric.base_entity_id)
@@ -1115,12 +1179,18 @@ async def get_metric_recommended_dimensions(
 async def get_metric_filter_columns(
     db_id: int,
     metric_id: int,
-    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     db: AsyncSession = Depends(get_db_session),
-    current_user: UserModel = Depends(get_current_user),
+    _user: UserModel = Depends(get_current_user),
 ) -> MetricFilterColumnsResponse:
     """Retrieve safe and relevant filter columns for a specific metric."""
-    metric = await _visible_metric(db, db_id, metric_id, current_user.id, org_id)
+    stmt_metric = select(SemanticMetricModel).where(
+        SemanticMetricModel.id == metric_id,
+        SemanticMetricModel.db_id == db_id,
+    )
+    metric = (await db.execute(stmt_metric)).scalar_one_or_none()
+    if not metric:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metric {metric_id} not found")
+
     base_table_name = ""
     if metric.base_entity_id:
         stmt_t = select(SemanticTableModel.table_name).where(SemanticTableModel.id == metric.base_entity_id)
@@ -1147,20 +1217,15 @@ async def update_metric(
     """Replace a metric definition and reset it to pending approval."""
     try:
         numeric_db_id = int(db_id)
-        resource = await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_manage_metrics")
-        scoped_stmt = select(SemanticMetricModel.id).where(
-            SemanticMetricModel.id == metric_id,
-            SemanticMetricModel.db_id == numeric_db_id,
-        )
-        if (await db.execute(scoped_stmt)).scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
+        await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_create_metrics")
         metric = await update_metric_record(
             db,
             metric_id,
             {"definition": body.definition.model_dump(mode="json")},
             current_user.id,
-            require_ownership=resource.org_id is None,
         )
+        if metric.db_id != numeric_db_id:
+            raise ValueError("Metric does not belong to database")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await db.commit()
@@ -1169,45 +1234,6 @@ async def update_metric(
         metric_id=metric.id,
         definition=metric.definition,
         source=metric.source,
-        status=metric.status,
-    )
-
-
-@router.post("/semantic/{db_id}/metric/{metric_id}/rollback/{target_version}", response_model=MetricResponse)
-async def rollback_metric(
-    db_id: str,
-    metric_id: int,
-    target_version: int = Path(..., ge=1),
-    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_session),
-) -> MetricResponse:
-    """Destructively rewind a metric to an earlier version and re-approve it."""
-    try:
-        numeric_db_id = int(db_id)
-        resource = await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_manage_metrics")
-        scoped_stmt = select(SemanticMetricModel.id).where(
-            SemanticMetricModel.id == metric_id,
-            SemanticMetricModel.db_id == numeric_db_id,
-        )
-        if (await db.execute(scoped_stmt)).scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
-        metric = await rollback_metric_record(
-            db,
-            metric_id=metric_id,
-            target_version=target_version,
-            actor_id=current_user.id,
-            require_ownership=resource.org_id is None,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    await db.commit()
-    await db.refresh(metric)
-    return MetricResponse(
-        metric_id=metric.id,
-        definition=metric.definition,
-        source=metric.source,
-        status=metric.status,
     )
 
 
@@ -1220,7 +1246,7 @@ async def delete_metric(
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Xóa một Business Metric khỏi Semantic Layer."""
-    await _require_resource_permission(db, current_user.id, int(db_id), org_id, "can_manage_metrics")
+    await _require_resource_permission(db, current_user.id, int(db_id), org_id, "can_create_metrics")
     stmt = select(SemanticMetricModel).where(
         SemanticMetricModel.id == metric_id,
         SemanticMetricModel.db_id == int(db_id),
@@ -1277,8 +1303,13 @@ async def _query_target(
     user_id: int,
     org_id: int | None = None,
 ) -> tuple[SemanticDatabaseModel, LiveTargetDbModel]:
-    """Authorize query capability and resolve a Live DB target."""
-    semantic_db = await _require_resource_permission(db, user_id, db_id, org_id, "can_query")
+    semantic_db = await _owned_semantic_database(db, db_id, user_id, org_id)
+    if semantic_db is None:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+    stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == db_id)
+    semantic_db = (await db.execute(stmt)).scalar_one_or_none()
+    if semantic_db is None:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
     live_stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.semantic_db_id == db_id)
     live_db = (await db.execute(live_stmt)).scalar_one_or_none()
     if live_db is None:
@@ -1402,19 +1433,42 @@ def _message_response(message: ChatMessageModel) -> ChatMessageResponse:
 
 def _assistant_metadata(
     suggestions: list[Any] | None,
+    action: str | None = None,
     duplicates: list[Any] | None = None,
     dedupe_performed: bool = True,
     status_name: str = "completed",
+    diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the versioned assistant message metadata contract."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": status_name,
         "suggestions": suggestions or [],
+        "suggestion_action": action,
         "duplicates": duplicates or [],
         "dedupe_performed": dedupe_performed,
+        "diagnostics": diagnostics,
         "error": None,
     }
+
+
+@router.get("/notifications", response_model=NotificationListResponse)
+async def get_notifications(
+    current_user: UserModel = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)
+) -> NotificationListResponse:
+    """Return the current user's persistent in-app notifications."""
+    items, unread_count = await list_notifications(db, current_user.id)
+    return NotificationListResponse(
+        items=[NotificationResponse.model_validate(item) for item in items], unread_count=unread_count
+    )
+
+
+@router.post("/notifications/read", status_code=204)
+async def read_notifications(
+    current_user: UserModel = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)
+) -> None:
+    """Mark all in-app notifications as read for the current user."""
+    await mark_notifications_read(db, current_user.id)
 
 
 @router.get("/semantic/{db_id}/chat/sessions", response_model=list[ChatSessionSummaryResponse])
@@ -1534,9 +1588,9 @@ async def chat_orchestrator(
     - 'chitchat' intent  → friendly Vietnamese natural-language response
     - 'data_question' intent → read-only schema and approved-metric guidance
     - 'metric_query' intent → Business Metric suggestions from schema
-    - 'out_of_scope' intent → polite scope boundary message
     """
     from src.agents.chat_graph import chat_agent
+    from src.agents.nodes.orchestrator_node import orchestrator_node
 
     numeric_db_id = _chat_db_id(db_id)
     try:
@@ -1556,24 +1610,29 @@ async def chat_orchestrator(
         )
         if session.title == "Cuộc trò chuyện mới":
             await update_chat_session_title(db, session.id, current_user.id, auto_generate_session_title(body.message))
-        schema_context = await _load_schema_context_for_db(db, str(numeric_db_id))
         approved_metrics = await _load_approved_metric_context(db, numeric_db_id)
-        existing, dedupe_performed = await load_existing_for_dedupe(db, str(numeric_db_id))
     except ChatAuthorizationError as exc:
         raise HTTPException(status_code=404, detail="Chat session or database not found") from exc
 
     try:
-        final_state = await chat_agent.ainvoke(
-            {
-                "session_id": session.id,
-                "user_message": body.message,
-                "chat_history": history,
-                "enriched_schema": schema_context,
-                "approved_metrics": approved_metrics,
-                "can_generate_metrics": can_generate_metrics,
-                "existing_metrics": existing,
-                "dedupe_performed": dedupe_performed,
-            }
+        classification = await orchestrator_node({"user_message": body.message, "chat_history": history})
+        preclassified_intent = classification.get("intent", "data_question")
+        context = await _build_chat_context(
+            db, numeric_db_id, body.message, preclassified_intent, get_settings().metric_context_token_budget
+        )
+        context_diagnostic = context.diagnostic
+        existing_metrics, dedupe_performed = await load_existing_for_dedupe(db, str(numeric_db_id))
+        final_state = await _chat_state_for_context(
+            chat_agent,
+            context,
+            session.id,
+            body.message,
+            history,
+            approved_metrics,
+            can_generate_metrics,
+            preclassified_intent,
+            existing_metrics,
+            dedupe_performed,
         )
     except Exception as exc:
         await save_chat_message(
@@ -1598,23 +1657,29 @@ async def chat_orchestrator(
     intent = final_state.get("intent", "chitchat")
 
     raw_metrics = final_state.get("suggested_metrics") or []
-    notices = final_state.get("duplicate_notices") or []
-    performed = final_state.get("dedupe_performed", True)
     response_text = final_state.get("chat_response", "")
+    suggestion_action = final_state.get("suggestion_action")
+    notices = final_state.get("duplicate_notices") or []
+    performed = final_state.get("dedupe_performed", dedupe_performed)
     if intent == "metric_query":
-        if raw_metrics:
-            response_text = f"Đã đề xuất {len(raw_metrics)} Metric Definition."
-        elif notices:
-            response_text = "Không có metric mới — các chỉ số đề xuất đã tồn tại trong hệ thống."
-        else:
-            response_text = "Không sinh được metric phù hợp với schema."
+        response_text = (
+            f"Đã đề xuất {len(raw_metrics)} Metric Definition."
+            if raw_metrics
+            else "Không sinh được metric phù hợp với schema."
+        )
     assistant = await save_chat_message(
         db,
         session.id,
         "assistant",
         response_text,
         intent=intent,
-        metadata_json=_assistant_metadata(raw_metrics, duplicates=notices, dedupe_performed=performed),
+        metadata_json=_assistant_metadata(
+            raw_metrics,
+            suggestion_action,
+            duplicates=notices,
+            dedupe_performed=performed,
+            diagnostics=context_diagnostic,
+        ),
         client_message_id=f"{body.client_message_id}:assistant" if body.client_message_id else None,
     )
     refreshed = await get_chat_session_with_messages(db, session.id, current_user.id)
@@ -1629,11 +1694,62 @@ async def chat_orchestrator(
         suggestions=raw_metrics if intent == "metric_query" else None,
         duplicates=notices if intent == "metric_query" else [],
         dedupe_performed=performed,
+        suggestion_action=suggestion_action if intent == "metric_query" else None,
+        diagnostics=_chat_diagnostics_for_role(context_diagnostic, can_generate_metrics),
         session_id=session.id,
         user_message_id=user_message.id,
         assistant_message_id=assistant.id,
         session=_session_summary(refreshed),
     )
+
+
+async def _chat_state_for_context(
+    chat_agent: Any,
+    context: Any,
+    session_id: str,
+    message: str,
+    history: list[dict[str, str]],
+    approved_metrics: list[dict[str, Any]],
+    can_generate_metrics: bool,
+    intent: str,
+    existing_metrics: list[dict[str, Any]] | None,
+    dedupe_performed: bool,
+) -> dict[str, Any]:
+    """Run the graph only after consented context preparation succeeds."""
+    if context.diagnostic["status"] != "ready":
+        return {"intent": "data_question", "chat_response": context.diagnostic["message"]}
+    return await chat_agent.ainvoke(
+        {
+            "session_id": session_id,
+            "user_message": message,
+            "chat_history": history,
+            "enriched_schema": context.schema,
+            "approved_metrics": approved_metrics,
+            "can_generate_metrics": can_generate_metrics,
+            "context_diagnostic": context.diagnostic,
+            "intent": intent,
+            "existing_metrics": existing_metrics or [],
+            "dedupe_performed": dedupe_performed,
+        }
+    )
+
+
+async def _build_chat_context(
+    db: AsyncSession, db_id: int, message: str, intent: str, token_budget: int
+) -> MetricContextResult:
+    """Prepare context only after the request intent is known."""
+    if intent == "metric_query":
+        return await build_metric_context(db, db_id, message, token_budget)
+    if intent == "data_question":
+        return await build_data_context(db, db_id, message, token_budget)
+    return MetricContextResult(schema={}, diagnostic={"status": "ready", "tables": [], "relationship_count": 0})
+
+
+def _chat_diagnostics_for_role(diagnostic: dict[str, Any], can_generate_metrics: bool) -> dict[str, Any]:
+    """Keep table-level diagnostics visible only to Data Leads."""
+    if can_generate_metrics:
+        return diagnostic
+    return {key: value for key, value in diagnostic.items() if key in {"status", "message"}}
 
 
 async def _resolve_chat_session(db: AsyncSession, session_id: str | None, user_id: int, db_id: int) -> ChatSessionModel:
@@ -1661,6 +1777,7 @@ async def _replay_chat_response(
         return None
     metadata = assistant.metadata_json if isinstance(assistant.metadata_json, dict) else {}
     suggestions = metadata.get("suggestions") or []
+    suggestion_action = metadata.get("suggestion_action")
     duplicates = metadata.get("duplicates") or []
     intent = assistant.intent or "chitchat"
     refreshed = await get_chat_session_with_messages(db, session.id, user_id)
@@ -1672,6 +1789,7 @@ async def _replay_chat_response(
         suggestions=suggestions if intent == "metric_query" else None,
         duplicates=duplicates if intent == "metric_query" else [],
         dedupe_performed=bool(metadata.get("dedupe_performed", True)),
+        suggestion_action=suggestion_action if intent == "metric_query" else None,
         session_id=session.id,
         user_message_id=user_message.id,
         assistant_message_id=assistant.id,

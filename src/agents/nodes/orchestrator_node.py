@@ -1,4 +1,4 @@
-"""Orchestrator node: classify user intent for multi-agent routing."""
+"""Classify chat requests for direct data guidance or metric generation."""
 
 from __future__ import annotations
 
@@ -31,7 +31,9 @@ Chỉ trả về DUY NHẤT 1 từ trong 4 từ: "chitchat", "data_question", "m
 Câu hỏi trước đây:
 {history}
 
-Câu hỏi mới nhất: {user_message}"""
+Latest request: {user_message}"""
+
+_INTENTS = {"chitchat", "data_question", "metric_query", "out_of_scope"}
 
 
 async def orchestrator_node(state: AgentState) -> dict[str, Any]:
@@ -40,18 +42,14 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
     Uses LLM with temperature=0.0 for deterministic classification.
     Falls back to 'chitchat' on error to avoid breaking the conversation.
     """
+    existing_intent = state.get("intent")
+    if existing_intent in _INTENTS:
+        return {"intent": existing_intent}
     user_message = state.get("user_message", "").strip()
     if not user_message:
-        return {
-            "intent": "chitchat",
-            "chat_response": "Bạn chưa nhập câu hỏi. Tôi có thể giúp gì cho bạn?",
-        }
-
+        return {"intent": "chitchat", "chat_response": "Bạn chưa nhập câu hỏi. Tôi có thể giúp gì?"}
     try:
-        llm = get_llm()
-        history = _format_history(state.get("chat_history", []))
-        prompt = _CLASSIFY_PROMPT.format(user_message=user_message, history=history)
-        response = await llm.ainvoke(prompt)
+        response = await get_llm().ainvoke(_classification_prompt(state, user_message))
         raw = (response.content if hasattr(response, "content") else str(response)).strip().lower()
         intent = _parse_intent(raw)
         logger.info(
@@ -62,10 +60,15 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
         if intent == "out_of_scope":
             return {"intent": "out_of_scope", "chat_response": _OUT_OF_SCOPE_RESPONSE}
         return {"intent": intent}
-
     except Exception as exc:
-        logger.warning("Orchestrator classification failed, defaulting to chitchat: %s", exc)
-        return {"intent": "chitchat"}
+        logger.warning("Orchestrator failed; defaulting to metric query: %s", exc)
+        return {"intent": "metric_query"}
+
+
+def _classification_prompt(state: AgentState, user_message: str) -> str:
+    """Build a bounded classification prompt from the recent chat history."""
+    history = _format_history(state.get("chat_history", []))
+    return _CLASSIFY_PROMPT.format(history=history, user_message=user_message)
 
 
 def _parse_intent(raw: str) -> str:
@@ -87,4 +90,4 @@ def _format_history(history: list[dict[str, str]]) -> str:
         content = item.get("content", "").strip()[:1000]
         if role in {"user", "assistant"} and content:
             lines.append(f"{role}: {content}")
-    return "\n".join(lines) or "(không có)"
+    return "\n".join(lines) or "(none)"

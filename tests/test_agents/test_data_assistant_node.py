@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agents.nodes.data_assistant_node import data_assistant_node
+from src.agents.nodes.data_assistant_node import _format_context, data_assistant_node
 
 
 @pytest.mark.asyncio
@@ -29,66 +29,64 @@ async def test_data_assistant_returns_data_question_response() -> None:
 
 
 @pytest.mark.asyncio
-async def test_data_assistant_includes_chat_history_in_llm_messages() -> None:
-    """The node must include prior chat_history turns in LLM messages array."""
-    response = MagicMock(content="Cột total có kiểu NUMERIC.")
+async def test_metric_catalog_question_lists_approved_metrics_without_llm() -> None:
+    """Listing approved metrics must not depend on a generative response."""
+    state = {
+        "user_message": "Có những metric gì trong semantic layer?",
+        "approved_metrics": [{"name": "Doanh thu thuần"}, {"name": "Số đơn hoàn thành"}],
+    }
     with patch("src.agents.nodes.data_assistant_node.get_llm") as mock_get_llm:
-        llm = AsyncMock()
-        llm.ainvoke.return_value = response
-        mock_get_llm.return_value = llm
+        result = await data_assistant_node(state)
 
-        history = [
-            {"role": "user", "content": "Bảng orders có những cột nào?"},
-            {"role": "assistant", "content": "Bảng orders có cột id, user_id, total."},
-        ]
-
-        result = await data_assistant_node(
-            {
-                "user_message": "Cột total kiểu gì?",
-                "chat_history": history,
-                "enriched_schema": {"orders": {"columns": ["id", "user_id", "total"]}},
-                "approved_metrics": [],
-            }
-        )
-
-        assert result["intent"] == "data_question"
-        assert result["chat_response"] == "Cột total có kiểu NUMERIC."
-        llm.ainvoke.assert_awaited_once()
-        invoked_messages = llm.ainvoke.call_args[0][0]
-        # Verify history is passed between system messages and current user message
-        roles = [m["role"] for m in invoked_messages]
-        assert roles == ["system", "system", "user", "assistant", "user"]
-        assert invoked_messages[2]["content"] == "Bảng orders có những cột nào?"
-        assert invoked_messages[3]["content"] == "Bảng orders có cột id, user_id, total."
-        assert invoked_messages[4]["content"] == "Cột total kiểu gì?"
+    mock_get_llm.assert_not_called()
+    assert "2 metric" in result["chat_response"]
+    assert "Doanh thu thuần" in result["chat_response"]
 
 
 @pytest.mark.asyncio
-async def test_data_assistant_empty_message_returns_prompt() -> None:
-    """Empty user_message returns quick guidance without calling LLM."""
+async def test_unsupported_metric_returns_missing_schema_inputs_without_llm() -> None:
+    """Unsupported KPI requests must not be turned into a metric card."""
+    state = {
+        "user_message": "Đếm khách hàng phát sinh giao dịch",
+        "metric_decision": {
+            "kind": "missing_metric_unsupported",
+            "reason": "Chưa có nguồn giao dịch.",
+            "missing_input_codes": ["transaction_table", "customer_link_column"],
+        },
+    }
     with patch("src.agents.nodes.data_assistant_node.get_llm") as mock_get_llm:
-        result = await data_assistant_node({"user_message": ""})
-        mock_get_llm.assert_not_called()
+        result = await data_assistant_node(state)
 
-    assert result["intent"] == "data_question"
-    assert "Bạn muốn tìm hiểu phần dữ liệu nào?" in result["chat_response"]
+    mock_get_llm.assert_not_called()
+    assert "Bảng giao dịch" in result["chat_response"]
 
 
 @pytest.mark.asyncio
-async def test_data_assistant_handles_llm_exception() -> None:
-    """LLM exception is caught safely and returns error response."""
-    with patch("src.agents.nodes.data_assistant_node.get_llm") as mock_get_llm:
-        llm = AsyncMock()
-        llm.ainvoke.side_effect = RuntimeError("LLM failure")
-        mock_get_llm.return_value = llm
+async def test_unsupported_metric_never_renders_foreign_llm_text() -> None:
+    """Unsupported-metric guidance must stay Vietnamese when the decision payload is English."""
+    state = {
+        "user_message": "Đếm khách hàng phát sinh giao dịch",
+        "metric_decision": {
+            "kind": "missing_metric_unsupported",
+            "reason": "The transaction table is absent.",
+            "missing_input_codes": ["transaction_table", "customer_link_column"],
+        },
+    }
 
-        result = await data_assistant_node(
-            {
-                "user_message": "test query",
-                "enriched_schema": {},
-                "approved_metrics": [],
-            }
-        )
+    result = await data_assistant_node(state)
 
-    assert result["intent"] == "data_question"
-    assert "Không thể đọc semantic layer" in result["chat_response"]
+    assert "Bảng giao dịch" in result["chat_response"]
+    assert "transaction table" not in result["chat_response"]
+
+
+def test_context_keeps_columns_after_the_legacy_character_limit() -> None:
+    """Data guidance must not silently drop late schema columns."""
+    columns = [{"column_name": f"field_{index}", "description": "x" * 100} for index in range(160)]
+    columns.extend([{"column_name": "is_completed"}, {"column_name": "completed_time"}])
+
+    state = {"enriched_schema": {"tables": [{"table_name": "order_header", "columns": columns}]}}
+    context = _format_context(state)
+
+    assert len(context) > 14000
+    assert "is_completed" in context
+    assert "completed_time" in context

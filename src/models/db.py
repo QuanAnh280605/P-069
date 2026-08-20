@@ -169,6 +169,12 @@ class UserModel(Base):
     chat_sessions: Mapped[list["ChatSessionModel"]] = relationship(
         "ChatSessionModel", back_populates="user", cascade="all, delete-orphan"
     )
+    metric_requests: Mapped[list["MetricRequestModel"]] = relationship(
+        "MetricRequestModel", back_populates="requester", foreign_keys="MetricRequestModel.requester_id"
+    )
+    notifications: Mapped[list["NotificationModel"]] = relationship(
+        "NotificationModel", back_populates="recipient", cascade="all, delete-orphan"
+    )
     imported_schemas: Mapped[list["ImportedSchemaModel"]] = relationship(
         "ImportedSchemaModel", back_populates="creator", cascade="all, delete-orphan"
     )
@@ -289,6 +295,9 @@ class SemanticDatabaseModel(Base):
     )
     chat_sessions: Mapped[list["ChatSessionModel"]] = relationship(
         "ChatSessionModel", back_populates="database", cascade="all, delete-orphan"
+    )
+    metric_requests: Mapped[list["MetricRequestModel"]] = relationship(
+        "MetricRequestModel", back_populates="database", cascade="all, delete-orphan"
     )
 
 
@@ -494,3 +503,61 @@ class ChatMessageModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     session: Mapped["ChatSessionModel"] = relationship("ChatSessionModel", back_populates="messages")
+
+
+class MetricRequestModel(Base):
+    """A Member-submitted proposal awaiting Data Lead review."""
+
+    __tablename__ = "metric_requests"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="ck_metric_requests_status"),
+        Index("idx_metric_requests_db_status", "db_id", "status"),
+        Index("idx_metric_requests_requester", "requester_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    db_id: Mapped[int] = mapped_column(Integer, ForeignKey("semantic_databases.id", ondelete="CASCADE"), nullable=False)
+    requester_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    assistant_message_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False
+    )
+    suggestion_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    definition: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    reviewed_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metric_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("semantic_metrics.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    database: Mapped["SemanticDatabaseModel"] = relationship("SemanticDatabaseModel", back_populates="metric_requests")
+    requester: Mapped["UserModel"] = relationship(
+        "UserModel", back_populates="metric_requests", foreign_keys=[requester_id]
+    )
+    metric: Mapped["SemanticMetricModel | None"] = relationship("SemanticMetricModel")
+
+
+class NotificationModel(Base):
+    """Persistent in-app notification for a Workspace user."""
+
+    __tablename__ = "notifications"
+    __table_args__ = (Index("idx_notifications_recipient_unread", "recipient_id", "read_at", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recipient_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    metric_request_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("metric_requests.id", ondelete="CASCADE"), nullable=True
+    )
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    recipient: Mapped["UserModel"] = relationship("UserModel", back_populates="notifications")
+    metric_request: Mapped["MetricRequestModel | None"] = relationship("MetricRequestModel")

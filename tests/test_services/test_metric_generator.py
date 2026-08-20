@@ -73,6 +73,21 @@ async def test_generate_definition_and_yaml_without_sql() -> None:
 
 
 @pytest.mark.asyncio
+async def test_generation_returns_one_definition_for_one_request() -> None:
+    """The custom generation endpoint must match the one-metric chat contract."""
+    structured = AsyncMock()
+    structured.ainvoke.return_value = MetricSuggestions(metrics=[_definition(), _definition(), _definition()])
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+    schema = {"order_items": {"columns": [{"column_name": "quantity"}, {"column_name": "unit_price"}]}}
+
+    with patch("src.services.metrics.get_llm", return_value=llm):
+        suggestions = await generate_metrics_from_prompt("Tính doanh thu", schema_dict=schema)
+
+    assert len(suggestions) == 1
+
+
+@pytest.mark.asyncio
 async def test_generation_rejects_unknown_expression_column() -> None:
     structured = AsyncMock()
     structured.ainvoke.return_value = MetricSuggestions(metrics=[_definition()])

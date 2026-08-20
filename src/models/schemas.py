@@ -223,6 +223,61 @@ class MetricWithHistoryResponse(MetricResponse):
     history: list[MetricVersionResponse] = Field(default_factory=list)
 
 
+class MetricRequestCreate(BaseModel):
+    """Select one AI suggestion from an owned assistant chat message."""
+
+    assistant_message_id: str = Field(..., min_length=36, max_length=36)
+    suggestion_index: int = Field(..., ge=0)
+
+
+class MetricRequestReview(BaseModel):
+    """Data Lead decision for a pending metric request."""
+
+    definition: MetricDefinition | None = None
+    review_note: str | None = Field(default=None, max_length=2000)
+
+
+class MetricRequestResponse(BaseModel):
+    """Safe representation of a Member metric request."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    db_id: int
+    requester_id: int
+    assistant_message_id: str
+    suggestion_index: int
+    definition: MetricDefinition
+    status: Literal["pending", "approved", "rejected"]
+    reviewed_by: int | None = None
+    review_note: str | None = None
+    metric_id: int | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class NotificationResponse(BaseModel):
+    """Persistent in-app notification returned to its recipient."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    type: str
+    title: str
+    body: str
+    metric_request_id: int | None = None
+    read_at: datetime | None = None
+    created_at: datetime
+
+
+class NotificationListResponse(BaseModel):
+    """Notification list plus its unread badge count."""
+
+    items: list[NotificationResponse] = Field(default_factory=list)
+    unread_count: int = 0
+
+
 # ---------------------------------------------------------------------------
 # Custom Prompt Metric Generation
 # ---------------------------------------------------------------------------
@@ -743,6 +798,8 @@ class ChatResponse(BaseModel):
     )
     duplicates: list[DuplicateMetricNotice] = Field(default_factory=list)
     dedupe_performed: bool = True
+    suggestion_action: Literal["save_metric", "submit_metric_request"] | None = None
+    diagnostics: dict[str, Any] | None = None
     session_id: str
     user_message_id: str
     assistant_message_id: str

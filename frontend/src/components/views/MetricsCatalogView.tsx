@@ -10,13 +10,22 @@ import {
   Sparkles,
   Send,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { MetricCard } from '@/components/metrics/MetricCard';
 import { MetricHistoryDialog } from '@/components/metrics/MetricHistoryDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { getMetricHistoryApi, MetricHistory as MetricHistoryData, MetricRecord } from '@/lib/api';
+import {
+  approveMetricRequestApi,
+  getMetricHistoryApi,
+  listMetricRequestsApi,
+  MetricDefinition,
+  MetricHistory as MetricHistoryData,
+  MetricRecord,
+  MetricRequest,
+  rejectMetricRequestApi,
+} from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { WorkspaceDatabase } from '@/components/workspace/shared';
 import { ViewHeader } from '@/components/workspace/ViewHeader';
@@ -44,6 +53,9 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
   const [history, setHistory] = useState<MetricHistoryData | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [requests, setRequests] = useState<MetricRequest[]>([]);
+  const [editingRequestId, setEditingRequestId] = useState<number | null>(null);
+  const [editedDefinition, setEditedDefinition] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'pending' | 'submitted' | 'approved'>('all');
   const canManage = Boolean(props.canManageMetrics);
   const canApprove = Boolean(props.canApproveMetrics);
@@ -55,6 +67,33 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
         : props.metrics.filter((item) => item.status === 'approved'),
     [canManage, isMemberSubmitter, props.metrics],
   );
+
+  useEffect(() => {
+    if (!canManage || !props.dbId) return;
+    void listMetricRequestsApi(String(props.dbId)).then(setRequests).catch(() => setRequests([]));
+  }, [canManage, props.dbId]);
+
+  const resolveRequest = async (
+    request: MetricRequest,
+    approved: boolean,
+    definition?: MetricDefinition,
+  ) => {
+    if (!props.dbId) return;
+    const result = approved
+      ? await approveMetricRequestApi(String(props.dbId), request.id, definition)
+      : await rejectMetricRequestApi(String(props.dbId), request.id);
+    setRequests((current) => current.map((item) => (item.id === result.id ? result : item)));
+    await props.onMetricsChanged?.();
+  };
+
+  const approveEditedRequest = async (request: MetricRequest) => {
+    try {
+      await resolveRequest(request, true, JSON.parse(editedDefinition) as MetricDefinition);
+      setEditingRequestId(null);
+    } catch {
+      window.alert('Definition JSON không hợp lệ hoặc không thể được duyệt.');
+    }
+  };
 
   const filtered = useMemo(
     () =>
@@ -162,6 +201,57 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
         >
           Chế độ chỉ xem: catalog chỉ hiển thị các metric đã được phê duyệt.
         </div>
+      )}
+
+      {canManage && requests.some((item) => item.status === 'pending') && (
+        <section className="border-b border-border bg-secondary/10 px-6 py-4">
+          <h2 className="mb-3 text-sm font-semibold text-foreground">
+            Yêu cầu metric từ Member ({requests.filter((item) => item.status === 'pending').length})
+          </h2>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {requests.filter((item) => item.status === 'pending').map((request) => (
+              <article key={request.id} className="rounded-lg border border-border bg-card p-3 text-xs">
+                <p className="font-semibold text-foreground">{request.definition.metric.name}</p>
+                <p className="mt-1 font-mono text-muted-foreground">
+                  {request.definition.metric.formula.function}({request.definition.metric.formula.expression})
+                </p>
+                {editingRequestId === request.id && (
+                  <textarea
+                    aria-label="Definition metric request"
+                    className="mt-2 min-h-36 w-full rounded border border-border bg-background p-2 font-mono text-[11px]"
+                    value={editedDefinition}
+                    onChange={(event) => setEditedDefinition(event.target.value)}
+                  />
+                )}
+                <div className="mt-3 flex gap-2">
+                  {editingRequestId === request.id ? (
+                    <Button size="sm" className="h-7 text-xs" onClick={() => void approveEditedRequest(request)}>
+                      Duyệt definition đã sửa
+                    </Button>
+                  ) : (
+                    <Button size="sm" className="h-7 text-xs" onClick={() => void resolveRequest(request, true)}>
+                      Duyệt & tạo
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      setEditingRequestId(request.id);
+                      setEditedDefinition(JSON.stringify(request.definition, null, 2));
+                    }}
+                  >
+                    Chỉnh sửa definition
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void resolveRequest(request, false)}>
+                    Từ chối
+                  </Button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Search & Filter Toolbar */}

@@ -593,6 +593,8 @@ export interface ChatOrchestratorResponse {
   suggestions?: MetricSuggestion[] | null;
   duplicates?: DuplicateMetricNotice[];
   dedupe_performed?: boolean;
+  diagnostics?: { status: string; message?: string; tables?: string[]; relationship_count?: number } | null;
+  suggestion_action?: 'save_metric' | 'submit_metric_request' | null;
   session_id: string;
   user_message_id: string;
   assistant_message_id: string;
@@ -622,6 +624,7 @@ export interface ChatMessageItem {
     suggestions?: MetricSuggestion[];
     duplicates?: DuplicateMetricNotice[];
     dedupe_performed?: boolean;
+    suggestion_action?: 'save_metric' | 'submit_metric_request' | null;
     error?: string | null;
   } | null;
   created_at: string;
@@ -700,6 +703,66 @@ export async function sendChatOrchestratorApi(
       client_message_id: clientMessageId,
     }),
   });
+}
+
+export interface MetricRequest {
+  id: number;
+  db_id: number;
+  requester_id: number;
+  assistant_message_id: string;
+  suggestion_index: number;
+  definition: MetricDefinition;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewed_by?: number | null;
+  review_note?: string | null;
+  metric_id?: number | null;
+  reviewed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppNotification {
+  id: number;
+  type: string;
+  title: string;
+  body: string;
+  metric_request_id?: number | null;
+  read_at?: string | null;
+  created_at: string;
+}
+
+export async function submitMetricRequestApi(
+  dbId: string, assistantMessageId: string, suggestionIndex: number,
+): Promise<MetricRequest> {
+  return chatRequest<MetricRequest>(`${API_BASE}/api/v1/semantic/${dbId}/metric-requests`, {
+    method: 'POST', body: JSON.stringify({ assistant_message_id: assistantMessageId, suggestion_index: suggestionIndex }),
+  });
+}
+
+export async function listMetricRequestsApi(dbId: string): Promise<MetricRequest[]> {
+  return chatRequest<MetricRequest[]>(`${API_BASE}/api/v1/semantic/${dbId}/metric-requests`);
+}
+
+export async function approveMetricRequestApi(
+  dbId: string, requestId: number, definition?: MetricDefinition, reviewNote?: string,
+): Promise<MetricRequest> {
+  return chatRequest<MetricRequest>(`${API_BASE}/api/v1/semantic/${dbId}/metric-requests/${requestId}/approve`, {
+    method: 'POST', body: JSON.stringify({ definition: definition || null, review_note: reviewNote || null }),
+  });
+}
+
+export async function rejectMetricRequestApi(dbId: string, requestId: number, reviewNote?: string): Promise<MetricRequest> {
+  return chatRequest<MetricRequest>(`${API_BASE}/api/v1/semantic/${dbId}/metric-requests/${requestId}/reject`, {
+    method: 'POST', body: JSON.stringify({ review_note: reviewNote || null }),
+  });
+}
+
+export async function listNotificationsApi(): Promise<{ items: AppNotification[]; unread_count: number }> {
+  return chatRequest(`${API_BASE}/api/v1/notifications`);
+}
+
+export async function markNotificationsReadApi(): Promise<void> {
+  await chatRequest<void>(`${API_BASE}/api/v1/notifications/read`, { method: 'POST' });
 }
 
 /* Legacy SQL metric adapter removed in favor of canonical definitions.

@@ -45,6 +45,10 @@ class MetricRequiresReviewError(ValueError):
     """Raised when a metric cannot be approved until its definition diagnostics are resolved."""
 
 
+class DuplicateMetricError(ValueError):
+    """Raised when a metric name already exists within one semantic database."""
+
+
 def _pydantic_tables_to_typeddict(tables) -> list[dict]:
     """Convert Pydantic TableMetadata to TypedDict for enrichment pipeline."""
     result = []
@@ -202,6 +206,7 @@ async def enrich_and_save_canonical_schema(
         )
 
         col_enrichments = {c["column_name"]: c for c in table_enrichment.get("columns", [])}
+        fk_references = _foreign_key_references(table_meta)
         for col_meta in table_meta.columns:
             col_enrich = col_enrichments.get(col_meta.column_name.raw_name, {})
             await _upsert_semantic_column(
@@ -209,6 +214,7 @@ async def enrich_and_save_canonical_schema(
                 table_id=table_id,
                 col_meta=col_meta,
                 enrichment=col_enrich,
+                fk_reference=fk_references.get(col_meta.column_name.raw_name),
             )
 
     relationships = await _extract_and_save_relationships(db, connection_id, raw_schema, table_id_map)
@@ -280,6 +286,7 @@ async def create_metric(
 ) -> SemanticMetricModel:
     """Create a metric and its initial version with a server-controlled status."""
     draft = MetricDefinition.model_validate(metric_data["definition"])
+    await _ensure_unique_metric_name(db, connection_id, draft.metric.name)
     definition = await MetricDefinitionResolver(db).resolve(connection_id, draft)
     status = status_override or ("needs_review" if definition.diagnostics else "pending_approval")
     definition = with_metric_status(definition, status)
@@ -313,6 +320,15 @@ async def create_metric(
     await db.flush()
 
     return metric
+
+
+async def _ensure_unique_metric_name(db: AsyncSession, db_id: int, name: str) -> None:
+    """Reject a duplicate metric name before creating a second catalog record."""
+    stmt = select(SemanticMetricModel.name).where(SemanticMetricModel.db_id == db_id)
+    existing_names = (await db.execute(stmt)).scalars().all()
+    normalized = name.strip().casefold()
+    if any(existing.strip().casefold() == normalized for existing in existing_names):
+        raise DuplicateMetricError(f'Metric "{name}" already exists in this Semantic Layer')
 
 
 async def update_metric(
@@ -494,6 +510,7 @@ async def _upsert_semantic_column(
     table_id: int,
     col_meta: Any,
     enrichment: dict[str, Any],
+    fk_reference: tuple[str, str] | None,
 ) -> int:
     """Upsert a semantic column: update if exists (by table_id + column_name), insert otherwise."""
     col_name = col_meta.column_name.raw_name
@@ -512,6 +529,9 @@ async def _upsert_semantic_column(
         existing.is_time_dimension = is_time
         existing.data_type = data_type
         existing.is_primary_key = col_meta.primary_key
+        existing.is_foreign_key = fk_reference is not None
+        existing.fk_target_table = fk_reference[0] if fk_reference else None
+        existing.fk_target_column = fk_reference[1] if fk_reference else None
         existing.is_nullable = col_meta.nullable
         existing.allowed_values = list(col_meta.sample_values) if col_meta.sample_values else None
         return existing.id
@@ -523,6 +543,9 @@ async def _upsert_semantic_column(
         business_name=enrichment.get("business_name", col_name),
         description=enrichment.get("description", ""),
         is_primary_key=col_meta.primary_key,
+        is_foreign_key=fk_reference is not None,
+        fk_target_table=fk_reference[0] if fk_reference else None,
+        fk_target_column=fk_reference[1] if fk_reference else None,
         is_nullable=col_meta.nullable,
         is_time_dimension=is_time,
         allowed_values=list(col_meta.sample_values) if col_meta.sample_values else None,
@@ -530,6 +553,15 @@ async def _upsert_semantic_column(
     db.add(record)
     await db.flush()
     return record.id
+
+
+def _foreign_key_references(table_meta: Any) -> dict[str, tuple[str, str]]:
+    """Index raw FK metadata by local column for semantic-column persistence."""
+    references: dict[str, tuple[str, str]] = {}
+    for foreign_key in table_meta.foreign_keys:
+        for source, target in zip(foreign_key.constrained_columns, foreign_key.referred_columns, strict=True):
+            references[source.raw_name] = (foreign_key.referred_table.raw_name, target.raw_name)
+    return references
 
 
 async def _extract_and_save_relationships(

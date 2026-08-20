@@ -113,6 +113,25 @@ async def test_node_without_existing_uses_v1() -> None:
     assert result["duplicate_notices"] == []
 
 
+@pytest.mark.asyncio
+async def test_ambiguous_metric_marks_assumptions_low_confidence() -> None:
+    """Unspecified business conditions must be visible in the proposal."""
+    structured = AsyncMock()
+    structured.ainvoke.return_value = MetricSuggestions(metrics=[_definition()])
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+    state = {
+        "enriched_schema": {"tables": [{"table_name": "orders", "columns": [{"column_name": "amount"}]}]},
+        "metric_decision": {"kind": "missing_metric_supported", "assumptions": ["Chưa nêu cách xử lý hoàn tiền"]},
+    }
+    with patch("src.agents.nodes.on_demand_metric_suggest_node.get_llm", return_value=llm):
+        result = await on_demand_metric_suggest_node(state)
+
+    metric = result["suggested_metrics"][0]["definition"]["metric"]
+    assert metric["confidence"] == "low"
+    assert "Giả định cần xác nhận" in metric["excluded_notes"]
+
+
 def test_schema_prompt_contains_entity_and_column() -> None:
     schema = {
         "tables": [
