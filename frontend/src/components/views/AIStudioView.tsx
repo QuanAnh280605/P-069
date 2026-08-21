@@ -36,6 +36,7 @@ interface AIStudioViewProps {
   onOpenCatalog?: () => void;
   onNotify?: (message: string) => void;
   mode?: 'data_assistant' | 'metric_studio';
+  refreshKey?: number;
 }
 
 export function AIStudioView({
@@ -52,6 +53,7 @@ export function AIStudioView({
   onOpenCatalog,
   onNotify,
   mode = 'metric_studio',
+  refreshKey = 0,
 }: AIStudioViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -66,6 +68,16 @@ export function AIStudioView({
       new Set(
         metricRequests
           .filter((item) => item.status === 'pending')
+          .map((item) => metricRequestKey(item.assistant_message_id, item.suggestion_index)),
+      ),
+    [metricRequests],
+  );
+
+  const approvedRequestKeys = useMemo(
+    () =>
+      new Set(
+        metricRequests
+          .filter((item) => item.status === 'approved')
           .map((item) => metricRequestKey(item.assistant_message_id, item.suggestion_index)),
       ),
     [metricRequests],
@@ -125,7 +137,7 @@ export function AIStudioView({
   useEffect(() => {
     if (!semanticDbId || canGenerateMetrics) return;
     void listMetricRequestsApi(String(semanticDbId)).then(setMetricRequests).catch(() => setMetricRequests([]));
-  }, [canGenerateMetrics, semanticDbId]);
+  }, [canGenerateMetrics, semanticDbId, refreshKey]);
 
   const send = async (prompt: string, _targetTables: string[]) => {
     const clientMessageId = crypto.randomUUID();
@@ -264,9 +276,14 @@ export function AIStudioView({
 
   const submitRequest = async (assistantMessageId: string, suggestionIndex: number) => {
     if (!semanticDbId) throw new Error('Semantic database chưa sẵn sàng.');
-    const request = await submitMetricRequestApi(String(semanticDbId), assistantMessageId, suggestionIndex);
-    setMetricRequests((current) => [request, ...current]);
-    onNotify?.('Đã gửi yêu cầu cho Data Lead xem xét.');
+    try {
+      const request = await submitMetricRequestApi(String(semanticDbId), assistantMessageId, suggestionIndex);
+      setMetricRequests((current) => [request, ...current]);
+      onNotify?.('Đã gửi yêu cầu cho Data Lead xem xét.');
+    } catch (error) {
+      // The server refuses duplicate submissions — surface it instead of failing silently.
+      appendError(setMessages, error instanceof Error ? error.message : 'Không thể gửi yêu cầu.');
+    }
   };
 
   const dbProp = {
@@ -349,6 +366,7 @@ export function AIStudioView({
           onUseExistingDuplicate={useExistingDuplicate}
           onSubmitMetricRequest={!canGenerateMetrics ? submitRequest : undefined}
           submittedRequestKeys={submittedRequestKeys}
+          approvedRequestKeys={approvedRequestKeys}
           savedMetricNames={layer.metrics.map((metric) => metric.name)}
         />
       </div>

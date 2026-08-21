@@ -49,16 +49,19 @@ async def create_metric_request(
 async def _reject_duplicate_pending(
     db: AsyncSession, db_id: int, requester_id: int, message_id: str, index: int
 ) -> None:
-    """Refuse a second pending request for the same suggestion."""
-    stmt = select(MetricRequestModel).where(
+    """Refuse a resubmission while the same suggestion is pending or approved."""
+    stmt = select(MetricRequestModel.status).where(
         MetricRequestModel.db_id == db_id,
         MetricRequestModel.requester_id == requester_id,
         MetricRequestModel.assistant_message_id == message_id,
         MetricRequestModel.suggestion_index == index,
-        MetricRequestModel.status == "pending",
+        MetricRequestModel.status.in_(["pending", "approved"]),
     )
-    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+    status = (await db.execute(stmt)).scalar_one_or_none()
+    if status == "pending":
         raise MetricRequestError("Metric request already pending review")
+    if status == "approved":
+        raise MetricRequestError("Metric request already approved")
 
 
 async def _owned_suggestion(db: AsyncSession, db_id: int, user_id: int, message_id: str, index: int) -> dict:
@@ -199,3 +202,19 @@ async def mark_notifications_read(db: AsyncSession, user_id: int) -> None:
     for item in items:
         item.read_at = datetime.now(UTC)
     await db.commit()
+
+
+async def mark_notification_read(db: AsyncSession, user_id: int, notification_id: int) -> NotificationModel | None:
+    """Mark one owned notification as read; return None when it is not found."""
+    item = (
+        await db.execute(
+            select(NotificationModel).where(
+                NotificationModel.id == notification_id,
+                NotificationModel.recipient_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if item is not None and item.read_at is None:
+        item.read_at = datetime.now(UTC)
+        await db.commit()
+    return item

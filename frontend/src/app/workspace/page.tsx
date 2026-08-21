@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { AIStudioView } from '@/components/views/AIStudioView';
@@ -40,6 +40,7 @@ import {
   listImportedSchemas,
   listLiveTargetDbs,
   listNotificationsApi,
+  markNotificationReadApi,
   markNotificationsReadApi,
   listMetricsApi,
   LiveDbRecord,
@@ -159,6 +160,9 @@ export default function WorkspacePage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [catalogRefreshKey, setCatalogRefreshKey] = useState(0);
+  // Latest-ref so the SSE subscription stays stable across tab/layer changes.
+  const refreshSemanticDataRef = useRef<() => Promise<void>>(async () => {});
 
   // Chat sessions state lifted to page level
   const [sessions, setSessions] = useState<ChatSessionItem[]>([]);
@@ -201,8 +205,18 @@ export default function WorkspacePage() {
     return streamNotifications((payload) => {
       setNotifications(payload.items);
       setUnreadNotifications(payload.unread_count);
+      // A new metric-request notification may have changed catalog data.
+      setCatalogRefreshKey((current) => current + 1);
+      // Approved requests create metrics the catalog must show without a reload.
+      void refreshSemanticDataRef.current();
     });
   }, [token]);
+
+  const openCatalog = useCallback(() => {
+    // Already-on-catalog clicks do not remount the view, so nudge a refetch.
+    setCatalogRefreshKey((current) => current + 1);
+    setTab('metrics');
+  }, []);
 
   const markAllNotificationsRead = useCallback(async () => {
     await markNotificationsReadApi();
@@ -210,6 +224,15 @@ export default function WorkspacePage() {
     setNotifications((current) =>
       current.map((item) => ({ ...item, read_at: item.read_at || new Date().toISOString() })),
     );
+  }, []);
+
+  const markNotificationRead = useCallback(async (item: AppNotification) => {
+    if (item.read_at) return;
+    setNotifications((current) =>
+      current.map((entry) => (entry.id === item.id ? { ...entry, read_at: new Date().toISOString() } : entry)),
+    );
+    setUnreadNotifications((current) => Math.max(0, current - 1));
+    await markNotificationReadApi(item.id);
   }, []);
 
   useEffect(() => {
@@ -361,6 +384,10 @@ export default function WorkspacePage() {
     }
   }, [activeLayerId, semanticDbId, notify, tab]);
 
+  useEffect(() => {
+    refreshSemanticDataRef.current = refreshSemanticData;
+  }, [refreshSemanticData]);
+
   // Load catalog on-demand when user opens Explorer tab
   useEffect(() => {
     if (tab === 'explorer' && semanticDbId) {
@@ -508,8 +535,9 @@ export default function WorkspacePage() {
       <NotificationCenter
         items={notifications}
         unreadCount={unreadNotifications}
-        onOpenCatalog={() => setTab('metrics')}
+        onOpenCatalog={openCatalog}
         onMarkAllRead={markAllNotificationsRead}
+        onMarkRead={markNotificationRead}
       />
       {toast && (
         <div className="fixed right-6 top-6 z-60 rounded-xl bg-card border border-border px-4 py-2.5 text-xs font-semibold text-foreground shadow-2xl animate-in fade-in slide-in-from-top-2">
@@ -535,7 +563,8 @@ export default function WorkspacePage() {
               onMetricsChanged={refreshSemanticData}
               onNotify={notify}
               onEditMetricRequest={canManageMetrics ? (item) => openEditor(undefined, item) : undefined}
-              onOpenCatalog={() => setTab('metrics')}
+              onOpenCatalog={openCatalog}
+              refreshKey={catalogRefreshKey}
             />
           )}
           {tab === 'metrics' && (
@@ -549,6 +578,8 @@ export default function WorkspacePage() {
               onOpenStudio={canUseMetricStudio ? () => setTab('studio') : undefined}
               onApproveAll={canApproveMetrics ? approve : undefined}
               onApproveMetric={canApproveMetrics ? approveSingleMetric : undefined}
+              onMetricsChanged={refreshSemanticData}
+              refreshKey={catalogRefreshKey}
             />
           )}
           {tab === 'explorer' && (

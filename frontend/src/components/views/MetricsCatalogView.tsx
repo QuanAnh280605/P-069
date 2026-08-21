@@ -42,9 +42,11 @@ interface MetricsCatalogViewProps {
   onSubmitMetric?: () => void;
   onMetricsChanged?: () => Promise<void> | void;
   canSubmitMetric?: boolean;
+  refreshKey?: number;
   canManageMetrics?: boolean;
   canApproveMetrics?: boolean;
   database?: WorkspaceDatabase | null;
+  refreshKey?: number;
 }
 
 export function MetricsCatalogView(props: MetricsCatalogViewProps) {
@@ -71,7 +73,7 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
   useEffect(() => {
     if (!canManage || !props.dbId) return;
     void listMetricRequestsApi(String(props.dbId)).then(setRequests).catch(() => setRequests([]));
-  }, [canManage, props.dbId]);
+  }, [canManage, props.dbId, props.refreshKey]);
 
   const resolveRequest = async (
     request: MetricRequest,

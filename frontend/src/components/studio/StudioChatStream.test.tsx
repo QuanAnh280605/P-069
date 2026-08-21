@@ -174,6 +174,28 @@ describe('StudioChatStream', () => {
     expect(screen.queryByRole('button', { name: /Gửi Data Lead xem xét/i })).not.toBeInTheDocument();
   });
 
+  it('shows the approved state instead of a resubmit button once the Data Lead approved', () => {
+    render(
+      <StudioChatStream
+        messages={[{
+          id: 'assistant-message', sender: 'assistant', text: 'Gợi ý', timestamp: '10:00',
+          suggestionAction: 'submit_metric_request',
+          suggestions: [{ definition: { metric: { name: 'Doanh thu trước thuế', formula: { function: 'SUM', expression: 'amount' }, base_entity: 'orders', filters: [], status: 'pending_approval', confidence: 'high', excluded_notes: '' } }, yaml_preview: '' }],
+        }]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={[]}
+        mode="data_assistant"
+        approvedRequestKeys={new Set(['assistant-message:0'])}
+      />,
+    );
+
+    const approvedBtn = screen.getByRole('button', { name: /Đã được Data Lead duyệt/i });
+    expect(approvedBtn).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Gửi Data Lead xem xét/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Đã gửi cho Data Lead/i })).not.toBeInTheDocument();
+  });
+
   it('ignores a second click while the request is still being sent', () => {
     let resolveSubmit: (() => void) | undefined;
     const submit = vi.fn(

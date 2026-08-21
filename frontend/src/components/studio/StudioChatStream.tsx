@@ -55,6 +55,9 @@ interface StudioChatStreamProps {
   theme?: 'light' | 'dark';
   onOpenCatalog?: () => void;
   mode?: 'data_assistant' | 'metric_studio';
+  savedMetricNames?: string[];
+  submittedRequestKeys?: ReadonlySet<string>;
+  approvedRequestKeys?: ReadonlySet<string>;
   onRenameSuggestion?: SuggestionIndexHandler;
   onDiscardSuggestion?: SuggestionIndexHandler;
   onDismissDuplicate?: SuggestionIndexHandler;
@@ -214,6 +217,9 @@ export function StudioChatStream(props: StudioChatStreamProps) {
               onEdit={props.onEditMetric}
               onRefine={props.onRefineWithAI}
               onOpenCatalog={props.onOpenCatalog}
+              onSubmitMetricRequest={props.onSubmitMetricRequest}
+              submittedKeys={props.submittedRequestKeys || new Set()}
+              approvedKeys={props.approvedRequestKeys || new Set()}
               onRenameSuggestion={props.onRenameSuggestion}
               onDiscardSuggestion={props.onDiscardSuggestion}
               onDismissDuplicate={props.onDismissDuplicate}
@@ -339,6 +345,9 @@ function MessageBubble({
   onEdit,
   onRefine,
   onOpenCatalog,
+  onSubmitMetricRequest,
+  submittedKeys,
+  approvedKeys,
   onRenameSuggestion,
   onDiscardSuggestion,
   onDismissDuplicate,
@@ -352,6 +361,9 @@ function MessageBubble({
   onEdit?: (suggestion: MetricSuggestion) => void;
   onRefine?: (suggestion: MetricSuggestion) => void;
   onOpenCatalog?: () => void;
+  onSubmitMetricRequest?: (messageId: string, suggestionIndex: number) => Promise<void>;
+  submittedKeys: ReadonlySet<string>;
+  approvedKeys: ReadonlySet<string>;
   onRenameSuggestion?: SuggestionIndexHandler;
   onDiscardSuggestion?: SuggestionIndexHandler;
   onDismissDuplicate?: SuggestionIndexHandler;
@@ -418,11 +430,14 @@ function MessageBubble({
                 onEdit={() => onEdit?.(sug)}
                 onRefine={() => onRefine?.(sug)}
                 onOpenCatalog={onOpenCatalog}
+                action={message.suggestionAction}
+                isSubmitted={submittedKeys.has(metricRequestKey(message.id, idx))}
+                isApproved={approvedKeys.has(metricRequestKey(message.id, idx))}
+                onSubmitRequest={
+                  onSubmitMetricRequest ? () => onSubmitMetricRequest(message.id, idx) : undefined
+                }
                 onRename={() => onRenameSuggestion?.(message.id, idx)}
                 onUseExisting={() => onDiscardSuggestion?.(message.id, idx)}
-                action={message.suggestionAction}
-                onSubmitRequest={onSubmitMetricRequest ? () => onSubmitMetricRequest(message.id, idx) : undefined}
-                isSubmitted={submittedKeys.has(metricRequestKey(message.id, idx))}
               />
             ))}
           </div>
@@ -536,6 +551,7 @@ function SuggestionCard({
   onUseExisting,
   action,
   isSubmitted,
+  isApproved,
   onSubmitRequest,
 }: {
   suggestion: MetricSuggestion;
@@ -548,6 +564,7 @@ function SuggestionCard({
   onUseExisting?: () => void;
   action?: 'save_metric' | 'submit_metric_request' | null;
   isSubmitted?: boolean;
+  isApproved?: boolean;
   onSubmitRequest?: () => Promise<void>;
 }) {
   const [showYaml, setShowYaml] = useState(false);
@@ -718,30 +735,41 @@ function SuggestionCard({
             : 'Lưu vào Semantic Layer (chờ Data Lead phê duyệt trước khi truy vấn)'}
         </span>
 
-        {/* ⛔ No Save while the conflict strip is unresolved — user must clarify first */}
-        {action === 'submit_metric_request' ? (
-          isSubmitted ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              className="h-8 gap-1.5 text-xs text-emerald-600 dark:text-emerald-400"
-              disabled
-            >
-              <Check className="h-3.5 w-3.5" />
-              Đã gửi cho Data Lead
-            </Button>
-          ) : (
-          <Button
-            size="sm"
-            className="h-8 gap-1.5 text-xs cursor-pointer"
-            onClick={() => void handleSubmitRequest()}
-            disabled={saving || !onSubmitRequest}
-          >
-            <Save className="h-3.5 w-3.5" />
-            {saving ? 'Đang gửi...' : 'Gửi Data Lead xem xét'}
-          </Button>
-        ) : !suggestion.conflict &&
-          (isSaved ? (
+        {/* ⛔ No Save/Submit while the conflict strip is unresolved — user must clarify first */}
+        {!suggestion.conflict &&
+          (action === 'submit_metric_request' ? (
+            isApproved ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-8 gap-1.5 text-xs text-emerald-600 dark:text-emerald-400"
+                disabled
+              >
+                <Check className="h-3.5 w-3.5" />
+                Đã được Data Lead duyệt
+              </Button>
+            ) : isSubmitted ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-8 gap-1.5 text-xs text-emerald-600 dark:text-emerald-400"
+                disabled
+              >
+                <Check className="h-3.5 w-3.5" />
+                Đã gửi cho Data Lead
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                className="h-8 gap-1.5 text-xs cursor-pointer"
+                onClick={() => void handleSubmitRequest()}
+                disabled={saving}
+              >
+                <Save className="h-3.5 w-3.5" />
+                {saving ? 'Đang gửi...' : 'Gửi Data Lead xem xét'}
+              </Button>
+            )
+          ) : isSaved ? (
             <Button
               size="sm"
               variant="secondary"

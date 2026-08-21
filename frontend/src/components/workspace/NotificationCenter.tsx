@@ -95,16 +95,19 @@ export function NotificationCenter({
   unreadCount,
   onOpenCatalog,
   onMarkAllRead,
+  onMarkRead,
 }: {
   items: AppNotification[];
   unreadCount: number;
   onOpenCatalog: () => void;
   onMarkAllRead: () => Promise<void> | void;
+  onMarkRead: (item: AppNotification) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
 
   const openItem = (item: AppNotification) => {
     if (!isMetricRequestNotification(item)) return;
+    void onMarkRead(item);
     setOpen(false);
     onOpenCatalog();
   };

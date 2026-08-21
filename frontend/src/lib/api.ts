@@ -765,6 +765,10 @@ export async function markNotificationsReadApi(): Promise<void> {
   await chatRequest<void>(`${API_BASE}/api/v1/notifications/read`, { method: 'POST' });
 }
 
+export async function markNotificationReadApi(notificationId: number): Promise<void> {
+  await chatRequest<void>(`${API_BASE}/api/v1/notifications/${notificationId}/read`, { method: 'POST' });
+}
+
 /* Legacy SQL metric adapter removed in favor of canonical definitions.
 export async function createMetricApi(
   dbId: string,

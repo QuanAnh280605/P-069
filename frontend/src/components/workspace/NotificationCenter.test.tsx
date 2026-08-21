@@ -40,6 +40,7 @@ function renderCenter(props: Partial<Parameters<typeof NotificationCenter>[0]> =
       unreadCount={1}
       onOpenCatalog={vi.fn()}
       onMarkAllRead={vi.fn().mockResolvedValue(undefined)}
+      onMarkRead={vi.fn().mockResolvedValue(undefined)}
       {...props}
     />,
   );
@@ -75,6 +76,17 @@ describe('NotificationCenter', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Thông báo' }));
 
     expect(screen.queryByRole('button', { name: 'Đánh dấu đã đọc' })).not.toBeInTheDocument();
+  });
+
+  it('marks the clicked metric request notification as read', () => {
+    const onMarkRead = vi.fn().mockResolvedValue(undefined);
+    renderCenter({ onMarkRead });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Thông báo' }));
+    fireEvent.click(screen.getByRole('button', { name: /Có yêu cầu metric mới/ }));
+
+    expect(onMarkRead).toHaveBeenCalledTimes(1);
+    expect(onMarkRead).toHaveBeenCalledWith(metricRequestNotification);
   });
 
   it('opens the catalog and closes the dropdown when a metric request item is clicked', () => {

@@ -16,6 +16,7 @@ from src.services.metric_request_service import (
     MetricRequestError,
     create_metric_request,
     list_notifications,
+    mark_notification_read,
     mark_notifications_read,
     reject_metric_request,
 )
@@ -152,6 +153,43 @@ async def test_resubmission_allowed_after_rejection(async_session) -> None:
 
 
 @pytest.mark.asyncio
+async def test_resubmission_blocked_after_approval(async_session) -> None:
+    """An approved request cannot be resubmitted — its metric already exists."""
+    database = SemanticDatabaseModel(created_by=1, display_name="DB", db_type="sqlite", conn_url_enc="enc")
+    async_session.add(database)
+    await async_session.flush()
+    session = ChatSessionModel(id="session-8", user_id=1, db_id=database.id)
+    message = ChatMessageModel(
+        id="message-8",
+        session_id=session.id,
+        sequence_no=1,
+        sender="assistant",
+        content="Proposal",
+        metadata_json=_suggestion_metadata(),
+    )
+    async_session.add_all([session, message])
+    await async_session.commit()
+
+    first = await create_metric_request(async_session, database.id, 1, message.id, 0)
+    first.status = "approved"
+    await async_session.commit()
+
+    with pytest.raises(MetricRequestError, match="approved"):
+        await create_metric_request(async_session, database.id, 1, message.id, 0)
+
+    stored = (
+        (
+            await async_session.execute(
+                select(MetricRequestModel).where(MetricRequestModel.assistant_message_id == message.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(stored) == 1
+
+
+@pytest.mark.asyncio
 async def test_reject_notifies_requester_of_rejection(async_session) -> None:
     """Rejecting a request tells the Member the metric was rejected."""
     database = SemanticDatabaseModel(created_by=1, display_name="DB", db_type="sqlite", conn_url_enc="enc")
@@ -260,3 +298,32 @@ async def test_notifications_become_read(async_session) -> None:
     await mark_notifications_read(async_session, 1)
     _, unread = await list_notifications(async_session, 1)
     assert unread == 0
+
+
+@pytest.mark.asyncio
+async def test_mark_single_notification_read(async_session) -> None:
+    """Opening one notification must not clear its unread siblings."""
+    first = NotificationModel(recipient_id=1, type="metric_request_approved", title="Đã duyệt", body="Doanh thu")
+    second = NotificationModel(recipient_id=1, type="metric_request_submitted", title="Đã gửi", body="Hoàn tiền")
+    async_session.add_all([first, second])
+    await async_session.commit()
+
+    marked = await mark_notification_read(async_session, 1, first.id)
+
+    assert marked is not None
+    assert marked.read_at is not None
+    _, unread = await list_notifications(async_session, 1)
+    assert unread == 1
+
+
+@pytest.mark.asyncio
+async def test_mark_notification_read_rejects_foreign_owner(async_session) -> None:
+    """Another user's notification cannot be marked read."""
+    foreign = NotificationModel(recipient_id=2, type="metric_request_submitted", title="Đã gửi", body="Doanh thu")
+    async_session.add(foreign)
+    await async_session.commit()
+
+    assert await mark_notification_read(async_session, 1, foreign.id) is None
+
+    _, unread = await list_notifications(async_session, 2)
+    assert unread == 1

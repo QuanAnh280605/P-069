@@ -108,6 +108,7 @@ from src.services.metric_request_service import (
     create_metric_request,
     list_metric_requests,
     list_notifications,
+    mark_notification_read,
     mark_notifications_read,
     reject_metric_request,
 )
@@ -1470,6 +1471,18 @@ async def read_notifications(
 ) -> None:
     """Mark all in-app notifications as read for the current user."""
     await mark_notifications_read(db, current_user.id)
+
+
+@router.post("/notifications/{notification_id}/read", status_code=204)
+async def read_notification(
+    notification_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    """Mark one in-app notification as read for the current user."""
+    notification = await mark_notification_read(db, current_user.id, notification_id)
+    if notification is None:
+        raise HTTPException(status_code=404, detail="Notification not found")
 
 
 @router.get("/notifications/stream")
