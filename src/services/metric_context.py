@@ -56,9 +56,7 @@ async def build_metric_context(
     return MetricContextResult(schema=schema, diagnostic=_ready_diagnostic(schema))
 
 
-async def build_data_context(
-    db: AsyncSession, db_id: int, question: str, token_budget: int
-) -> MetricContextResult:
+async def build_data_context(db: AsyncSession, db_id: int, question: str, token_budget: int) -> MetricContextResult:
     """Build a focused schema context for a non-metric data question."""
     tables, relationships = await _load_metadata(db, db_id)
     if _asks_for_temporal_fields(question):
@@ -79,11 +77,19 @@ async def _load_metadata(
     db: AsyncSession, db_id: int
 ) -> tuple[list[SemanticTableModel], list[CanonicalRelationshipModel]]:
     """Load semantic tables and validated relationship graph from metadata only."""
-    table_stmt = select(SemanticTableModel).options(selectinload(SemanticTableModel.columns)).where(SemanticTableModel.db_id == db_id)
+    table_stmt = (
+        select(SemanticTableModel)
+        .options(selectinload(SemanticTableModel.columns))
+        .where(SemanticTableModel.db_id == db_id)
+    )
     relationship_stmt = (
         select(CanonicalRelationshipModel)
-        .options(selectinload(CanonicalRelationshipModel.from_entity), selectinload(CanonicalRelationshipModel.to_entity))
-        .where(CanonicalRelationshipModel.connection_id == db_id, CanonicalRelationshipModel.validation_status == "valid")
+        .options(
+            selectinload(CanonicalRelationshipModel.from_entity), selectinload(CanonicalRelationshipModel.to_entity)
+        )
+        .where(
+            CanonicalRelationshipModel.connection_id == db_id, CanonicalRelationshipModel.validation_status == "valid"
+        )
     )
     tables = list((await db.execute(table_stmt)).scalars().all())
     relationships = list((await db.execute(relationship_stmt)).scalars().all())
@@ -114,10 +120,18 @@ async def _select_tables(
     valid = {table.table_name for table in tables}
     if target_tables:
         selected = set(target_tables) & valid
-        return (selected, None) if selected else (set(), _clarification("Bảng được chọn không tồn tại trong schema.").diagnostic)
+        return (
+            (selected, None)
+            if selected
+            else (set(), _clarification("Bảng được chọn không tồn tại trong schema.").diagnostic)
+        )
     prompt = prompt_template.format(inventory=json.dumps(inventory, ensure_ascii=False), question=question)
     payload = await ainvoke_json(get_llm(role="metric"), prompt)
-    selected = {str(name) for name in payload.get("table_names", []) if str(name) in valid} if isinstance(payload, dict) else set()
+    selected = (
+        {str(name) for name in payload.get("table_names", []) if str(name) in valid}
+        if isinstance(payload, dict)
+        else set()
+    )
     if not isinstance(payload, dict) or payload.get("needs_clarification") or not selected:
         message = payload.get("question") if isinstance(payload, dict) else "Hãy nêu rõ phần dữ liệu bạn muốn xem."
         return set(), _clarification(str(message)).diagnostic
@@ -149,7 +163,12 @@ def _temporal_table_payload(table: SemanticTableModel) -> dict[str, Any] | None:
     columns = [_column_payload(column) for column in table.columns if _is_temporal_column(column)]
     if not columns:
         return None
-    return {"table_name": table.table_name, "business_name": table.business_name, "description": table.description, "columns": columns}
+    return {
+        "table_name": table.table_name,
+        "business_name": table.business_name,
+        "description": table.description,
+        "columns": columns,
+    }
 
 
 def _is_temporal_column(column: Any) -> bool:
@@ -182,18 +201,26 @@ def _table_payload(table: SemanticTableModel) -> dict[str, Any]:
 def _column_payload(column: Any) -> dict[str, Any]:
     """Serialize one semantic column without data values."""
     return {
-        "column_name": column.column_name, "data_type": column.data_type,
-        "business_name": column.business_name, "description": column.description,
-        "is_primary_key": column.is_primary_key, "is_foreign_key": column.is_foreign_key,
-        "fk_target_table": column.fk_target_table, "fk_target_column": column.fk_target_column,
+        "column_name": column.column_name,
+        "data_type": column.data_type,
+        "business_name": column.business_name,
+        "description": column.description,
+        "is_primary_key": column.is_primary_key,
+        "is_foreign_key": column.is_foreign_key,
+        "fk_target_table": column.fk_target_table,
+        "fk_target_column": column.fk_target_column,
     }
 
 
 def _relations(relationships: list[CanonicalRelationshipModel], included: set[str]) -> list[dict[str, str]]:
     """Serialize only relationships wholly contained in the selected context."""
     return [
-        {"from_table": relation.from_entity.table_name, "to_table": relation.to_entity.table_name,
-         "join_condition": relation.join_condition, "relationship_type": relation.relationship_type}
+        {
+            "from_table": relation.from_entity.table_name,
+            "to_table": relation.to_entity.table_name,
+            "join_condition": relation.join_condition,
+            "relationship_type": relation.relationship_type,
+        }
         for relation in relationships
         if relation.from_entity.table_name in included and relation.to_entity.table_name in included
     ]
@@ -211,4 +238,8 @@ def _clarification(message: str) -> MetricContextResult:
 
 def _ready_diagnostic(schema: dict[str, Any]) -> dict[str, Any]:
     """Return non-sensitive context telemetry for authorized Data Leads."""
-    return {"status": "ready", "tables": [item["table_name"] for item in schema["tables"]], "relationship_count": len(schema["relationships"])}
+    return {
+        "status": "ready",
+        "tables": [item["table_name"] for item in schema["tables"]],
+        "relationship_count": len(schema["relationships"]),
+    }

@@ -26,7 +26,10 @@ def test_context_keeps_late_business_tables_and_relationships() -> None:
     """A context must retain order tables regardless of their original JSON position."""
     tables = [_table(f"lookup_{index}") for index in range(30)] + [_table("order_header"), _table("order_line")]
     relation = SimpleNamespace(
-        from_entity=tables[-1], to_entity=tables[-2], join_condition="order_line.order_id = order_header.id", relationship_type="many_to_one"
+        from_entity=tables[-1],
+        to_entity=tables[-2],
+        join_condition="order_line.order_id = order_header.id",
+        relationship_type="many_to_one",
     )
 
     context = _expand_context(tables, [relation], {"order_header", "order_line"})

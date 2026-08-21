@@ -128,6 +128,27 @@ async def test_create_workspace_makes_creator_admin(async_session):
 
 
 @pytest.mark.asyncio
+async def test_invitation_accept_creates_scoped_membership(async_session):
+    user = await _add_user(async_session, 2, "member@company.com")
+    organization = await create_organization(async_session, 1, "Acme", "acme")
+    invitation = await create_invitation(async_session, organization.id, 1, "member", "http://localhost:3000")
+
+    raw_token = invitation.invite_url.rsplit("/", 1)[-1]
+    accepted = await accept_invitation(async_session, raw_token, user)
+
+    assert accepted.id == organization.id
+    assert accepted.role == "member"
+    assert await get_membership(async_session, user.id, organization.id)
+
+
+@pytest.mark.asyncio
+async def test_last_data_lead_cannot_be_removed(async_session):
+    organization = await create_organization(async_session, 1, "Acme", "acme")
+
+    with pytest.raises(ValueError, match="last Workspace Data Lead"):
+        await remove_member(async_session, organization.id, 1, 1)
+
+
 async def test_admin_can_change_member_role(async_session):
     member = await _add_user(async_session, 2, "member@company.com")
     organization = await create_organization(async_session, 1, "Acme", "acme")
