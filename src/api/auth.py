@@ -92,7 +92,6 @@ def create_access_token(user: UserModel) -> str:
             "email": user.email,
             "username": user.username,
             "name": user.full_name or user.username,
-            "role": user.role,
         }
     )
     return jwt.encode(payload, _get_secret_key(), algorithm=ALGORITHM)
@@ -182,7 +181,6 @@ def _build_token_response(access_token: str, refresh_token: str, user: UserModel
             "email": user.email,
             "name": user.full_name,
             "username": user.username,
-            "role": user.role,
         },
     }
 
@@ -203,7 +201,6 @@ async def _create_user(db: AsyncSession, email: str, username: str, password: st
         username=username,
         hashed_password=hash_password(password),
         full_name=full_name or username,
-        role="analyst",
         status="active",
     )
     db.add(user)
@@ -435,7 +432,6 @@ async def get_current_user_profile(
         email=user.email,
         username=user.username,
         full_name=user.full_name,
-        role=user.role,
         status=user.status,
         created_at=user.created_at,
     )

@@ -1,11 +1,6 @@
 'use client';
 
-import {
-  CheckCircle2,
-  Database,
-  Loader2,
-  Plus,
-} from 'lucide-react';
+import { CheckCircle2, Database, Loader2, Plus } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -43,7 +38,6 @@ import {
   MetricRecord,
   MetricSuggestion,
   METRIC_WRITE_PERMISSION_MESSAGE,
-  isPermissionDenied,
   SemanticCatalog,
   SemanticLayerData,
   updateChatSessionTitleApi,
@@ -88,7 +82,8 @@ const SettingsModal = dynamic(
 );
 
 const WorkspaceManagementModal = dynamic(
-  () => import('@/components/modals/WorkspaceManagementModal').then((m) => m.WorkspaceManagementModal),
+  () =>
+    import('@/components/modals/WorkspaceManagementModal').then((m) => m.WorkspaceManagementModal),
   { ssr: false },
 );
 
@@ -166,13 +161,15 @@ export default function WorkspacePage() {
   const semanticDbId = activeLayer?.semantic_db_id;
   const canUseDataAssistant = Boolean(permissions.can_use_data_assistant);
   const canUseMetricStudio = Boolean(permissions.can_use_metric_studio);
-  const canManageMetrics = Boolean(permissions.can_create_metrics);
+  const canSubmitMetric = Boolean(permissions.can_submit_metric);
+  const canManageMetrics = Boolean(permissions.can_manage_metrics);
   const canApproveMetrics = Boolean(permissions.can_approve_metrics);
+  const canManageSchema = Boolean(permissions.can_manage_schema);
   const canChat = Boolean(
     permissions.can_use_chat &&
-      (canUseDataAssistant || canUseMetricStudio) &&
-      semanticDbId &&
-      activeLayer?.source_type === 'live',
+    (canUseDataAssistant || canUseMetricStudio) &&
+    semanticDbId &&
+    activeLayer?.source_type === 'live',
   );
   const studioMode = canUseMetricStudio ? 'metric_studio' : 'data_assistant';
 
@@ -213,33 +210,28 @@ export default function WorkspacePage() {
   useEffect(() => {
     if (!token || !activeLayer || activeLayer.is_loaded) return;
     void loadLayerDetail(activeLayer, token).then((detailed) => {
-      setLayers((current) =>
-        current.map((item) => (item.id === detailed.id ? detailed : item)),
-      );
+      setLayers((current) => current.map((item) => (item.id === detailed.id ? detailed : item)));
     });
   }, [token, activeLayer, activeLayerId]);
 
-  const loadSessions = useCallback(
-    async (dbId: string) => {
-      setLoadingSessions(true);
-      try {
-        const items = await listChatSessionsApi(dbId);
-        setSessions(items);
-        if (typeof window !== 'undefined') {
-          const fromUrl = new URLSearchParams(window.location.search).get('chat');
-          const matched = items.find((item) => item.id === fromUrl);
-          if (matched) {
-            setActiveSessionId(matched.id);
-          }
+  const loadSessions = useCallback(async (dbId: string) => {
+    setLoadingSessions(true);
+    try {
+      const items = await listChatSessionsApi(dbId);
+      setSessions(items);
+      if (typeof window !== 'undefined') {
+        const fromUrl = new URLSearchParams(window.location.search).get('chat');
+        const matched = items.find((item) => item.id === fromUrl);
+        if (matched) {
+          setActiveSessionId(matched.id);
         }
-      } catch {
-        setSessions([]);
-      } finally {
-        setLoadingSessions(false);
       }
-    },
-    [],
-  );
+    } catch {
+      setSessions([]);
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, []);
 
   useEffect(() => {
     setActiveSessionId(null);
@@ -248,18 +240,15 @@ export default function WorkspacePage() {
     void loadSessions(String(semanticDbId));
   }, [activeLayer?.source_type, activeLayerId, loadSessions, semanticDbId]);
 
-  const selectSession = useCallback(
-    (sessionId: string) => {
-      setActiveSessionId(sessionId);
-      if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href);
-        url.searchParams.set('chat', sessionId);
-        window.history.replaceState({}, '', url);
-      }
-      setTab('studio');
-    },
-    [],
-  );
+  const selectSession = useCallback((sessionId: string) => {
+    setActiveSessionId(sessionId);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('chat', sessionId);
+      window.history.replaceState({}, '', url);
+    }
+    setTab('studio');
+  }, []);
 
   const newChat = useCallback(() => {
     setActiveSessionId(null);
@@ -343,7 +332,8 @@ export default function WorkspacePage() {
   }, [tab, semanticDbId, catalog]);
 
   const saveDefinition = async (definition: MetricDefinition) => {
-    if (!canManageMetrics) {
+    const canSave = editingMetric ? canManageMetrics : canSubmitMetric;
+    if (!canSave) {
       notify(METRIC_WRITE_PERMISSION_MESSAGE);
       throw new Error(METRIC_WRITE_PERMISSION_MESSAGE);
     }
@@ -351,58 +341,55 @@ export default function WorkspacePage() {
     const dbId = String(activeLayer.semantic_db_id);
     try {
       if (editingMetric) await updateMetricApi(dbId, editingMetric.metric_id, definition);
-      else await createMetricApi(dbId, { definition, source: editingSuggestion ? 'ai' : 'manual' });
+      else
+        await createMetricApi(dbId, {
+          definition,
+          source: editingSuggestion ? 'ai' : 'manual',
+        });
       await refreshSemanticData();
-      notify('Đã lưu Metric Definition dạng JSON.');
+      notify(
+        canManageMetrics ? 'Đã lưu metric.' : 'Đã gửi metric. Trạng thái: Chưa được xác minh.',
+      );
     } catch (error) {
-      if (isPermissionDenied(error)) notify(METRIC_WRITE_PERMISSION_MESSAGE);
+      notify(error instanceof Error ? error.message : 'Không thể lưu metric');
       throw error;
     }
   };
 
   const removeMetric = async (metricId: number) => {
+    if (!canManageMetrics) return notify(METRIC_WRITE_PERMISSION_MESSAGE);
     if (!activeLayer?.semantic_db_id) return;
-    await deleteMetricApi(String(activeLayer.semantic_db_id), metricId);
-    setLayers((current) =>
-      current.map((item) =>
-        item.id === activeLayerId
-          ? { ...item, metrics: item.metrics.filter((m) => m.metric_id !== metricId) }
-          : item,
-      ),
-    );
-    notify('Đã xóa metric.');
+    try {
+      await deleteMetricApi(String(activeLayer.semantic_db_id), metricId);
+      await refreshSemanticData();
+      notify('Đã xóa metric.');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Không thể xóa metric');
+    }
   };
 
   const approve = async () => {
+    if (!canApproveMetrics) return notify(METRIC_WRITE_PERMISSION_MESSAGE);
     if (!activeLayer?.semantic_db_id) return;
-    const response = await approveMetricsApi(activeLayer.semantic_db_id);
-    setLayers((current) =>
-      current.map((item) =>
-        item.id === activeLayerId
-          ? {
-              ...item,
-              metrics: item.metrics.map((m) => ({ ...m, status: 'approved' })),
-            }
-          : item,
-      ),
-    );
-    notify(`Đã phê duyệt ${response.approved_count} metric.`);
+    try {
+      const response = await approveMetricsApi(activeLayer.semantic_db_id);
+      await refreshSemanticData();
+      notify(`Đã phê duyệt ${response.approved_count} metric.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Không thể phê duyệt metric');
+    }
   };
 
   const approveSingleMetric = async (metricId: number) => {
+    if (!canApproveMetrics) return notify(METRIC_WRITE_PERMISSION_MESSAGE);
     if (!activeLayer?.semantic_db_id) return;
-    await approveSingleMetricApi(String(activeLayer.semantic_db_id), metricId);
-    setLayers((current) =>
-      current.map((item) =>
-        item.id === activeLayerId
-          ? {
-              ...item,
-              metrics: item.metrics.map((m) => (m.metric_id === metricId ? { ...m, status: 'approved' } : m)),
-            }
-          : item,
-      ),
-    );
-    notify('Đã phê duyệt chỉ số thành công.');
+    try {
+      await approveSingleMetricApi(String(activeLayer.semantic_db_id), metricId);
+      await refreshSemanticData();
+      notify('Đã phê duyệt chỉ số thành công.');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Không thể phê duyệt metric');
+    }
   };
 
   const openEditor = (metric?: MetricRecord, suggestion?: MetricSuggestion) => {
@@ -451,22 +438,28 @@ export default function WorkspacePage() {
         const nextLayer = layers.find((item) => item.id === id);
         const nextCanChat = Boolean(
           permissions.can_use_chat &&
-            (canUseDataAssistant || canUseMetricStudio) &&
-            nextLayer?.source_type === 'live',
+          (canUseDataAssistant || canUseMetricStudio) &&
+          nextLayer?.source_type === 'live',
         );
         setTab(nextCanChat ? 'studio' : 'metrics');
       }}
-      onRemoveDatabase={async (id) => {
-        const layer = layers.find((l) => l.id === id);
-        if (!layer || !token || !window.confirm(`Xóa database ${layer.db_name}?`)) return;
-        await deleteDatabaseApi(layer.id, token);
-        deleteLayer(layer.id);
-        setLayers((current) => current.filter((item) => item.id !== layer.id));
-      }}
-      onConnectDatabase={() => setConnectOpen(true)}
+      onRemoveDatabase={
+        canManageSchema
+          ? async (id) => {
+              const layer = layers.find((item) => item.id === id);
+              if (!layer || !token || !window.confirm(`Xóa database ${layer.db_name}?`)) return;
+              await deleteDatabaseApi(layer.id, token);
+              deleteLayer(layer.id);
+              setLayers((current) => current.filter((item) => item.id !== layer.id));
+            }
+          : undefined
+      }
+      onConnectDatabase={canManageSchema ? () => setConnectOpen(true) : undefined}
       onOpenSettings={() => setSettingsOpen(true)}
       onOpenWorkspaceManagement={
-        permissions.can_manage_members ? () => setWorkspaceManagementOpen(true) : undefined
+        permissions.can_manage_members || permissions.can_manage_invitations
+          ? () => setWorkspaceManagementOpen(true)
+          : undefined
       }
       onLogout={logout}
       onSelectChatSession={canChat ? selectSession : undefined}
@@ -497,7 +490,9 @@ export default function WorkspacePage() {
               onNewChat={canChat ? newChat : undefined}
               onMetricsChanged={refreshSemanticData}
               onNotify={notify}
-              onEditMetricRequest={canManageMetrics ? (item) => openEditor(undefined, item) : undefined}
+              onEditMetricRequest={
+                canManageMetrics ? (item) => openEditor(undefined, item) : undefined
+              }
               onOpenCatalog={() => setTab('metrics')}
             />
           )}
@@ -507,11 +502,19 @@ export default function WorkspacePage() {
               metrics={activeLayer.metrics}
               database={layerToDatabase(activeLayer)}
               canManageMetrics={canManageMetrics}
+              canSubmitMetric={canSubmitMetric}
+              canApproveMetrics={canApproveMetrics}
+              onSubmitMetric={canSubmitMetric ? () => openEditor() : undefined}
               onDeleteMetric={canManageMetrics ? removeMetric : undefined}
               onEditMetric={canManageMetrics ? (item) => openEditor(item) : undefined}
-              onOpenStudio={canUseMetricStudio ? () => setTab('studio') : undefined}
+              onOpenStudio={
+                canChat && (canUseMetricStudio || canSubmitMetric)
+                  ? () => setTab('studio')
+                  : undefined
+              }
               onApproveAll={canApproveMetrics ? approve : undefined}
               onApproveMetric={canApproveMetrics ? approveSingleMetric : undefined}
+              onMetricsChanged={refreshSemanticData}
             />
           )}
           {tab === 'explorer' && (
@@ -543,14 +546,16 @@ export default function WorkspacePage() {
               định nghĩa các chỉ số.
             </p>
           </div>
-          <Button onClick={() => setConnectOpen(true)} className="gap-2 text-xs">
-            <Plus className="h-4 w-4" />
-            Thêm kết nối Database
-          </Button>
+          {canManageSchema && (
+            <Button onClick={() => setConnectOpen(true)} className="gap-2 text-xs">
+              <Plus className="h-4 w-4" />
+              Thêm kết nối Database
+            </Button>
+          )}
         </div>
       )}
 
-      {connectOpen && (
+      {canManageSchema && connectOpen && (
         <ConnectDbModal
           isOpen={connectOpen}
           onClose={() => setConnectOpen(false)}
@@ -582,16 +587,18 @@ export default function WorkspacePage() {
           tables={activeLayer?.tables || []}
           initialDefinition={editingMetric?.definition || editingSuggestion?.definition}
           initialName={editingMetric?.name}
-          canSave={canManageMetrics}
+          canSave={editingMetric ? canManageMetrics : canSubmitMetric}
+          submissionMode={!editingMetric && canSubmitMetric && !canManageMetrics}
           saveDisabledReason={METRIC_WRITE_PERMISSION_MESSAGE}
         />
       )}
-      {workspaceManagementOpen && (
-        <WorkspaceManagementModal
-          isOpen={workspaceManagementOpen}
-          onClose={() => setWorkspaceManagementOpen(false)}
-        />
-      )}
+      {workspaceManagementOpen &&
+        (permissions.can_manage_members || permissions.can_manage_invitations) && (
+          <WorkspaceManagementModal
+            isOpen={workspaceManagementOpen}
+            onClose={() => setWorkspaceManagementOpen(false)}
+          />
+        )}
     </WorkspaceApp>
   );
 }
@@ -635,7 +642,10 @@ async function loadConnectionSummaries(token: string): Promise<SemanticLayerData
 }
 
 // On-demand detail loader for selected database
-async function loadLayerDetail(layer: SemanticLayerData, token: string): Promise<SemanticLayerData> {
+async function loadLayerDetail(
+  layer: SemanticLayerData,
+  token: string,
+): Promise<SemanticLayerData> {
   if (layer.is_loaded) return layer;
   try {
     let fullLayer = layer;

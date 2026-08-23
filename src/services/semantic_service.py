@@ -4,7 +4,6 @@ Provides:
   - ensure_semantic_database: Create or find SemanticDatabaseModel for a source.
   - enrich_and_save_canonical_schema: LLM-enrich raw schema → draft semantic tables/columns/FKs.
   - create_metric / update_metric / approve_metric: Metric lifecycle with versioning.
-  - get_metric_with_history: Metric retrieval with version history.
 """
 
 from __future__ import annotations
@@ -40,6 +39,10 @@ from src.services.query_compiler import SemanticQueryCompiler
 logger = logging.getLogger(__name__)
 
 _TIME_DIMENSION_TYPES = {"TIMESTAMP", "TIMESTAMP WITHOUT TIME ZONE", "TIMESTAMP WITH TIME ZONE", "DATE", "DATETIME"}
+
+
+class MetricRequiresReviewError(ValueError):
+    """Raised when a metric cannot be approved until its definition diagnostics are resolved."""
 
 
 def _pydantic_tables_to_typeddict(tables) -> list[dict]:
@@ -273,11 +276,12 @@ async def create_metric(
     connection_id: int,
     metric_data: dict[str, Any],
     user_id: int,
+    status_override: str | None = None,
 ) -> SemanticMetricModel:
-    """Create a new metric with version=1, status='draft', and an initial metric_versions record."""
+    """Create a metric and its initial version with a server-controlled status."""
     draft = MetricDefinition.model_validate(metric_data["definition"])
     definition = await MetricDefinitionResolver(db).resolve(connection_id, draft)
-    status = "needs_review" if definition.diagnostics else "pending_approval"
+    status = status_override or ("needs_review" if definition.diagnostics else "pending_approval")
     definition = with_metric_status(definition, status)
     table = await validate_metric_definition(db, connection_id, definition)
     payload = definition.model_dump(mode="json")
@@ -316,16 +320,17 @@ async def update_metric(
     metric_id: int,
     metric_data: dict[str, Any],
     user_id: int,
+    require_ownership: bool = True,
 ) -> SemanticMetricModel:
     """Update an existing metric, increment version, and create a new metric_versions record.
 
-    Raises ValueError if the metric is not found or user is not the owner.
+    Raises ValueError if the metric is not found or required ownership is absent.
     """
     stmt = select(SemanticMetricModel).where(SemanticMetricModel.id == metric_id)
     metric = (await db.execute(stmt)).scalar_one_or_none()
     if metric is None:
         raise ValueError(f"Metric {metric_id} not found")
-    if metric.created_by != user_id:
+    if require_ownership and metric.created_by != user_id:
         raise ValueError(f"User {user_id} does not have ownership of metric {metric_id}")
 
     draft = MetricDefinition.model_validate(metric_data["definition"])
@@ -369,9 +374,11 @@ async def approve_metric(
     metric = (await db.execute(stmt)).scalar_one_or_none()
     if metric is None:
         raise ValueError(f"Metric {metric_id} not found")
+    if metric.status not in {"pending_approval", "needs_review", "unverified"}:
+        raise ValueError("Metric is not eligible for approval")
 
     if metric.definition is None:
-        raise ValueError("Legacy metric definition requires review before approval")
+        raise MetricRequiresReviewError("Legacy metric definition requires review before approval")
     definition = await MetricDefinitionResolver(db).resolve(
         metric.db_id, MetricDefinition.model_validate(metric.definition)
     )
@@ -379,7 +386,7 @@ async def approve_metric(
         metric.status = "needs_review"
         metric.approved_by = None
         metric.definition = definition.model_dump(mode="json")
-        raise ValueError("Metric requires review before approval")
+        raise MetricRequiresReviewError("Metric requires review before approval")
     definition = with_metric_status(definition, "approved")
     metric.definition = definition.model_dump(mode="json")
     metric.status = "approved"

@@ -99,6 +99,35 @@ async def test_classifies_kpi_question_as_metric() -> None:
     assert result["intent"] == "metric_query"
 
 
+@pytest.mark.asyncio
+async def test_classifies_weather_question_as_out_of_scope() -> None:
+    """Unrelated weather question should be classified as out_of_scope with rejection message."""
+    with patch("src.agents.nodes.orchestrator_node.get_llm") as mock_get_llm:
+        llm = AsyncMock()
+        llm.ainvoke.return_value = _mock_llm_response("out_of_scope")
+        mock_get_llm.return_value = llm
+
+        result = await orchestrator_node({"user_message": "thời tiết Hà Nội hôm nay thế nào?"})
+
+    assert result["intent"] == "out_of_scope"
+    assert "chat_response" in result
+    assert "Semantic Layer" in result["chat_response"]
+
+
+@pytest.mark.asyncio
+async def test_classifies_recipe_question_as_out_of_scope() -> None:
+    """Unrelated recipe/cooking question should return out_of_scope."""
+    with patch("src.agents.nodes.orchestrator_node.get_llm") as mock_get_llm:
+        llm = AsyncMock()
+        llm.ainvoke.return_value = _mock_llm_response("out_of_scope")
+        mock_get_llm.return_value = llm
+
+        result = await orchestrator_node({"user_message": "hướng dẫn nấu phở bò"})
+
+    assert result["intent"] == "out_of_scope"
+    assert "chat_response" in result
+
+
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ Hệ thống **AI Semantic Layer Agent** là nền tảng quản trị và khai 
     - *Clustering:* Phân nhóm đồ thị bảng theo miền nghiệp vụ (Domain Clustering) để tối ưu xử lý schema lớn.
     - *Pass 2:* Sinh tên nghiệp vụ tiếng Việt (`business_name`) và mô tả chi tiết (`description`) cho từng bảng và cột theo cụm, đi kèm cơ chế Fallback tự động.
   - **Canonical Semantic Layer Builder:** Tự động chuẩn hóa metadata, xác định Primary Keys, Foreign Keys, Time Dimensions, quan hệ liên bảng (`canonical_relationships`) và đề xuất Business Metrics ban đầu.
-  - **HITL Governance & Versioning:** BA/DA xem xét, chỉnh sửa trực tiếp (Inline Editing), quản lý vòng đời duyệt (Approval) và lưu lịch sử phiên bản (`metric_versions`).
+  - **HITL Governance & Versioning:** Member gửi metric ở trạng thái `unverified`; Data Lead xem xét, chỉnh sửa, phê duyệt thành `approved` và quản lý lịch sử phiên bản (`metric_versions`).
   - **Export:** Đóng gói xuất Semantic Layer ra chuẩn JSON và YAML phục vụ tích hợp công cụ BI.
 
 - **Flow 2 — Deterministic Semantic Query Engine (CHỈ DÙNG CHO LIVE DB):**
@@ -32,14 +32,14 @@ Hệ thống **AI Semantic Layer Agent** là nền tảng quản trị và khai 
 graph TB
     subgraph Client["🖥️ Client Layer — Next.js 14 Web App"]
         V1["📊 Data Model View\n(Tables, Columns, Relationships)"]
-        V2["📋 Metrics Catalog View\n(Formulas, Versions, Approvals)"]
+        V2["📋 Metrics Catalog View\n(Submissions, Versions, Approvals)"]
         V3["🔍 Metric Explorer View\n(Visual Query Builder & Live Table)"]
         V4["💬 AI Studio View\n(Multi-agent Streaming Chat & SQL Preview)"]
         V5["📤 Export Playground View\n(JSON / YAML Exporter)"]
     end
 
     subgraph API["🌐 API Layer — FastAPI (Async REST Endpoints)"]
-        AUTH_API["🔐 Auth Routes (/api/v1/auth)\nJWT, Bcrypt, Google OAuth, RBAC"]
+        AUTH_API["🔐 Auth & Workspace Routes\nJWT, OAuth, invitations, workspace RBAC"]
         INGEST_API["📥 Schema Ingestion Routes\n/semantic/import/* & /semantic/db/*"]
         CATALOG_API["📚 Catalog & Edit Routes\n/semantic/{db_id}/catalog, /table, /column"]
         METRIC_API["🎯 Metric Lifecycle Routes\n/semantic/{db_id}/metrics, /approve, /history"]
@@ -54,7 +54,7 @@ graph TB
         G_CLUSTER["Domain / Graph Clustering\nPhân cụm bảng theo liên kết FK"]
         G_PASS2["Pass 2: Cluster Enrichment\nLLM sinh business_name & description tiếng Việt\n+ Fallback Generator"]
         G_CANONICAL["Canonical Builder Service\nBuild canonical tables, columns, relationships"]
-        HITL["👤 HITL Review & Approval\nBA/DA phê duyệt, chỉnh sửa inline"]
+        HITL["👤 Metric Review & Approval\nData Lead phê duyệt, chỉnh sửa inline"]
         G_PERSIST["Save & Persistence Service\nPersist vào Metadata Store"]
 
         G_INGEST --> G_PASS1 --> G_CLUSTER --> G_PASS2 --> G_CANONICAL --> HITL --> G_PERSIST
@@ -75,7 +75,7 @@ graph TB
     end
 
     subgraph Data["🗄️ Data Layer"]
-        METADB[("🗄️ Metadata Store (PostgreSQL / SQLite)\n10 ORM Models: users, sessions, imported_schemas,\nlive_target_dbs, databases, tables, columns,\nmetrics, canonical_relationships, metric_versions")]
+        METADB[("🗄️ Metadata Store (PostgreSQL / SQLite)\nAuth, workspace RBAC, semantic metadata,\nmetric lifecycle, versions and chat history")]
         TARGET[("🎯 Target Database (Live DB Only)\nPostgreSQL / MySQL / SQLite")]
     end
 
@@ -115,7 +115,7 @@ flowchart TD
     end
 
     subgraph HITL_Loop["4. HITL Review & Approval"]
-        CANON --> REVIEW{"👤 HITL Review (Web UI)\nBA/DA kiểm tra, chỉnh sửa inline\nvà duyệt từng Table / Column / Metric"}
+        CANON --> REVIEW{"👤 HITL Review (Web UI)\nData Lead kiểm tra schema, chỉnh sửa\nvà duyệt Metric"}
         REVIEW -->|"Sửa inline"| EDIT["PUT /table hoặc PUT /column\nLưu thay đổi ngay lập tức"]
         EDIT --> REVIEW
         REVIEW -->|"Duyệt (Approve)"| SAVE["Save Node / Persistence Service\nLưu vào PostgreSQL Metadata Store"]
@@ -220,12 +220,13 @@ flowchart LR
 | **Bảo vệ Dữ liệu Live DB** | **sqlglot AST Inspection + Read-Only SELECT** | Phân quyền DB user thuần túy | Ngăn ngừa mọi hành vi sửa đổi dữ liệu ở cấp độ ứng dụng, tự động gán trần `LIMIT 100` và `timeout = 15s`. |
 | **Lưu trữ Thông tin Nhạy cảm** | **Fernet Symmetric Encryption** | Lưu Plaintext / Hashing một chiều | Fernet cho phép giải mã 2 chiều an toàn trong bộ nhớ khi cần kết nối lại DB mà không để lộ connection string ra ngoài. |
 | **Quản trị Chỉ số (Metrics)** | **MetricDefinition v2 + Version History** | Lưu chuỗi SQL tự do | Hỗ trợ quản trị công thức, kiểu tổng hợp (`SUM`, `COUNT`, `AVG`...), bộ lọc độc lập và truy vết lịch sử thay đổi phiên bản. |
+| **Phân quyền Ứng dụng** | **Workspace-scoped RBAC** (`admin`, `data_lead`, `member`) | Vai trò toàn cục trên tài khoản | Một người có thể giữ vai trò khác nhau theo Workspace; JWT/profile không chứa vai trò ứng dụng toàn cục. |
 
 ---
 
-## 6. Database Schema — Metadata Store (10 Tables)
+## 6. Database Schema — Metadata Store
 
-Hệ thống Metadata Store sử dụng **10 bảng ORM** được định nghĩa trong [`src/models/db.py`](file:///d:/project/P-069/src/models/db.py):
+Các bảng ORM được định nghĩa trong `src/models/db.py`. RBAC chỉ tồn tại trên membership của từng Workspace; bảng `users` không có cột role.
 
 ```mermaid
 erDiagram
@@ -235,6 +236,11 @@ erDiagram
     users ||--o{ semantic_databases : "creates (1-N)"
     users ||--o{ semantic_metrics : "creates/approves (1-N)"
     users ||--o{ metric_versions : "changes (1-N)"
+    users ||--o{ organization_members : "joins workspaces (1-N)"
+
+    organizations ||--o{ organization_members : "has members (1-N)"
+    organizations ||--o{ organization_invitations : "issues invites (1-N)"
+    organizations ||--o{ semantic_databases : "owns semantic DBs (1-N)"
 
     semantic_databases ||--o{ semantic_tables : "contains (1-N)"
     semantic_databases ||--o{ semantic_metrics : "contains (1-N)"
@@ -252,10 +258,38 @@ erDiagram
         string username UK
         string hashed_password
         string full_name
-        string role "admin | analyst"
         string status "active | inactive | suspended"
         datetime created_at
         datetime updated_at
+    }
+
+    organizations {
+        int id PK
+        string name
+        string slug UK
+        int created_by FK
+        datetime created_at
+        datetime updated_at
+    }
+
+    organization_members {
+        int id PK
+        int org_id FK
+        int user_id FK
+        string role "admin | data_lead | member"
+        datetime joined_at
+        datetime updated_at
+    }
+
+    organization_invitations {
+        int id PK
+        int org_id FK
+        int inviter_id FK
+        string invitee_email
+        string role "admin | data_lead | member"
+        string token_hash UK
+        datetime expires_at
+        string status "pending | accepted | revoked | expired"
     }
 
     user_sessions {
@@ -343,7 +377,7 @@ erDiagram
         text description
         text sql_template
         string source "ai | manual"
-        string status "draft | active | archived"
+        string status "draft | pending_approval | needs_review | approved | unverified"
         int base_entity_id FK
         text formula
         string aggregation_type
@@ -388,3 +422,7 @@ erDiagram
 2. **Deterministic Query Compilation:** Không để LLM tự viết SQL lúc truy vấn dữ liệu thực tế nhằm loại bỏ hoàn toàn các rủi ro bảo mật và sai sót công thức.
 3. **Double Guardrails on Execution:** Mọi câu truy vấn gửi tới Live DB đều được bọc kiểm tra AST với `sqlglot`, gán cứng trần `LIMIT 100` và `timeout = 15s`.
 4. **Credential Isolation:** Toàn bộ chuỗi kết nối Target DB được mã hóa Fernet đối xứng trước khi ghi vào Database và chỉ giải mã trong RAM khi thực thi tác vụ.
+5. **Workspace-scoped RBAC:** `admin` chỉ quản trị thành viên và invitation trong Workspace hiện tại, không phải quản trị viên toàn nền tảng. `data_lead` quản trị schema và metric; `member` chỉ gửi metric mới. Cả ba vai trò được xem catalog đã duyệt, query Live DB và dùng chat/data assistant.
+6. **Last-admin Invariant:** Workspace luôn phải còn ít nhất một `admin`; mọi thao tác hạ vai trò hoặc xóa admin cuối cùng đều bị từ chối, kể cả tự hạ vai trò hoặc tự rời Workspace.
+7. **Invitation Safety:** Chỉ Workspace Admin tạo/thu hồi URL mời. Link chứa vai trò `admin|data_lead|member`, token chỉ lưu dưới dạng hash, dùng một lần và hết hạn sau 7 ngày.
+8. **Metric Review Boundary:** Submission của Member được server ép thành `unverified`, bất biến đối với Member, và trước khi duyệt chỉ hiển thị cho người tạo cùng Data Lead. Data Lead có thể sửa, xóa hoặc chuyển `unverified` thành `approved`; Admin chỉ xem catalog `approved`. Query compiler chỉ chấp nhận metric `approved`.

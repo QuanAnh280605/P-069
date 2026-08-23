@@ -22,8 +22,8 @@ interface WorkspaceAppProps {
   onToggleCollapse: () => void;
   onToggleTheme: () => void;
   onSelectDatabase: (id: string) => void;
-  onRemoveDatabase: (id: string) => void;
-  onConnectDatabase: () => void;
+  onRemoveDatabase?: (id: string) => void;
+  onConnectDatabase?: () => void;
   onOpenSettings: () => void;
   onOpenWorkspaceManagement?: () => void;
   onLogout?: () => void;

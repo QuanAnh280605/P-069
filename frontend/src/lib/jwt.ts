@@ -6,7 +6,6 @@ export interface UserPayload {
   name: string;
   avatar?: string;
   provider?: 'credentials' | 'google';
-  role?: string;
 }
 
 const TOKEN_KEY = 'semantic_auth_token';
@@ -64,7 +63,6 @@ export function parseJWTToken(token: string): UserPayload | null {
         'User',
       avatar: payload.avatar,
       provider: payload.provider || 'credentials',
-      role: payload.role || 'analyst',
     };
   } catch (err) {
     console.error('Error parsing JWT:', err);

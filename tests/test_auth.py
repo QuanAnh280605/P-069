@@ -26,7 +26,6 @@ def _dummy_user(user_id: int = 42) -> UserModel:
         username="testuser",
         full_name="Test User",
         hashed_password="hashed_dummy",
-        role="analyst",
         status="active",
     )
 
@@ -50,7 +49,7 @@ def test_jwt_access_token_flow() -> None:
     payload = decode_jwt_token(token)
     assert payload["sub"] == "42"
     assert payload["email"] == "test@company.com"
-    assert payload["role"] == "analyst"
+    assert "role" not in payload
     assert payload["type"] == "access"
 
 
@@ -107,6 +106,7 @@ async def test_register_and_login_api(async_session: AsyncSession) -> None:
         assert data_reg["token_type"] == "bearer"
         assert data_reg["expires_in"] == ACCESS_TOKEN_EXPIRE_SECONDS
         assert data_reg["user"]["email"] == "authtest@company.com"
+        assert "role" not in data_reg["user"]
 
         # Login user
         login_payload = {
@@ -118,6 +118,7 @@ async def test_register_and_login_api(async_session: AsyncSession) -> None:
         data_login = res_login.json()
         assert "access_token" in data_login
         assert "refresh_token" in data_login
+        assert "role" not in data_login["user"]
 
         # Get Current User Profile (/me) with access token
         access_token = data_login["access_token"]
@@ -127,6 +128,7 @@ async def test_register_and_login_api(async_session: AsyncSession) -> None:
         )
         assert res_me.status_code == 200
         assert res_me.json()["email"] == "authtest@company.com"
+        assert "role" not in res_me.json()
 
     app.dependency_overrides.clear()
 

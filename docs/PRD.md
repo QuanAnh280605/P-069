@@ -18,14 +18,20 @@
 
 ## 2. Đối tượng Người dùng & Chân dung (User Personas)
 
-### Persona 1 (Chính): Business Analyst (BA) / Data Analyst (DA)
-- **Mục tiêu:** Cần quản lý ngữ cảnh dữ liệu nghiệp vụ chính xác; quy định công thức tính chỉ số một lần duy nhất cho toàn bộ đội ngũ; xuất bản Semantic Layer sang các công cụ BI.
-- **Điểm nghẽn:** Mất nhiều tuần nhập Data Dictionary thủ công bằng bảng tính; đối mặt với việc mỗi phòng ban tự tính toán số liệu một kiểu.
-- **Nhu cầu:** Hệ thống tự động phân tích schema, đề xuất tên tiếng Việt, gợi ý metrics, hỗ trợ chỉnh sửa inline và phê duyệt linh hoạt.
+RBAC chỉ có phạm vi **Workspace**; không tồn tại vai trò ứng dụng toàn cục trên tài khoản. Một người có thể giữ vai trò khác nhau trong các Workspace khác nhau.
 
-### Persona 2: Data Lead / Analytics Engineer
-- **Mục tiêu:** Thiết lập các quan hệ liên bảng chuẩn (`canonical_relationships`), kiểm soát các phiên bản công thức chỉ số và khai thác dữ liệu an toàn từ Live Database mà không lo ngại rủi ro bảo mật hoặc quá tải server.
-- **Nhu cầu:** Query Engine biên dịch SQL chuẩn xác, có Guardrails bắt buộc lệnh SELECT và trần LIMIT/timeout, có công cụ Compile Preview và truy vết lịch sử phiên bản chỉ số.
+### Persona 1: Workspace Admin
+- **Mục tiêu:** Quản trị thành viên, tạo/thu hồi URL mời và gán vai trò trong Workspace.
+- **Ranh giới:** Không quản trị schema hoặc metric; không phải Admin toàn nền tảng. Workspace luôn phải còn ít nhất một Admin.
+
+### Persona 2 (Chính): Data Lead / Analytics Engineer
+- **Mục tiêu:** Quản trị schema/kết nối, thiết lập `canonical_relationships`, tạo và quản lý metric, xét duyệt submission của Member và khai thác Live Database an toàn.
+- **Nhu cầu:** Chỉnh sửa/xóa metric chưa duyệt, phê duyệt `unverified -> approved`, truy vết lịch sử và dùng Query Engine với Guardrails bắt buộc.
+- **Ranh giới:** Không quản trị thành viên hoặc invitation.
+
+### Persona 3: Member / Business Analyst
+- **Mục tiêu:** Gửi đề xuất metric mới, theo dõi submission của chính mình và sử dụng catalog metric đã duyệt để query/chat.
+- **Ranh giới:** Submission được tạo ở trạng thái `unverified` và Member không thể sửa, xóa hay tự phê duyệt sau khi gửi.
 
 ---
 

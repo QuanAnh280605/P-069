@@ -11,7 +11,11 @@ const mockTables: SemanticTable[] = [
     description: 'Bảng đơn hàng',
     columns: [
       { column_name: 'price', data_type: 'numeric', business_name: 'Giá' },
-      { column_name: 'quantity', data_type: 'integer', business_name: 'Số lượng' },
+      {
+        column_name: 'quantity',
+        data_type: 'integer',
+        business_name: 'Số lượng',
+      },
     ],
   },
 ];
@@ -42,7 +46,7 @@ describe('MetricModal', () => {
         tables={mockTables}
         initialDefinition={mockDefinition}
         initialName="Doanh thu thuần"
-      />
+      />,
     );
     expect(screen.getByText('Định nghĩa Business Metric')).toBeInTheDocument();
   });
@@ -56,7 +60,7 @@ describe('MetricModal', () => {
         tables={mockTables}
         initialDefinition={mockDefinition}
         initialName="Doanh thu thuần"
-      />
+      />,
     );
     expect(screen.getByRole('button', { name: /Definition/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /History/i })).toBeInTheDocument();
@@ -71,7 +75,7 @@ describe('MetricModal', () => {
         tables={mockTables}
         initialDefinition={mockDefinition}
         initialName="Doanh thu thuần"
-      />
+      />,
     );
     // Definition tab should be active and show form fields
     expect(screen.getByText('Tên metric')).toBeInTheDocument();
@@ -90,10 +94,20 @@ describe('MetricModal', () => {
         initialDefinition={mockDefinition}
         initialName="Doanh thu thuần"
         versions={[
-          { version: 2, definition: mockDefinition, change_reason: 'Updated formula', created_at: '2026-01-15T10:00:00Z' },
-          { version: 1, definition: mockDefinition, change_reason: 'Initial creation', created_at: '2026-01-10T08:00:00Z' },
+          {
+            version: 2,
+            definition: mockDefinition,
+            change_reason: 'Updated formula',
+            created_at: '2026-01-15T10:00:00Z',
+          },
+          {
+            version: 1,
+            definition: mockDefinition,
+            change_reason: 'Initial creation',
+            created_at: '2026-01-10T08:00:00Z',
+          },
         ]}
-      />
+      />,
     );
     const historyBtn = screen.getByRole('button', { name: /History/i });
     fireEvent.click(historyBtn);
@@ -112,9 +126,9 @@ describe('MetricModal', () => {
         initialDefinition={mockDefinition}
         initialName="Doanh thu thuần"
         status="pending_approval"
-      />
+      />,
     );
-    expect(screen.getByText('Pending')).toBeInTheDocument();
+    expect(screen.getByText('Chờ duyệt')).toBeInTheDocument();
   });
 
   it('shows approve button for non-approved metrics', () => {
@@ -129,7 +143,7 @@ describe('MetricModal', () => {
         initialName="Doanh thu thuần"
         status="pending_approval"
         onApprove={onApprove}
-      />
+      />,
     );
     const approveBtn = screen.getByRole('button', { name: /Phê duyệt/i });
     expect(approveBtn).toBeInTheDocument();
@@ -147,7 +161,7 @@ describe('MetricModal', () => {
         initialDefinition={mockDefinition}
         initialName="Doanh thu thuần"
         status="approved"
-      />
+      />,
     );
     expect(screen.getByText(/Đã có trong Semantic Layer/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Phê duyệt/i })).not.toBeInTheDocument();
@@ -162,7 +176,7 @@ describe('MetricModal', () => {
         tables={mockTables}
         initialDefinition={mockDefinition}
         initialName="Doanh thu thuần"
-      />
+      />,
     );
     // YAML preview section should be visible
     expect(screen.getByText(/Preview chỉ đọc/i)).toBeInTheDocument();
@@ -181,8 +195,26 @@ describe('MetricModal', () => {
       />,
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent(/Chỉ Data Lead/i);
+    expect(screen.getByRole('alert')).toHaveTextContent(/không có quyền/i);
     expect(screen.getByRole('button', { name: 'Lưu metric' })).toBeDisabled();
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('presents the standard form as a Member submission', () => {
+    render(
+      <MetricModal
+        isOpen
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        tables={mockTables}
+        initialDefinition={mockDefinition}
+        submissionMode
+      />,
+    );
+
+    expect(screen.getByText('Gửi Business Metric')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gửi metric' })).toBeEnabled();
+    expect(screen.getByText(/Chưa được xác minh sau khi gửi/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Phê duyệt/i })).not.toBeInTheDocument();
   });
 });

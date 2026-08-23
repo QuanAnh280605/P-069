@@ -44,8 +44,8 @@ interface WorkspaceSidebarProps {
   onToggleCollapse: () => void;
   onToggleTheme: () => void;
   onSelectDatabase: (id: string) => void;
-  onRemoveDatabase: (id: string) => void;
-  onConnectDatabase: () => void;
+  onRemoveDatabase?: (id: string) => void;
+  onConnectDatabase?: () => void;
   onOpenSettings: () => void;
   onOpenWorkspaceManagement?: () => void;
   onLogout?: () => void;
@@ -89,8 +89,12 @@ export function WorkspaceSidebar({
   onDeleteChatSession,
   onRenameChatSession,
 }: WorkspaceSidebarProps) {
-  const { workspaces, currentWorkspace, role, switchWorkspace } = useWorkspace();
+  const { workspaces, currentWorkspace, role, permissions, switchWorkspace } = useWorkspace();
   const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
+  const canManageWorkspace = Boolean(
+    permissions.can_manage_members || permissions.can_manage_invitations,
+  );
+  const canManageSchema = Boolean(permissions.can_manage_schema);
   const visibleNavItems = navItems.filter((item) => item.id !== 'ai-studio' || canChat);
   const getNavLabel = (id: ViewId, label: string) =>
     id === 'ai-studio' && chatMode === 'data_assistant' ? 'Data Assistant' : label;
@@ -106,7 +110,7 @@ export function WorkspaceSidebar({
         >
           <ChevronLeft className="h-4 w-4 rotate-180" />
         </button>
-        {onOpenWorkspaceManagement && (
+        {canManageWorkspace && onOpenWorkspaceManagement && (
           <button
             type="button"
             onClick={onOpenWorkspaceManagement}
@@ -208,7 +212,7 @@ export function WorkspaceSidebar({
               {role ? role.replace('_', ' ') : 'Member'}
             </p>
           </div>
-          {onOpenWorkspaceManagement && (
+          {canManageWorkspace && onOpenWorkspaceManagement && (
             <button
               type="button"
               onClick={onOpenWorkspaceManagement}
@@ -227,7 +231,7 @@ export function WorkspaceSidebar({
               <p className="font-mono text-[10px] uppercase text-muted-foreground">
                 Workspaces ({workspaces.length})
               </p>
-              {onOpenWorkspaceManagement && (
+              {canManageWorkspace && onOpenWorkspaceManagement && (
                 <button
                   type="button"
                   onClick={() => {
@@ -316,14 +320,16 @@ export function WorkspaceSidebar({
       <div className="flex min-h-0 flex-1 flex-col px-3 pt-4">
         <div className="mb-2 flex items-center justify-between px-1">
           <SectionLabel>Data Sources</SectionLabel>
-          <button
-            type="button"
-            onClick={onConnectDatabase}
-            className="rounded p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground cursor-pointer"
-            aria-label="Connect database"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
+          {canManageSchema && onConnectDatabase && (
+            <button
+              type="button"
+              onClick={onConnectDatabase}
+              className="rounded p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground cursor-pointer"
+              aria-label="Connect database"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
         <div className="flex-1 space-y-1 overflow-y-auto pb-2">
           {databases.map((db) => {
@@ -354,7 +360,7 @@ export function WorkspaceSidebar({
                   />
                   <EngineIcon engine={db.engine} className="h-3.5 w-3.5 shrink-0 text-sidebar-foreground/60" />
                   <span className="flex-1 truncate font-mono text-[13px] text-sidebar-foreground">{db.name}</span>
-                  {databases.length > 1 && (
+                  {canManageSchema && onRemoveDatabase && databases.length > 1 && (
                     <button
                       type="button"
                       onClick={(e) => {

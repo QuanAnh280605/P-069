@@ -77,6 +77,35 @@ describe('StudioChatStream', () => {
     expect(screen.getByText('Month')).toBeInTheDocument();
   });
 
+  it('renders <br> inside table cells without leaking raw HTML tags', () => {
+    const tableWithBreaks = [
+      '| Bước | Nội dung | Gợi ý |',
+      '|---|---|---|',
+      '| 1️⃣ | **Metric** | - Ý 1 (ví dụ `revenue`). <br> - Ý 2. |',
+    ].join('\n');
+
+    render(
+      <StudioChatStream
+        messages={[
+          {
+            id: 'table-breaks',
+            sender: 'assistant',
+            text: tableWithBreaks,
+            timestamp: '10:00',
+          },
+        ]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={[]}
+      />,
+    );
+
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.queryByText(/<br>/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Ý 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Ý 2/)).toBeInTheDocument();
+  });
+
   it('renders assistant message with icon container and AI agent label', () => {
     render(
       <StudioChatStream
@@ -98,7 +127,7 @@ describe('StudioChatStream', () => {
     expect(screen.getByText('Tôi đã phân tích schema')).toBeInTheDocument();
   });
 
-  it('shows read-only permission notice in Data Assistant mode', () => {
+  it('shows assistant mode notice in Data Assistant mode', () => {
     render(
       <StudioChatStream
         messages={[]}
@@ -109,8 +138,23 @@ describe('StudioChatStream', () => {
       />,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent(/không có quyền tạo, sửa hoặc lưu metric/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/chờ Data Lead phê duyệt/i);
     expect(screen.getByText(/GỢI Ý CÂU HỎI VỀ DỮ LIỆU/i)).toBeInTheDocument();
+  });
+
+  it('qualifies the data-assistant querying notice with the Live-DB-only caveat', () => {
+    render(
+      <StudioChatStream
+        messages={[]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={[]}
+        mode="data_assistant"
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(/tra cứu dữ liệu qua các metric đã duyệt/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/chỉ áp dụng cho kết nối Live DB/i);
   });
 
   it('renders user message with user label', () => {
@@ -168,13 +212,13 @@ describe('StudioChatStream', () => {
     // Metric name heading
     expect(screen.getByText('Doanh thu thuần')).toBeInTheDocument();
     // Status badge
-    expect(screen.getByText(/Chờ phê duyệt/)).toBeInTheDocument();
+    expect(screen.getByText(/Chờ duyệt/)).toBeInTheDocument();
     // Confidence badge
     expect(screen.getByText(/Độ tin cậy: Cao/)).toBeInTheDocument();
     // YAML toggle button
     expect(screen.getByRole('button', { name: /Hiển thị mã YAML/i })).toBeInTheDocument();
     // Save button
-    expect(screen.getByText(/Lưu vào Semantic Layer/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Lưu vào Semantic Layer/i })).toBeInTheDocument();
   });
 
   it('shows saved state after clicking save button', async () => {

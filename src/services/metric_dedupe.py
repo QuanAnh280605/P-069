@@ -114,15 +114,11 @@ def merge_dedupe(
     notices = list(valid_notices)
     valid_conflicts = _valid_conflicts(llm_conflicts, by_name)
     flagged = {_norm_name(c.proposed_metric_name) for c in valid_conflicts}
-    notice_by_proposed = {
-        _norm_name(n.proposed_metric_name): n for n in valid_notices if n.proposed_metric_name
-    }
+    notice_by_proposed = {_norm_name(n.proposed_metric_name): n for n in valid_notices if n.proposed_metric_name}
     kept: list[MetricSuggestionItem] = []
     superseded: set[int | str] = set()
     for item in suggestions:
-        result, notice, dropped_key = _process_suggestion(
-            item, by_name, flagged, notice_by_proposed, valid_conflicts
-        )
+        result, notice, dropped_key = _process_suggestion(item, by_name, flagged, notice_by_proposed, valid_conflicts)
         if result is not None:
             kept.append(result)
         if notice is not None:
@@ -165,9 +161,7 @@ def _process_suggestion(
     return conflict, None, _notice_key(notice)
 
 
-def _dup_notice_key(
-    name_key: str, notice_by_proposed: dict[str, DuplicateMetricNotice]
-) -> int | str | None:
+def _dup_notice_key(name_key: str, notice_by_proposed: dict[str, DuplicateMetricNotice]) -> int | str | None:
     """Notice superseded when an exact-name conflict overrides its duplicate verdict."""
     notice = notice_by_proposed.get(name_key)
     return _notice_key(notice) if notice is not None else None

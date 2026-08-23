@@ -4,12 +4,7 @@ import { Check, GitCommitHorizontal, Plus, Save, Sparkles, Trash2, X } from 'luc
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -23,7 +18,12 @@ import {
 import { cn } from '@/lib/utils';
 import { YamlCodeViewer } from '@/components/studio/YamlCodeViewer';
 import { StatusPill } from '@/components/workspace/shared';
-import { coerceFilterValue, createMetricDefinition, renderMetricYaml, withPendingStatus } from '@/lib/metrics';
+import {
+  coerceFilterValue,
+  createMetricDefinition,
+  renderMetricYaml,
+  withPendingStatus,
+} from '@/lib/metrics';
 
 export interface MetricVersion {
   version: number;
@@ -44,6 +44,7 @@ interface MetricModalProps {
   versions?: MetricVersion[];
   canSave?: boolean;
   saveDisabledReason?: string;
+  submissionMode?: boolean;
 }
 
 const FUNCTIONS: MetricFunction[] = ['SUM', 'COUNT', 'COUNT_DISTINCT', 'AVG', 'MIN', 'MAX'];
@@ -71,13 +72,20 @@ export function MetricModal(props: MetricModalProps) {
   useEffect(() => {
     const base = props.tables[0]?.table_name || '';
     const next = props.initialDefinition || createMetricDefinition(base);
-    setDefinition({ metric: { ...next.metric, name: next.metric.name || props.initialName || '' } });
+    setDefinition({
+      metric: {
+        ...next.metric,
+        name: next.metric.name || props.initialName || '',
+      },
+    });
     setError('');
     setActiveTab('definition');
   }, [props.initialDefinition, props.initialName, props.isOpen, props.tables]);
 
   const columns = useMemo(
-    () => props.tables.find((table) => table.table_name === definition.metric.base_entity)?.columns || [],
+    () =>
+      props.tables.find((table) => table.table_name === definition.metric.base_entity)?.columns ||
+      [],
     [definition.metric.base_entity, props.tables],
   );
 
@@ -105,7 +113,9 @@ export function MetricModal(props: MetricModalProps) {
     }
   };
 
-  const status = props.status || definition.metric.status || 'pending_approval';
+  const status = props.submissionMode
+    ? 'unverified'
+    : props.status || definition.metric.status || 'pending_approval';
   const versions = props.versions || [];
 
   return (
@@ -114,7 +124,7 @@ export function MetricModal(props: MetricModalProps) {
         <DialogHeader>
           <div className="flex flex-wrap items-center gap-3">
             <DialogTitle className="font-display text-2xl">
-              Định nghĩa Business Metric
+              {props.submissionMode ? 'Gửi Business Metric' : 'Định nghĩa Business Metric'}
             </DialogTitle>
             <StatusPill status={status} />
           </div>
@@ -127,10 +137,13 @@ export function MetricModal(props: MetricModalProps) {
 
         {/* Tab Controls */}
         <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 self-start">
-          {([
+          {[
             { key: 'definition' as TabKey, label: 'Definition' },
-            { key: 'history' as TabKey, label: `Version history (${versions.length})` },
-          ]).map((tab) => (
+            {
+              key: 'history' as TabKey,
+              label: `Version history (${versions.length})`,
+            },
+          ].map((tab) => (
             <button
               key={tab.key}
               type="button"
@@ -211,7 +224,10 @@ export function MetricModal(props: MetricModalProps) {
                     value={definition.metric.formula.expression}
                     onChange={(e) =>
                       setMetric({
-                        formula: { ...definition.metric.formula, expression: e.target.value },
+                        formula: {
+                          ...definition.metric.formula,
+                          expression: e.target.value,
+                        },
                       })
                     }
                     placeholder="quantity * unit_price"
@@ -247,8 +263,19 @@ export function MetricModal(props: MetricModalProps) {
                   </div>
                 )}
                 {props.canSave === false && !error && (
-                  <div role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-700 dark:text-amber-300">
+                  <div
+                    role="alert"
+                    className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-700 dark:text-amber-300"
+                  >
                     {props.saveDisabledReason || METRIC_WRITE_PERMISSION_MESSAGE}
+                  </div>
+                )}
+                {props.submissionMode && !error && (
+                  <div
+                    role="status"
+                    className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-700 dark:text-amber-300"
+                  >
+                    Metric sẽ có trạng thái Chưa được xác minh sau khi gửi.
                   </div>
                 )}
               </div>
@@ -268,7 +295,7 @@ export function MetricModal(props: MetricModalProps) {
               {/* Modal Footer */}
               <div className="flex items-center justify-between gap-2 border-t border-border pt-4 lg:col-span-2">
                 <div>
-                  {status !== 'approved' && props.onApprove && (
+                  {!props.submissionMode && status !== 'approved' && props.onApprove && (
                     <Button
                       type="button"
                       variant="secondary"
@@ -294,11 +321,21 @@ export function MetricModal(props: MetricModalProps) {
                   <Button
                     type="submit"
                     disabled={saving || props.canSave === false}
-                    title={props.canSave === false ? props.saveDisabledReason || METRIC_WRITE_PERMISSION_MESSAGE : undefined}
+                    title={
+                      props.canSave === false
+                        ? props.saveDisabledReason || METRIC_WRITE_PERMISSION_MESSAGE
+                        : undefined
+                    }
                     className="gap-1.5 text-xs"
                   >
                     <Save className="h-3.5 w-3.5" />
-                    {saving ? 'Đang lưu...' : 'Lưu metric'}
+                    {saving
+                      ? props.submissionMode
+                        ? 'Đang gửi...'
+                        : 'Đang lưu...'
+                      : props.submissionMode
+                        ? 'Gửi metric'
+                        : 'Lưu metric'}
                   </Button>
                 </div>
               </div>
@@ -317,14 +354,18 @@ export function MetricModal(props: MetricModalProps) {
                         <GitCommitHorizontal className="h-3 w-3 text-muted-foreground" />
                       </span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm text-foreground">Version {v.version}</span>
+                        <span className="font-mono text-sm text-foreground">
+                          Version {v.version}
+                        </span>
                         {i === 0 && (
                           <span className="rounded-full bg-secondary px-2 py-0.5 font-mono text-[10px] text-secondary-foreground">
                             current
                           </span>
                         )}
                       </div>
-                      {v.change_reason && <p className="mt-0.5 text-sm text-foreground">{v.change_reason}</p>}
+                      {v.change_reason && (
+                        <p className="mt-0.5 text-sm text-foreground">{v.change_reason}</p>
+                      )}
                       {v.created_at && (
                         <p className="font-mono text-[11px] text-muted-foreground">
                           {new Date(v.created_at).toLocaleString()}
@@ -353,9 +394,7 @@ function FilterEditor({
 }) {
   const update = (index: number, patch: Partial<MetricFilter>) =>
     onChange(
-      filters.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, ...patch } : item,
-      ),
+      filters.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)),
     );
 
   return (
@@ -391,7 +430,10 @@ function FilterEditor({
           <select
             value={filter.operator}
             onChange={(e) =>
-              update(index, { operator: e.target.value as FilterOperator, value: null })
+              update(index, {
+                operator: e.target.value as FilterOperator,
+                value: null,
+              })
             }
             className="h-8 w-24 rounded border border-border bg-background px-1 text-xs outline-none"
           >
@@ -405,7 +447,9 @@ function FilterEditor({
             disabled={filter.operator.startsWith('is_')}
             value={displayValue(filter.value)}
             onChange={(e) =>
-              update(index, { value: coerceFilterValue(filter.operator, e.target.value) })
+              update(index, {
+                value: coerceFilterValue(filter.operator, e.target.value),
+              })
             }
             className="h-8 flex-1 px-2 text-xs"
           />

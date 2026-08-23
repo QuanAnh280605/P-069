@@ -61,4 +61,17 @@ describe('InvitePage', () => {
     expect(window.localStorage.getItem('current_organization_id')).toBe('7');
     expect(mockPush).toHaveBeenCalledWith('/');
   });
+
+  it('labels an Admin invitation', async () => {
+    previewInvite.mockResolvedValue({
+      organization_name: 'Acme Analytics',
+      organization_slug: 'acme-analytics',
+      role: 'admin',
+      expires_at: '2026-08-26T00:00:00Z',
+    });
+
+    render(<InvitePage />);
+
+    expect(await screen.findByText('Admin')).toBeInTheDocument();
+  });
 });

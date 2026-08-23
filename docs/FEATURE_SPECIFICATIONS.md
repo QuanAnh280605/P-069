@@ -80,13 +80,46 @@ Tránh tình trạng "mỗi người tính một kiểu" và cần kiểm soát 
 
 ### 2. Thiết kế Giải pháp
 1. **Cấu trúc `MetricDefinition` v2:** Quản lý chỉ số có cấu trúc: Tên, Mô tả, Base Entity, Aggregation Type (`SUM`, `COUNT`, `AVG`...), Expression/Formula, Dimensions hỗ trợ và Fixed Filters.
-2. **Quản lý Nguồn & Trạng thái Phê duyệt:** Phân biệt chỉ số do AI sinh (`source: 'ai'`) hay do người dùng tạo (`source: 'manual'`), cùng trạng thái phê duyệt (`approved_by`, `status: 'active'`).
-3. **Tự động Lưu vết Phiên bản (`metric_versions`):** Mỗi khi BA/DA chỉnh sửa công thức qua API `PUT`, hệ thống tự động tăng trường `version` và ghi nhận một bản ghi mới vào bảng `metric_versions` kèm lý do thay đổi (`change_reason`).
-4. **History Drawer:** Giao diện cho phép xem lại toàn bộ dòng thời gian các phiên bản công thức cũ của metric.
+2. **Submission & Phê duyệt:** Metric do Member gửi được server gán `unverified`; chỉ Data Lead có thể chỉnh sửa, xóa hoặc phê duyệt thành `approved`. Metric chỉ được Semantic Query Compiler chấp nhận sau khi `approved`.
+3. **Visibility:** Trước khi duyệt, submission của Member chỉ hiển thị cho chính người tạo và Data Lead. Member không thể sửa/xóa submission; Admin chỉ có catalog `approved` ở chế độ read-only.
+4. **Tự động Lưu vết Phiên bản (`metric_versions`):** Mỗi khi Data Lead chỉnh sửa công thức qua API `PUT`, hệ thống tự động tăng trường `version` và ghi nhận một bản ghi mới vào bảng `metric_versions` kèm lý do thay đổi (`change_reason`).
+5. **History Drawer:** Giao diện cho phép xem lại toàn bộ dòng thời gian các phiên bản công thức cũ theo cùng quy tắc visibility.
 
 ---
 
-## ĐẶC TẢ #5: Multi-Agent Conversational Studio & Query Clarifier Wizard
+## ĐẶC TẢ #5: Workspace-scoped RBAC & Invitation Management
+
+| Thuộc tính | Chi tiết |
+|---|---|
+| **Mã Tính năng** | `[F-RBAC]` |
+| **Tên tính năng** | **Workspace-scoped Administration, Roles & Invitations** |
+| **Mô-đun chịu trách nhiệm** | `src/services/organization_service.py`, `src/api/organization_routes.py` |
+| **Trạng thái** | **Đã hiện thực & Hoạt động** |
+
+### 1. Phạm vi Vai trò
+`admin`, `data_lead`, `member` là vai trò trên membership của từng Workspace, không phải vai trò tài khoản hay quản trị toàn nền tảng. Người tạo Workspace nhận vai trò Admin.
+
+### 2. Target Permission Matrix
+
+| Capability | Admin | Data Lead | Member |
+|---|:---:|:---:|:---:|
+| Quản trị thành viên | Có | Không | Không |
+| Quản trị invitation | Có | Không | Không |
+| Quản trị schema/kết nối | Không | Có | Không |
+| Gửi/Đề xuất metric mới (Form & AI Suggestion) | Không | Có | Có *(unverified)* |
+| Sửa/xóa metric | Không | Có | Không |
+| Phê duyệt metric | Không | Có | Không |
+| Xem metric chờ duyệt | Không | Có | Không |
+| Query metric đã duyệt | Có | Có | Có |
+| Chat / Data Assistant | Có | Có | Có |
+| Metric Studio (Batch generation) | Không | Có | Không |
+
+### 3. Bất biến Quản trị & Invitation
+Workspace phải luôn còn ít nhất một Admin; hệ thống từ chối hạ vai trò hoặc xóa Admin cuối cùng, kể cả tự thao tác. Chỉ Admin tạo/thu hồi URL mời mang một trong ba vai trò; token chỉ lưu dạng hash, dùng một lần và hết hạn sau 7 ngày.
+
+---
+
+## ĐẶC TẢ #6: Multi-Agent Conversational Studio & Query Clarifier Wizard
 
 | Thuộc tính | Chi tiết |
 |---|---|

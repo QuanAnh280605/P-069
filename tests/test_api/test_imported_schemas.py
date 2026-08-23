@@ -22,7 +22,6 @@ def _token_headers(user: UserModel | None = None, org_id: int | None = None) -> 
         username="tester",
         full_name="Tester",
         hashed_password="hash",
-        role="admin",
         status="active",
     )
     headers = {"Authorization": f"Bearer {create_access_token(active_user)}"}
@@ -119,7 +118,6 @@ async def _create_second_user(session: AsyncSession) -> UserModel:
         username="second",
         full_name="Second",
         hashed_password="hash",
-        role="analyst",
         status="active",
     )
     session.add(user)

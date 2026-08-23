@@ -44,7 +44,7 @@ make format       # ruff format src/ tests/
 
 uvicorn src.main:app --reload --port 8000        # API server (Swagger at /docs)
 alembic upgrade head                            # apply migrations
-docker compose -f docker-compose.dev.yml up postgres pgweb -d   # metadata store
+docker compose -f docker-compose.dev.yml up postgres pgadmin -d # metadata store
 ```
 
 Custom commands: `/new-migration` (Alembic autogenerate), `/check` (make check).

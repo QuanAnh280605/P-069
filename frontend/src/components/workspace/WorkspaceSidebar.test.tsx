@@ -3,8 +3,35 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
 import type { WorkspaceDatabase, ViewId } from '@/components/workspace/shared';
 
+const workspaceState = vi.hoisted(() => ({
+  role: 'admin',
+  permissions: {
+    can_manage_members: true,
+    can_manage_invitations: true,
+    can_manage_schema: false,
+  } as Record<string, boolean>,
+}));
+
+vi.mock('@/context/WorkspaceContext', () => ({
+  useWorkspace: () => ({
+    workspaces: [],
+    currentWorkspace: { id: 1, name: 'Risk Analytics', role: workspaceState.role },
+    role: workspaceState.role,
+    permissions: workspaceState.permissions,
+    switchWorkspace: vi.fn(),
+  }),
+}));
+
 describe('WorkspaceSidebar', () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    workspaceState.role = 'admin';
+    workspaceState.permissions = {
+      can_manage_members: true,
+      can_manage_invitations: true,
+      can_manage_schema: false,
+    };
+  });
 
   const mockDatabases: WorkspaceDatabase[] = [
     {
@@ -100,6 +127,19 @@ describe('WorkspaceSidebar', () => {
       expect(screen.getByText('alice')).toBeInTheDocument();
       expect(screen.getByTitle('Đăng xuất')).toBeInTheDocument();
     });
+  });
+
+  it('renders workspace management only for a role with management permissions', () => {
+    const onOpenWorkspaceManagement = vi.fn();
+    const { rerender } = render(
+      <WorkspaceSidebar {...defaultProps} onOpenWorkspaceManagement={onOpenWorkspaceManagement} />,
+    );
+    fireEvent.click(screen.getByLabelText('Manage workspace'));
+    expect(onOpenWorkspaceManagement).toHaveBeenCalledOnce();
+
+    workspaceState.permissions = { can_manage_members: false, can_manage_invitations: false };
+    rerender(<WorkspaceSidebar {...defaultProps} onOpenWorkspaceManagement={onOpenWorkspaceManagement} />);
+    expect(screen.queryByLabelText('Manage workspace')).not.toBeInTheDocument();
   });
 
   it('hides AI Studio navigation when the workspace has no chat capability', () => {
@@ -216,11 +256,44 @@ describe('WorkspaceSidebar', () => {
     });
 
     it('calls onConnectDatabase when connect button is clicked', () => {
+      workspaceState.role = 'data_lead';
+      workspaceState.permissions = { can_manage_schema: true };
       const onConnectDatabase = vi.fn();
       render(<WorkspaceSidebar {...defaultProps} onConnectDatabase={onConnectDatabase} />);
 
       fireEvent.click(screen.getByLabelText('Connect database'));
       expect(onConnectDatabase).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['admin', false],
+      ['member', false],
+      ['data_lead', true],
+    ])('shows schema controls for %s only when can_manage_schema is %s', (role, canManageSchema) => {
+      workspaceState.role = role;
+      workspaceState.permissions = { can_manage_schema: canManageSchema };
+      const onConnectDatabase = vi.fn();
+      const onRemoveDatabase = vi.fn();
+
+      render(
+        <WorkspaceSidebar
+          {...defaultProps}
+          onConnectDatabase={onConnectDatabase}
+          onRemoveDatabase={onRemoveDatabase}
+        />,
+      );
+
+      if (canManageSchema) {
+        fireEvent.click(screen.getByLabelText('Connect database'));
+        fireEvent.click(screen.getByLabelText('Remove Production DB'));
+        expect(onConnectDatabase).toHaveBeenCalledOnce();
+        expect(onRemoveDatabase).toHaveBeenCalledWith('db-1');
+      } else {
+        expect(screen.queryByLabelText('Connect database')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Remove Production DB')).not.toBeInTheDocument();
+        expect(onConnectDatabase).not.toHaveBeenCalled();
+        expect(onRemoveDatabase).not.toHaveBeenCalled();
+      }
     });
   });
 

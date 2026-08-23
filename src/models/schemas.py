@@ -5,11 +5,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
-from src.models.metric_definition import FilterOperator, MetricDefinition
+from src.models.metric_definition import FilterOperator, MetricDefinition, MetricStatus
 from src.models.raw_schema import RawSchema
 from src.models.schema_metadata import ParseDiagnostic, RawSchemaMetadata, SchemaDialect
 
-WorkspaceRole = Literal["data_lead", "member"]
+WorkspaceRole = Literal["admin", "data_lead", "member"]
 
 # ---------------------------------------------------------------------------
 # User Authentication & RBAC Schemas
@@ -62,7 +62,6 @@ class UserProfileResponse(BaseModel):
     email: str
     username: str
     full_name: str
-    role: Literal["admin", "analyst"]
     status: Literal["active", "inactive", "suspended"]
     created_at: datetime
 
@@ -105,7 +104,7 @@ class OrganizationRoleUpdateRequest(BaseModel):
 class OrganizationInviteCreateRequest(BaseModel):
     """Request to create a one-time Workspace invitation."""
 
-    role: Literal["data_lead", "member"] = "member"
+    role: Literal["admin", "data_lead", "member"] = "member"
 
 
 class OrganizationInviteResponse(BaseModel):
@@ -113,7 +112,7 @@ class OrganizationInviteResponse(BaseModel):
 
     id: int
     org_id: int
-    role: Literal["data_lead", "member"]
+    role: Literal["admin", "data_lead", "member"]
     status: Literal["pending", "accepted", "revoked", "expired"]
     expires_at: datetime
     invite_url: str | None = None
@@ -124,7 +123,7 @@ class OrganizationInvitePreviewResponse(BaseModel):
 
     organization_name: str
     organization_slug: str
-    role: Literal["data_lead", "member"]
+    role: Literal["admin", "data_lead", "member"]
     expires_at: datetime
 
 
@@ -196,6 +195,7 @@ class MetricResponse(BaseModel):
     metric_id: int
     definition: MetricDefinition | None = None
     source: Literal["ai", "manual"]
+    status: MetricStatus = "pending_approval"
     name: str = ""
     description: str = ""
     sql_template: str = ""
@@ -732,10 +732,10 @@ class ChatSessionUpdateRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Response từ chatbot orchestrator sau khi phân loại intent."""
 
-    intent: str = Field(..., description="'chitchat', 'data_question' hoặc 'metric_query'")
+    intent: str = Field(..., description="'chitchat', 'data_question', 'metric_query' hoặc 'out_of_scope'")
     chat_response: str | None = Field(
         default=None,
-        description="Câu trả lời ngôn ngữ tự nhiên cho chitchat/data_question",
+        description="Câu trả lời ngôn ngữ tự nhiên cho chitchat/data_question/out_of_scope",
     )
     suggestions: list[Any] | None = Field(
         default=None,

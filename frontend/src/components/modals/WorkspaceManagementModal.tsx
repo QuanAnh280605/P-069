@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { CalendarClock, Check, ChevronDown, Copy, Link2, Shield, UserPlus, X } from 'lucide-react';
 
 import {
@@ -14,6 +14,8 @@ import {
   WorkspaceMember,
   WorkspaceRole,
 } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { useWorkspace } from '@/context/WorkspaceContext';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -24,14 +26,20 @@ import {
 } from '@/components/ui/dialog';
 
 const inviteRoleLabels: Record<WorkspaceInvite['role'], string> = {
+  admin: 'Admin',
   member: 'Member',
   data_lead: 'Data Lead',
 };
 
 export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const { user } = useAuth();
+  const { permissions, reloadWorkspaces } = useWorkspace();
+  const canManageMembers = Boolean(permissions.can_manage_members);
+  const canManageInvitations = Boolean(permissions.can_manage_invitations);
+  const canManageWorkspace = canManageMembers || canManageInvitations;
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
-  const [role, setRole] = useState<'member' | 'data_lead'>('member');
+  const [role, setRole] = useState<WorkspaceRole>('member');
   const [inviteUrl, setInviteUrl] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -41,28 +49,28 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
   const [membersExpanded, setMembersExpanded] = useState(true);
   const [invitesExpanded, setInvitesExpanded] = useState(true);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    if (!canManageWorkspace) return;
     setLoading(true);
     try {
-      const [nextMembers, nextInvites] = await Promise.all([
-        listWorkspaceMembersApi(),
-        listWorkspaceInvitesApi(),
-      ]);
-      setMembers(nextMembers);
-      setInvites(nextInvites);
+      const nextMembers = canManageMembers ? await listWorkspaceMembersApi() : [];
+      const nextInvites = canManageInvitations ? await listWorkspaceInvitesApi() : [];
+      if (canManageMembers) setMembers(nextMembers);
+      if (canManageInvitations) setInvites(nextInvites);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không thể tải dữ liệu Workspace');
     } finally {
       setLoading(false);
     }
-  };
+  }, [canManageWorkspace, canManageMembers, canManageInvitations]);
 
   useEffect(() => {
-    if (isOpen) void load();
-  }, [isOpen]);
+    if (isOpen && canManageWorkspace) void load();
+  }, [isOpen, canManageWorkspace, load]);
 
   const invite = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canManageInvitations) return;
     setError('');
     setInviteUrl('');
     setCopied(false);
@@ -90,9 +98,15 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
   };
 
   const changeRole = async (member: WorkspaceMember, nextRole: WorkspaceRole) => {
+    if (!canManageMembers) return;
     setError('');
     try {
       await updateWorkspaceMemberApi(member.user_id, nextRole);
+      if (String(member.user_id) === user?.id && nextRole !== 'admin') {
+        await reloadWorkspaces();
+        onClose();
+        return;
+      }
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không thể thay đổi quyền thành viên');
@@ -100,10 +114,16 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
   };
 
   const remove = async (member: WorkspaceMember) => {
+    if (!canManageMembers) return;
     if (!window.confirm(`Xóa ${member.email} khỏi Workspace?`)) return;
     setError('');
     try {
       await removeWorkspaceMemberApi(member.user_id);
+      if (String(member.user_id) === user?.id) {
+        await reloadWorkspaces();
+        onClose();
+        return;
+      }
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không thể xóa thành viên');
@@ -111,6 +131,7 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
   };
 
   const revoke = async (invitationId: number) => {
+    if (!canManageInvitations) return;
     setError('');
     setRevokingId(invitationId);
     try {
@@ -122,6 +143,8 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
       setRevokingId(null);
     }
   };
+
+  if (!canManageWorkspace) return null;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -141,7 +164,8 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
           </div>
         )}
 
-        <section className="rounded-xl border border-border bg-card p-4">
+        {canManageInvitations && (
+          <section className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-start gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
               <Link2 className="h-4 w-4" />
@@ -161,10 +185,11 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
                 id="invite-role"
                 aria-label="Vai trò lời mời"
                 value={role}
-                onChange={(event) => setRole(event.target.value as 'member' | 'data_lead')}
+                onChange={(event) => setRole(event.target.value as WorkspaceRole)}
                 disabled={inviting}
                 className="border-input bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-3 text-sm outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50"
               >
+                <option value="admin">Admin</option>
                 <option value="member">Member</option>
                 <option value="data_lead">Data Lead</option>
               </select>
@@ -197,9 +222,11 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
               </div>
             </div>
           )}
-        </section>
+          </section>
+        )}
 
-        <section>
+        {canManageMembers && (
+          <section>
           <div className="mb-2 flex items-center justify-between gap-3">
             <button
               type="button"
@@ -216,6 +243,9 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
           </div>
           {membersExpanded && (
             <div id="workspace-members-panel" className="divide-y divide-border rounded-xl border border-border bg-card">
+              <p className="border-b border-border bg-secondary/30 px-3 py-2 text-xs text-muted-foreground">
+                Workspace luôn phải còn ít nhất một Admin. Nếu đổi vai trò hoặc xóa chính bạn, quyền quản lý có thể mất ngay.
+              </p>
               {members.map((member) => (
                 <div key={member.user_id} className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm">
                   <div className="min-w-0">
@@ -229,6 +259,7 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
                       onChange={(event) => void changeRole(member, event.target.value as WorkspaceRole)}
                       className="border-input bg-background text-foreground h-8 rounded-md border px-2 text-xs"
                     >
+                      <option value="admin">Admin</option>
                       <option value="data_lead">Data Lead</option>
                       <option value="member">Member</option>
                     </select>
@@ -241,9 +272,11 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
               {!loading && members.length === 0 && <p className="p-4 text-xs text-muted-foreground">Chưa có thành viên.</p>}
             </div>
           )}
-        </section>
+          </section>
+        )}
 
-        <section>
+        {canManageInvitations && (
+          <section>
           <div className="mb-2 flex items-center justify-between gap-3">
             <button
               type="button"
@@ -308,7 +341,8 @@ export function WorkspaceManagementModal({ isOpen, onClose }: { isOpen: boolean;
               )}
             </div>
           </div>}
-        </section>
+          </section>
+        )}
       </DialogContent>
     </Dialog>
   );

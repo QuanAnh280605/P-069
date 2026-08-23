@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth import create_access_token
@@ -14,6 +15,7 @@ from src.models.db import (
     ImportedSchemaModel,
     LiveTargetDbModel,
     MetricVersionModel,
+    OrganizationMemberModel,
     SemanticColumnModel,
     SemanticDatabaseModel,
     SemanticMetricModel,
@@ -29,6 +31,7 @@ from src.models.schema_metadata import (
     SchemaMetadata,
     TableMetadata,
 )
+from src.services.organization_service import create_organization
 
 
 @pytest.fixture
@@ -40,7 +43,6 @@ def auth_headers():
         username="tester",
         full_name="Tester",
         hashed_password="hash",
-        role="analyst",
         status="active",
     )
     token = create_access_token(user)
@@ -286,6 +288,298 @@ def _make_route_def(
     }
 
 
+async def _seed_workspace_actor(async_session: AsyncSession, role: str) -> tuple[UserModel, int, UserModel]:
+    owner = await async_session.get(UserModel, 1)
+    organization = await create_organization(async_session, owner.id, f"{role} Workspace", f"metric-{role}")
+    actor = owner
+    if role != "admin":
+        actor = UserModel(
+            id=2,
+            email=f"{role}@company.com",
+            username=role,
+            full_name=role.replace("_", " ").title(),
+            hashed_password="hash",
+            status="active",
+        )
+        async_session.add(actor)
+        async_session.add(OrganizationMemberModel(org_id=organization.id, user_id=actor.id, role=role))
+    return owner, organization.id, actor
+
+
+async def _seed_metric_database(async_session: AsyncSession, owner_id: int, org_id: int) -> SemanticDatabaseModel:
+    sem_db = SemanticDatabaseModel(
+        org_id=org_id,
+        created_by=owner_id,
+        display_name="Metric RBAC DB",
+        db_type="postgresql",
+        conn_url_enc="dummy",
+        status="saved",
+    )
+    async_session.add(sem_db)
+    await async_session.flush()
+    table = SemanticTableModel(
+        db_id=sem_db.id,
+        table_name="orders",
+        business_name="Orders",
+        primary_key_column="id",
+    )
+    async_session.add(table)
+    await async_session.flush()
+    async_session.add_all(
+        [
+            SemanticColumnModel(
+                table_id=table.id,
+                column_name="id",
+                data_type="INTEGER",
+                business_name="ID",
+                is_primary_key=True,
+            ),
+            SemanticColumnModel(
+                table_id=table.id,
+                column_name="total_amount",
+                data_type="NUMERIC",
+                business_name="Total",
+            ),
+        ]
+    )
+    return sem_db
+
+
+async def _seed_unverified_metric(async_session: AsyncSession, db_id: int) -> SemanticMetricModel:
+    metric = SemanticMetricModel(
+        db_id=db_id,
+        name="Member Submission",
+        description="Submitted metric",
+        sql_template="",
+        source="manual",
+        formula="",
+        aggregation_type="SUM",
+        definition=_make_route_def("Member Submission", "SUM", "total_amount", "orders"),
+        status="unverified",
+        created_by=3,
+        version=1,
+    )
+    async_session.add(metric)
+    await async_session.flush()
+    async_session.add(MetricVersionModel(metric_id=metric.id, version=1, formula="", changed_by=3))
+    return metric
+
+
+async def _seed_metric_workspace(async_session: AsyncSession, role: str) -> tuple[UserModel, int, int, int]:
+    owner, org_id, actor = await _seed_workspace_actor(async_session, role)
+    sem_db = await _seed_metric_database(async_session, owner.id, org_id)
+    metric = await _seed_unverified_metric(async_session, sem_db.id)
+    await async_session.commit()
+    return actor, org_id, sem_db.id, metric.id
+
+
+async def _seed_metric_with_versions(async_session: AsyncSession, role: str) -> tuple[UserModel, int, int, int]:
+    """Seed a workspace metric whose approved current row is v3 of a v1/v2/v3 history."""
+    actor, org_id, db_id, metric_id = await _seed_metric_workspace(async_session, role)
+    metric = await async_session.get(SemanticMetricModel, metric_id)
+    metric.version = 3
+    metric.status = "approved"
+    async_session.add_all(
+        [
+            MetricVersionModel(
+                metric_id=metric_id,
+                version=2,
+                formula="total_amount",
+                definition=_make_route_def("Member Submission", "AVG", "total_amount", "orders"),
+                changed_by=3,
+            ),
+            MetricVersionModel(
+                metric_id=metric_id,
+                version=3,
+                formula="id",
+                definition=_make_route_def("Member Submission", "COUNT", "id", "orders"),
+                changed_by=3,
+            ),
+        ]
+    )
+    await async_session.commit()
+    return actor, org_id, db_id, metric_id
+
+
+def _workspace_headers(user: UserModel, org_id: int) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {create_access_token(user)}",
+        "X-Organization-ID": str(org_id),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("role", "operation", "expected_status"),
+    [
+        ("admin", "create", 403),
+        ("admin", "update", 403),
+        ("admin", "delete", 403),
+        ("admin", "bulk_approve", 403),
+        ("admin", "single_approve", 403),
+        ("data_lead", "create", 201),
+        ("data_lead", "update", 200),
+        ("data_lead", "delete", 204),
+        ("data_lead", "bulk_approve", 200),
+        ("data_lead", "single_approve", 200),
+        ("member", "create", 201),
+        ("member", "update", 403),
+        ("member", "delete", 403),
+        ("member", "bulk_approve", 403),
+        ("member", "single_approve", 403),
+    ],
+)
+async def test_metric_mutation_role_matrix(
+    client: AsyncClient,
+    async_session: AsyncSession,
+    role: str,
+    operation: str,
+    expected_status: int,
+):
+    actor, org_id, db_id, metric_id = await _seed_metric_workspace(async_session, role)
+    headers = _workspace_headers(actor, org_id)
+    definition = _make_route_def("Changed Metric", "SUM", "total_amount", "orders")
+    requests = {
+        "create": ("post", f"/api/v1/semantic/{db_id}/metric", {"definition": definition, "source": "manual"}),
+        "update": ("put", f"/api/v1/semantic/{db_id}/metric/{metric_id}", {"definition": definition}),
+        "delete": ("delete", f"/api/v1/semantic/{db_id}/metric/{metric_id}", None),
+        "bulk_approve": ("post", "/api/v1/semantic/approve", {"db_id": db_id}),
+        "single_approve": ("post", f"/api/v1/semantic/{db_id}/metric/{metric_id}/approve", None),
+    }
+    method, url, payload = requests[operation]
+
+    response = await client.request(method, url, json=payload, headers=headers)
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.asyncio
+async def test_member_create_forces_unverified_status_and_authenticated_creator(client, async_session):
+    actor, org_id, db_id, _ = await _seed_metric_workspace(async_session, "member")
+    definition = _make_route_def("Escalation Attempt", "SUM", "total_amount", "orders")
+    definition["metric"]["status"] = "approved"
+
+    response = await client.post(
+        f"/api/v1/semantic/{db_id}/metric",
+        json={"definition": definition, "source": "manual"},
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "unverified"
+    metric = await async_session.get(SemanticMetricModel, response.json()["metric_id"])
+    assert metric.created_by == actor.id
+    assert metric.status == "unverified"
+    assert metric.definition["metric"]["status"] == "unverified"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("role", "expected_names"),
+    [
+        ("admin", {"Approved"}),
+        ("data_lead", {"Approved", "Pending", "Review", "Own Unverified", "Other Unverified"}),
+        ("member", {"Approved", "Own Unverified"}),
+    ],
+)
+async def test_metric_list_visibility_by_role(client, async_session, role, expected_names):
+    actor, org_id, db_id, seeded_metric_id = await _seed_metric_workspace(async_session, role)
+    seeded = await async_session.get(SemanticMetricModel, seeded_metric_id)
+    seeded.name = "Other Unverified"
+    seeded.created_by = 999
+    records = [
+        ("Approved", "approved", 999),
+        ("Pending", "pending_approval", 999),
+        ("Review", "needs_review", 999),
+        ("Own Unverified", "unverified", actor.id),
+    ]
+    for name, status_name, creator in records:
+        async_session.add(
+            SemanticMetricModel(
+                db_id=db_id,
+                name=name,
+                description="",
+                sql_template="",
+                source="manual",
+                aggregation_type="COUNT",
+                status=status_name,
+                created_by=creator,
+                version=1,
+            )
+        )
+    await async_session.commit()
+
+    response = await client.get(
+        f"/api/v1/semantic/{db_id}/metrics",
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == 200
+    assert {item["name"] for item in response.json()} == expected_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("role", "owner", "expected_status"),
+    [("admin", "other", 404), ("member", "other", 404), ("member", "self", 200), ("data_lead", "other", 200)],
+)
+async def test_unverified_metric_history_visibility(client, async_session, role, owner, expected_status):
+    actor, org_id, db_id, metric_id = await _seed_metric_workspace(async_session, role)
+    metric = await async_session.get(SemanticMetricModel, metric_id)
+    metric.created_by = actor.id if owner == "self" else 999
+    await async_session.commit()
+
+    response = await client.get(
+        f"/api/v1/semantic/{db_id}/metric/{metric_id}/history",
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["dimensions", "filter-columns"])
+async def test_metric_metadata_rejects_cross_workspace_database(client, async_session, suffix):
+    actor, actor_org_id, _, _ = await _seed_metric_workspace(async_session, "member")
+    other_owner = UserModel(
+        id=10,
+        email="other-owner@company.com",
+        username="other-owner",
+        full_name="Other Owner",
+        hashed_password="hash",
+        status="active",
+    )
+    async_session.add(other_owner)
+    await async_session.flush()
+    other_org = await create_organization(async_session, other_owner.id, "Other Workspace", "other-workspace")
+    other_db = await _seed_metric_database(async_session, other_owner.id, other_org.id)
+    other_metric = await _seed_unverified_metric(async_session, other_db.id)
+    await async_session.commit()
+
+    response = await client.get(
+        f"/api/v1/semantic/{other_db.id}/metric/{other_metric.id}/{suffix}",
+        headers=_workspace_headers(actor, actor_org_id),
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["dimensions", "filter-columns"])
+async def test_metric_metadata_hides_another_members_unverified_metric(client, async_session, suffix):
+    actor, org_id, db_id, metric_id = await _seed_metric_workspace(async_session, "member")
+    metric = await async_session.get(SemanticMetricModel, metric_id)
+    metric.created_by = 999
+    await async_session.commit()
+
+    response = await client.get(
+        f"/api/v1/semantic/{db_id}/metric/{metric_id}/{suffix}",
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == 404
+
+
 @pytest.mark.asyncio
 async def test_approve_semantic_layer_success(client: AsyncClient, async_session: AsyncSession, auth_headers: dict):
     """POST /semantic/approve approves all draft metrics for the semantic database."""
@@ -356,7 +650,6 @@ async def test_approve_skips_other_users_metrics(client: AsyncClient, async_sess
         username="analyst",
         full_name="Analyst",
         hashed_password="hash",
-        role="analyst",
         status="active",
     )
     async_session.add(user2)
@@ -416,6 +709,47 @@ async def test_approve_skips_other_users_metrics(client: AsyncClient, async_sess
     assert res.status_code == 200
     data = res.json()
     assert data["approved_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_approve_semantic_layer_all_need_review_returns_422(
+    client: AsyncClient, async_session: AsyncSession, auth_headers: dict
+):
+    """POST /semantic/approve returns 422 and leaves db status unchanged when every candidate needs review."""
+    sem_db = SemanticDatabaseModel(
+        id=213,
+        created_by=1,
+        display_name="All Review DB",
+        db_type="postgresql",
+        conn_url_enc="dummy",
+        status="draft",
+    )
+    # Table WITHOUT a primary key → MISSING_GRAIN diagnostic on resolve
+    tbl = SemanticTableModel(id=913, db_id=213, table_name="orders", business_name="Đơn hàng")
+    col = SemanticColumnModel(
+        id=9031, table_id=913, column_name="total_amount", data_type="NUMERIC", business_name="Tổng tiền"
+    )
+    metric = SemanticMetricModel(
+        db_id=213,
+        name="Broken Metric",
+        description="Needs review",
+        sql_template="SELECT SUM(total_amount) FROM orders",
+        source="manual",
+        formula="SUM(orders.total)",
+        aggregation_type="SUM",
+        definition=_make_route_def("Broken Metric", "SUM", "total_amount", "orders"),
+        status="pending_approval",
+        created_by=1,
+        version=1,
+    )
+    async_session.add_all([sem_db, tbl, col, metric])
+    await async_session.commit()
+
+    res = await client.post("/api/v1/semantic/approve", json={"db_id": 213}, headers=auth_headers)
+
+    assert res.status_code == 422
+    await async_session.refresh(sem_db)
+    assert sem_db.status != "saved"
 
 
 # ---------------------------------------------------------------------------
@@ -626,3 +960,271 @@ async def test_get_metric_history_wrong_db(client: AsyncClient, async_session: A
     # Query with wrong db_id (241 vs 999)
     res = await client.get(f"/api/v1/semantic/999/metric/{metric.id}/history", headers=auth_headers)
     assert res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_metric_cross_db_returns_404(client: AsyncClient, async_session: AsyncSession, auth_headers: dict):
+    """PUT /semantic/{db_id}/metric/{metric_id} returns 404 when the metric belongs to another database."""
+    sem_db_a = SemanticDatabaseModel(
+        id=242,
+        created_by=1,
+        display_name="DB A",
+        db_type="postgresql",
+        conn_url_enc="dummy",
+        status="draft",
+    )
+    sem_db_b = SemanticDatabaseModel(
+        id=243,
+        created_by=1,
+        display_name="DB B",
+        db_type="postgresql",
+        conn_url_enc="dummy",
+        status="draft",
+    )
+    metric_b = SemanticMetricModel(
+        db_id=243,
+        name="Metric B",
+        description="In DB B",
+        sql_template="SELECT 1",
+        source="manual",
+        formula="COUNT(*)",
+        aggregation_type="COUNT",
+        status="pending_approval",
+        created_by=1,
+        version=1,
+    )
+    async_session.add_all([sem_db_a, sem_db_b, metric_b])
+    await async_session.commit()
+
+    res = await client.put(
+        f"/api/v1/semantic/242/metric/{metric_b.id}",
+        json={"definition": _make_route_def("Hijack Attempt", "COUNT", "total_amount", "orders")},
+        headers=auth_headers,
+    )
+
+    assert res.status_code == 404
+    assert res.json()["detail"] == f"Metric {metric_b.id} not found"
+
+
+# ---------------------------------------------------------------------------
+# POST /semantic/{db_id}/metric/{metric_id}/rollback/{target_version}
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_rollback_versions(async_session: AsyncSession, metric_id: int) -> list[MetricVersionModel]:
+    result = await async_session.execute(
+        select(MetricVersionModel).where(MetricVersionModel.metric_id == metric_id).order_by(MetricVersionModel.version)
+    )
+    return list(result.scalars().all())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("role", "expected_status"), [("admin", 403), ("data_lead", 200), ("member", 403)])
+async def test_metric_rollback_role_matrix(client, async_session, role, expected_status):
+    """Only Data Leads may roll back metrics, including another member's metric."""
+    actor, org_id, db_id, metric_id = await _seed_metric_with_versions(async_session, role)
+
+    response = await client.post(
+        f"/api/v1/semantic/{db_id}/metric/{metric_id}/rollback/2",
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.asyncio
+async def test_rollback_requires_authentication(client):
+    response = await client.post("/api/v1/semantic/1/metric/1/rollback/2")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_rollback_missing_database_returns_404(client, async_session):
+    actor, org_id, _, _ = await _seed_metric_with_versions(async_session, "data_lead")
+
+    response = await client.post(
+        "/api/v1/semantic/9999/metric/1/rollback/2",
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_rollback_missing_metric_returns_404(client, async_session):
+    actor, org_id, db_id, _ = await _seed_metric_with_versions(async_session, "data_lead")
+
+    response = await client.post(
+        f"/api/v1/semantic/{db_id}/metric/9999/rollback/2",
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_rollback_wrong_database_returns_404(client, async_session):
+    actor, org_id, db_id, metric_id = await _seed_metric_with_versions(async_session, "data_lead")
+    owner = await async_session.get(UserModel, 1)
+    other_db = await _seed_metric_database(async_session, owner.id, org_id)
+    await async_session.commit()
+
+    response = await client.post(
+        f"/api/v1/semantic/{other_db.id}/metric/{metric_id}/rollback/2",
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_rollback_cross_workspace_database_returns_404(client, async_session):
+    actor, actor_org_id, _, _ = await _seed_metric_with_versions(async_session, "member")
+    other_owner = UserModel(
+        id=10,
+        email="other-owner@company.com",
+        username="other-owner",
+        full_name="Other Owner",
+        hashed_password="hash",
+        status="active",
+    )
+    async_session.add(other_owner)
+    await async_session.flush()
+    other_org = await create_organization(async_session, other_owner.id, "Other Workspace", "other-workspace")
+    other_db = await _seed_metric_database(async_session, other_owner.id, other_org.id)
+    other_metric = await _seed_unverified_metric(async_session, other_db.id)
+    await async_session.commit()
+
+    response = await client.post(
+        f"/api/v1/semantic/{other_db.id}/metric/{other_metric.id}/rollback/2",
+        headers=_workspace_headers(actor, actor_org_id),
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_rollback_non_integer_target_version_returns_422(client, async_session):
+    """A non-integer path segment fails FastAPI path validation before the handler runs."""
+    actor, org_id, db_id, metric_id = await _seed_metric_with_versions(async_session, "data_lead")
+
+    response = await client.post(
+        f"/api/v1/semantic/{db_id}/metric/{metric_id}/rollback/not-an-int",
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target_version", [0, -1, 3, 99])
+async def test_rollback_rejects_invalid_target_versions(client, async_session, target_version):
+    """Zero/negative targets fail ge=1 validation; current/future targets fail the service range check."""
+    actor, org_id, db_id, metric_id = await _seed_metric_with_versions(async_session, "data_lead")
+
+    response = await client.post(
+        f"/api/v1/semantic/{db_id}/metric/{metric_id}/rollback/{target_version}",
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_rollback_missing_snapshot_returns_422(client, async_session):
+    """A target within range whose version row is absent maps to 422."""
+    actor, org_id, db_id, metric_id = await _seed_metric_with_versions(async_session, "data_lead")
+    snapshot = (
+        await async_session.execute(
+            select(MetricVersionModel).where(
+                MetricVersionModel.metric_id == metric_id,
+                MetricVersionModel.version == 2,
+            )
+        )
+    ).scalar_one()
+    await async_session.delete(snapshot)
+    await async_session.commit()
+
+    response = await client.post(
+        f"/api/v1/semantic/{db_id}/metric/{metric_id}/rollback/2",
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_rollback_restores_v2_deletes_v3_and_approves(client, async_session):
+    """v3→v2 deletes v3 and leaves the current row as approved v2 content."""
+    actor, org_id, db_id, metric_id = await _seed_metric_with_versions(async_session, "data_lead")
+    before = await _fetch_rollback_versions(async_session, metric_id)
+    assert [v.version for v in before] == [1, 2, 3]
+
+    response = await client.post(
+        f"/api/v1/semantic/{db_id}/metric/{metric_id}/rollback/2",
+        headers=_workspace_headers(actor, org_id),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["metric_id"] == metric_id
+    assert body["status"] == "approved"
+
+    metric = await async_session.get(SemanticMetricModel, metric_id)
+    assert metric.version == 2
+    assert metric.status == "approved"
+    assert metric.aggregation_type == "AVG"
+    assert metric.definition["metric"]["formula"]["function"] == "AVG"
+    assert metric.definition["metric"]["formula"]["expression"] == "total_amount"
+    assert metric.definition["metric"]["status"] == "approved"
+
+    remaining = await _fetch_rollback_versions(async_session, metric_id)
+    assert [v.version for v in remaining] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_rollback_personal_db_requires_creator_ownership(client, async_session, auth_headers):
+    """Personal databases require the requester to own the metric itself."""
+    sem_db = _seed_semantic_db(async_session, db_id=250)
+    metric = SemanticMetricModel(
+        db_id=sem_db.id,
+        name="Foreign Metric",
+        description="",
+        sql_template="",
+        source="manual",
+        formula="total_amount",
+        aggregation_type="SUM",
+        definition=_make_route_def("Foreign Metric", "SUM", "total_amount", "orders"),
+        status="approved",
+        created_by=99,
+        version=2,
+    )
+    async_session.add(metric)
+    await async_session.flush()
+    async_session.add_all(
+        [
+            MetricVersionModel(
+                metric_id=metric.id,
+                version=1,
+                formula="total_amount",
+                definition=_make_route_def("Foreign Metric", "SUM", "total_amount", "orders"),
+                changed_by=99,
+            ),
+            MetricVersionModel(
+                metric_id=metric.id,
+                version=2,
+                formula="id",
+                definition=_make_route_def("Foreign Metric", "COUNT", "id", "orders"),
+                changed_by=99,
+            ),
+        ]
+    )
+    await async_session.commit()
+
+    response = await client.post(
+        f"/api/v1/semantic/{sem_db.id}/metric/{metric.id}/rollback/1",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422

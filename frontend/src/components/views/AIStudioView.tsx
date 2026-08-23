@@ -11,9 +11,7 @@ import {
   generateCustomMetricsApi,
   getChatSessionDetailApi,
   MetricSuggestion,
-  METRIC_WRITE_PERMISSION_MESSAGE,
   SemanticLayerData,
-  isPermissionDenied,
   sendChatOrchestratorApi,
 } from '@/lib/api';
 import { ChatMessage, StudioChatStream } from '@/components/studio/StudioChatStream';
@@ -73,7 +71,7 @@ export function AIStudioView({
           error ||
           (canGenerateMetrics
             ? `Xin chào! Tôi đã quét schema cho database ${layer.db_name} (${layer.tables.length} bảng). Bạn có thể hỏi để tôi đề xuất và định nghĩa Business Metrics.`
-            : `Xin chào! Tôi có thể giúp bạn tìm hiểu schema, metric đã phê duyệt và cách chọn dữ liệu trong ${layer.db_name}.`),
+            : `Xin chào! Tôi có thể giúp bạn tìm hiểu schema, tra cứu dữ liệu qua các metric đã duyệt (chỉ áp dụng cho kết nối Live DB) hoặc đề xuất Business Metrics mới cho ${layer.db_name}.`),
         timestamp: now(),
         isError: Boolean(error),
       },
@@ -164,7 +162,11 @@ export function AIStudioView({
             ...current.filter((item) => item.id !== response.session!.id),
           ]);
         }
-        if (response.intent === 'chitchat' || response.intent === 'data_question') {
+        if (
+          response.intent === 'chitchat' ||
+          response.intent === 'data_question' ||
+          response.intent === 'out_of_scope'
+        ) {
           setMessages((current) => [
             ...current,
             {
@@ -197,7 +199,6 @@ export function AIStudioView({
           },
         ]);
       } catch (error) {
-        if (!canGenerateMetrics) throw error;
         const res = await generateCustomMetricsApi(String(semanticDbId), prompt, _targetTables);
         suggestions = res.suggestions || [];
         duplicates = res.duplicates ?? [];
@@ -226,14 +227,21 @@ export function AIStudioView({
     }
   };
 
-  const updateMessage = (messageId: string, updater: (message: ChatMessage) => ChatMessage): void => {
-    setMessages((current) => current.map((message) => (message.id === messageId ? updater(message) : message)));
+  const updateMessage = (
+    messageId: string,
+    updater: (message: ChatMessage) => ChatMessage,
+  ): void => {
+    setMessages((current) =>
+      current.map((message) => (message.id === messageId ? updater(message) : message)),
+    );
   };
 
   const renameSuggestion = (messageId: string, index: number): void =>
     updateMessage(messageId, (message) => ({
       ...message,
-      suggestions: message.suggestions?.map((item, i) => (i === index ? applySuggestedName(item) : item)),
+      suggestions: message.suggestions?.map((item, i) =>
+        i === index ? applySuggestedName(item) : item,
+      ),
     }));
 
   const discardSuggestion = (messageId: string, index: number): void =>
@@ -251,11 +259,17 @@ export function AIStudioView({
   const useExistingDuplicate = (messageId: string, index: number): void =>
     updateMessage(messageId, (message) => {
       if (!message.duplicates?.[index]) return message;
-      const duplicates = message.duplicates.map((item, i) => (i === index ? { ...item, resolved: true } : item));
+      const duplicates = message.duplicates.map((item, i) =>
+        i === index ? { ...item, resolved: true } : item,
+      );
       const allSettled = duplicates.length > 0 && duplicates.every((item) => item.resolved);
       const hasSuggestions = (message.suggestions?.length ?? 0) > 0;
       // Description line is stale once every notice is resolved and nothing else shows.
-      return { ...message, duplicates, text: allSettled && !hasSuggestions ? '' : message.text };
+      return {
+        ...message,
+        duplicates,
+        text: allSettled && !hasSuggestions ? '' : message.text,
+      };
     });
 
   const save = async (suggestion: MetricSuggestion) => {
@@ -273,14 +287,11 @@ export function AIStudioView({
       });
       await onMetricsChanged();
     } catch (error) {
-      if (isPermissionDenied(error)) onNotify?.(METRIC_WRITE_PERMISSION_MESSAGE);
+      const message = error instanceof Error ? error.message : 'Lỗi không xác định';
+      onNotify?.(message);
       appendError(
         setMessages,
-        isPermissionDenied(error)
-          ? METRIC_WRITE_PERMISSION_MESSAGE
-          : `Không thể lưu chỉ số "${suggestion.definition.metric.name}": ${
-              error instanceof Error ? error.message : 'Lỗi không xác định'
-            }`,
+        `Không thể lưu chỉ số "${suggestion.definition.metric.name}": ${message}`,
       );
       throw error;
     }
@@ -302,7 +313,7 @@ export function AIStudioView({
         description={
           canGenerateMetrics
             ? 'Chat with the assistant to explore your schema and generate business metric definitions.'
-            : 'Hỏi về schema, metric đã duyệt và cách khai thác dữ liệu an toàn.'
+            : 'Hỏi về schema, tra cứu dữ liệu qua metric đã duyệt (chỉ áp dụng cho Live DB) hoặc yêu cầu đề xuất Business Metrics mới.'
         }
         database={dbProp}
         actions={
@@ -343,17 +354,14 @@ export function AIStudioView({
           onSendMessage={send}
           isLoading={loading || loadingSessions}
           tableNames={layer.tables.map((table) => table.table_name)}
-          onAddMetric={canGenerateMetrics ? save : undefined}
-          onEditMetric={canGenerateMetrics ? onEditMetricRequest : undefined}
+          onAddMetric={save}
+          onEditMetric={onEditMetricRequest}
           onRenameSuggestion={renameSuggestion}
           onDiscardSuggestion={discardSuggestion}
           onDismissDuplicate={dismissDuplicate}
           onUseExistingDuplicate={useExistingDuplicate}
-          onRefineWithAI={
-            canGenerateMetrics
-              ? (suggestion) =>
-                  setActivePrompt(`Hãy điều chỉnh chỉ số ${suggestion.definition.metric.name}: `)
-              : undefined
+          onRefineWithAI={(suggestion) =>
+            setActivePrompt(`Hãy điều chỉnh chỉ số ${suggestion.definition.metric.name}: `)
           }
           activePromptText={activePrompt}
           theme={theme}
@@ -387,10 +395,19 @@ function appendError(
 ): void {
   setter((current) => [
     ...current,
-    { id: crypto.randomUUID(), sender: 'assistant', text, timestamp: now(), isError: true },
+    {
+      id: crypto.randomUUID(),
+      sender: 'assistant',
+      text,
+      timestamp: now(),
+      isError: true,
+    },
   ]);
 }
 
 function now(): string {
-  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date().toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }

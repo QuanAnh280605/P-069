@@ -43,6 +43,8 @@ OrgHeader = Annotated[int | None, Header(alias="X-Organization-ID")]
 def _parse_org_error(error: Exception) -> HTTPException:
     if isinstance(error, PermissionError):
         return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error))
+    if isinstance(error, ValueError) and "last Workspace Admin" in str(error):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error))
 
 
@@ -69,7 +71,7 @@ async def create_workspace(
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> OrganizationSummaryResponse:
-    """Create a Workspace and return its Data Lead membership."""
+    """Create a Workspace and return its Admin membership."""
     organization = await create_organization(db, current_user.id, body.name, body.slug)
     _, membership = await resolve_membership(db, current_user.id, organization.id)
     return OrganizationSummaryResponse(
@@ -128,7 +130,7 @@ async def update_workspace_member(
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
-    """Change a member role; only Data Leads may perform this action."""
+    """Change a member role; only Admins may perform this action."""
     organization, _ = await _active_org(db, current_user.id, org_id)
     try:
         await change_member_role(db, organization.id, current_user.id, user_id, body.role)

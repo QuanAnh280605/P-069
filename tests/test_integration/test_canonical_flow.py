@@ -69,7 +69,6 @@ def _auth_headers() -> dict[str, str]:
         username="tester",
         full_name="Tester",
         hashed_password="hash",
-        role="admin",
         status="active",
     )
     return {"Authorization": f"Bearer {create_access_token(user)}"}
@@ -1252,7 +1251,6 @@ async def test_approve_skips_other_users_metrics(client: Any, async_session: Asy
         username="analyst",
         full_name="Analyst",
         hashed_password="hash",
-        role="analyst",
         status="active",
     )
     async_session.add(user2)

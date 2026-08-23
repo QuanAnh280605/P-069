@@ -461,4 +461,91 @@ describe('MetricExplorerView', () => {
     const pieBtn = screen.getByRole('button', { name: /Biểu đồ Tròn/i });
     fireEvent.click(pieBtn);
   });
+
+  it('filters metric list in Section 1 by metric search query and clears search', () => {
+    const mockMetrics: MetricRecord[] = [
+      {
+        metric_id: 1,
+        name: 'Doanh thu thuần',
+        source: 'ai',
+        version: 1,
+        status: 'approved',
+        created_at: '2026-01-01',
+        definition: {
+          schema_version: 2,
+          metric: {
+            name: 'Doanh thu thuần',
+            base_entity: 'orders',
+            base_entity_id: 10,
+            grain: { column_ids: [101] },
+            formula: { function: 'SUM', expression: 'price' },
+            filters: [],
+            status: 'approved',
+            confidence: 'high',
+            excluded_notes: '',
+          },
+        },
+      },
+      {
+        metric_id: 2,
+        name: 'Số lượng khách hàng',
+        source: 'ai',
+        version: 1,
+        status: 'approved',
+        created_at: '2026-01-01',
+        definition: {
+          schema_version: 2,
+          metric: {
+            name: 'Số lượng khách hàng',
+            base_entity: 'customers',
+            base_entity_id: 20,
+            grain: { column_ids: [201] },
+            formula: { function: 'COUNT', expression: 'id' },
+            filters: [],
+            status: 'approved',
+            confidence: 'high',
+            excluded_notes: '',
+          },
+        },
+      },
+    ];
+
+    const mockCatalog: SemanticCatalog = {
+      db_id: 3,
+      source_type: 'live',
+      query_supported: true,
+      tables: [],
+      relationships: [],
+    };
+
+    render(
+      <MetricExplorerView
+        dbId={3}
+        metrics={mockMetrics}
+        catalog={mockCatalog}
+        theme="light"
+      />
+    );
+
+    // Both metrics initially visible
+    expect(screen.getByText('Doanh thu thuần')).toBeInTheDocument();
+    expect(screen.getByText('Số lượng khách hàng')).toBeInTheDocument();
+
+    // Type in metric search
+    const searchInput = screen.getByPlaceholderText(/Tìm nhanh chỉ số/i);
+    fireEvent.change(searchInput, { target: { value: 'khách hàng' } });
+
+    // Only matching metric is displayed
+    expect(screen.getByText('Số lượng khách hàng')).toBeInTheDocument();
+    expect(screen.queryByText('Doanh thu thuần')).not.toBeInTheDocument();
+
+    // Type non-matching search
+    fireEvent.change(searchInput, { target: { value: 'không tồn tại' } });
+    expect(screen.getByText(/Không tìm thấy metric nào khớp/)).toBeInTheDocument();
+
+    // Clear search
+    fireEvent.change(searchInput, { target: { value: '' } });
+    expect(screen.getByText('Doanh thu thuần')).toBeInTheDocument();
+    expect(screen.getByText('Số lượng khách hàng')).toBeInTheDocument();
+  });
 });

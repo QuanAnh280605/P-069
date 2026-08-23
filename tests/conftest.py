@@ -34,7 +34,6 @@ async def async_session():
             username="tester",
             full_name="Tester",
             hashed_password="hash",
-            role="admin",
             status="active",
         )
         session.add(user)

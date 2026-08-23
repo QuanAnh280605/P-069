@@ -17,7 +17,7 @@ async def test_create_and_list_workspace(client, async_session):
     response = await client.post("/api/v1/org", json={"name": "Acme Analytics"}, headers=_headers(user))
 
     assert response.status_code == 201
-    assert response.json()["role"] == "data_lead"
+    assert response.json()["role"] == "admin"
 
     listed = await client.get("/api/v1/org/my-orgs", headers=_headers(user))
     assert listed.status_code == 200
@@ -47,7 +47,6 @@ async def test_member_can_preview_invitation_and_accept(client, async_session):
         username="newmember",
         full_name="New Member",
         hashed_password="hash",
-        role="analyst",
         status="active",
     )
     async_session.add(member)
@@ -59,7 +58,7 @@ async def test_member_can_preview_invitation_and_accept(client, async_session):
 
 
 @pytest.mark.asyncio
-async def test_workspace_admin_role_is_rejected(client, async_session):
+async def test_workspace_admin_role_is_accepted(client, async_session):
     owner = await async_session.get(UserModel, 1)
     created = await client.post("/api/v1/org", json={"name": "Acme"}, headers=_headers(owner))
 
@@ -69,7 +68,7 @@ async def test_workspace_admin_role_is_rejected(client, async_session):
         headers={**_headers(owner), "X-Organization-ID": str(created.json()["id"])},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -111,7 +110,6 @@ async def test_member_cannot_mutate_workspace_resource_without_header(client, as
         username="member",
         full_name="Member",
         hashed_password="hash",
-        role="analyst",
         status="active",
     )
     async_session.add(member)
@@ -178,3 +176,168 @@ async def test_workspace_header_blocks_cross_workspace_resource_access(client, a
     )
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Admin-only management — API 403 tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_data_lead_gets_403_on_member_role_change(client, async_session):
+    admin_user = await async_session.get(UserModel, 1)
+    data_lead = UserModel(
+        id=2,
+        email="dl@company.com",
+        username="datalead",
+        full_name="Data Lead",
+        hashed_password="hash",
+        status="active",
+    )
+    member = UserModel(
+        id=3,
+        email="member@company.com",
+        username="member",
+        full_name="Member",
+        hashed_password="hash",
+        status="active",
+    )
+    async_session.add_all([data_lead, member])
+    organization = await create_organization(async_session, admin_user.id, "Acme", "acme")
+    async_session.add_all(
+        [
+            OrganizationMemberModel(org_id=organization.id, user_id=data_lead.id, role="data_lead"),
+            OrganizationMemberModel(org_id=organization.id, user_id=member.id, role="member"),
+        ]
+    )
+    await async_session.commit()
+
+    response = await client.put(
+        f"/api/v1/org/members/{member.id}",
+        json={"role": "data_lead"},
+        headers={**_headers(data_lead), "X-Organization-ID": str(organization.id)},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_member_gets_403_on_member_removal(client, async_session):
+    admin_user = await async_session.get(UserModel, 1)
+    member1 = UserModel(
+        id=2,
+        email="m1@company.com",
+        username="member1",
+        full_name="Member 1",
+        hashed_password="hash",
+        status="active",
+    )
+    member2 = UserModel(
+        id=3,
+        email="m2@company.com",
+        username="member2",
+        full_name="Member 2",
+        hashed_password="hash",
+        status="active",
+    )
+    async_session.add_all([member1, member2])
+    organization = await create_organization(async_session, admin_user.id, "Acme", "acme")
+    async_session.add_all(
+        [
+            OrganizationMemberModel(org_id=organization.id, user_id=member1.id, role="member"),
+            OrganizationMemberModel(org_id=organization.id, user_id=member2.id, role="member"),
+        ]
+    )
+    await async_session.commit()
+
+    response = await client.delete(
+        f"/api/v1/org/members/{member2.id}",
+        headers={**_headers(member1), "X-Organization-ID": str(organization.id)},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_data_lead_gets_403_on_invitation_creation(client, async_session):
+    admin_user = await async_session.get(UserModel, 1)
+    data_lead = UserModel(
+        id=2,
+        email="dl@company.com",
+        username="datalead",
+        full_name="Data Lead",
+        hashed_password="hash",
+        status="active",
+    )
+    async_session.add(data_lead)
+    organization = await create_organization(async_session, admin_user.id, "Acme", "acme")
+    async_session.add(OrganizationMemberModel(org_id=organization.id, user_id=data_lead.id, role="data_lead"))
+    await async_session.commit()
+
+    response = await client.post(
+        "/api/v1/org/invite",
+        json={"role": "member"},
+        headers={**_headers(data_lead), "X-Organization-ID": str(organization.id)},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_member_gets_403_on_invitation_list(client, async_session):
+    admin_user = await async_session.get(UserModel, 1)
+    member = UserModel(
+        id=2,
+        email="member@company.com",
+        username="member",
+        full_name="Member",
+        hashed_password="hash",
+        status="active",
+    )
+    async_session.add(member)
+    organization = await create_organization(async_session, admin_user.id, "Acme", "acme")
+    async_session.add(OrganizationMemberModel(org_id=organization.id, user_id=member.id, role="member"))
+    await async_session.commit()
+
+    response = await client.get(
+        "/api/v1/org/invites",
+        headers={**_headers(member), "X-Organization-ID": str(organization.id)},
+    )
+
+    assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Last-admin conflict → 409
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_last_admin_demotion_returns_409(client, async_session):
+    owner = await async_session.get(UserModel, 1)
+    created = await client.post("/api/v1/org", json={"name": "Acme"}, headers=_headers(owner))
+    org_id = created.json()["id"]
+
+    response = await client.put(
+        "/api/v1/org/members/1",
+        json={"role": "member"},
+        headers={**_headers(owner), "X-Organization-ID": str(org_id)},
+    )
+
+    assert response.status_code == 409
+    assert "last" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_last_admin_removal_returns_409(client, async_session):
+    owner = await async_session.get(UserModel, 1)
+    created = await client.post("/api/v1/org", json={"name": "Acme"}, headers=_headers(owner))
+    org_id = created.json()["id"]
+
+    response = await client.delete(
+        "/api/v1/org/members/1",
+        headers={**_headers(owner), "X-Organization-ID": str(org_id)},
+    )
+
+    assert response.status_code == 409
+    assert "last" in response.json()["detail"].lower()

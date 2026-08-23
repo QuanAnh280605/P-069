@@ -277,14 +277,16 @@ Hệ thống phân tách rành mạch **2 cơ sở dữ liệu**:
 ### 1. Khởi tạo Metadata Store & Chạy Migrations
 
 ```bash
-# 1. Khởi chạy PostgreSQL Metadata Store và PgWeb UI
-docker compose -f docker-compose.dev.yml up postgres pgweb -d
+# 1. Khởi chạy PostgreSQL Metadata Store và pgAdmin 4 UI
+docker compose -f docker-compose.dev.yml up postgres pgadmin -d
 
 # 2. Cập nhật Database Schema lên phiên bản mới nhất bằng Alembic
 alembic upgrade head
 ```
 
-- **PgWeb UI (Trình quản trị Web Database):** Truy cập tại [http://localhost:8081](http://localhost:8081) để xem trực quan các bảng của Metadata Store và Target DB.
+- **pgAdmin 4 Web UI (Trình quản trị & chỉnh sửa Web Database):** Truy cập tại [http://localhost:8081](http://localhost:8081) để xem và chỉnh sửa trực tiếp (View/Edit Data, Filter, SQL Query) các bảng của Metadata Store và Target DB.
+  - **Tài khoản đăng nhập (nếu yêu cầu):** `admin@admin.com` / `admin`
+  - **Server:** Đã được cấu hình sẵn kết nối tự động tới database `semantic_layer_dev` (user: `dev`, password: `devpassword`).
 
 ---
 

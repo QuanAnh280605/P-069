@@ -20,7 +20,6 @@ def _auth_headers() -> dict[str, str]:
         username="tester",
         full_name="Tester",
         hashed_password="hash",
-        role="admin",
         status="active",
     )
     return {"Authorization": f"Bearer {create_access_token(user)}"}

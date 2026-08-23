@@ -34,7 +34,6 @@ def _token_headers(user: UserModel | None = None) -> dict[str, str]:
         username="tester",
         full_name="Tester",
         hashed_password="hash",
-        role="admin",
         status="active",
     )
     return {"Authorization": f"Bearer {create_access_token(active_user)}"}
@@ -597,7 +596,6 @@ async def test_catalog_rejects_other_users_database(
         username="other",
         full_name="Other",
         hashed_password="hash",
-        role="admin",
         status="active",
     )
     response = await client.get(CATALOG_ENDPOINT.format(db_id=data["sem_db_id"]), headers=_token_headers(other))

@@ -10,14 +10,23 @@ from src.services.llm import get_llm
 
 logger = logging.getLogger(__name__)
 
-_CLASSIFY_PROMPT = """Bạn là bộ phân loại câu hỏi thông minh.
-Phân loại câu hỏi của người dùng vào đúng 1 trong 3 nhóm:
+_OUT_OF_SCOPE_RESPONSE = (
+    "Tôi là trợ lý AI chuyên về Semantic Layer và phân tích dữ liệu doanh nghiệp. "
+    "Tôi chỉ hỗ trợ các câu hỏi liên quan đến cơ sở dữ liệu, schema, bảng, cột, "
+    "Business Metrics và tính năng của hệ thống. "
+    "Rất tiếc tôi không thể trả lời câu hỏi ngoài phạm vi này. "
+    "Bạn có câu hỏi nào về dữ liệu không?"
+)
 
-- "chitchat": chào hỏi, hỏi thông tin chung về hệ thống, câu hỏi không liên quan đến dữ liệu
-- "data_question": hỏi về schema, bảng, cột, glossary, metric đã có, cách chọn dữ liệu hoặc giải thích kết quả
-- "metric_query": yêu cầu tạo/sửa/đề xuất công thức Business Metric mới
+_CLASSIFY_PROMPT = """Bạn là bộ phân loại câu hỏi thông minh cho hệ thống AI Semantic Layer.
+Phân loại câu hỏi của người dùng vào đúng 1 trong 4 nhóm:
 
-Chỉ trả về DUY NHẤT 1 từ: "chitchat", "data_question" hoặc "metric_query"
+- "chitchat": Chào hỏi (xin chào, cảm ơn, tạm biệt), hỏi về danh tính/khả năng của AI trợ lý hoặc hỏi thông tin/tính năng chung của hệ thống AI Semantic Layer.
+- "data_question": Hỏi về cấu trúc database, schema, bảng, cột, kiểu dữ liệu, glossary, quan hệ bảng, danh sách metric đã có hoặc hướng dẫn chọn dữ liệu/dimension/filter để truy vấn.
+- "metric_query": Yêu cầu tạo mới, chỉnh sửa, tính toán hoặc đề xuất công thức Business Metric từ schema dữ liệu.
+- "out_of_scope": Câu hỏi hoặc yêu cầu KHÔNG LIÊN QUAN đến dữ liệu, database, Business Metrics hay tính năng hệ thống (ví dụ: thời tiết, công thức nấu ăn, viết thơ, kể chuyện, giải toán ngoài lề, tin tức xã hội, thể thao, giải trí, lập trình ứng dụng ngoài lề...).
+
+Chỉ trả về DUY NHẤT 1 từ trong 4 từ: "chitchat", "data_question", "metric_query", hoặc "out_of_scope"
 
 Câu hỏi trước đây:
 {history}
@@ -26,7 +35,7 @@ Câu hỏi mới nhất: {user_message}"""
 
 
 async def orchestrator_node(state: AgentState) -> dict[str, Any]:
-    """Classify user message into 'chitchat', 'data_question', or 'metric_query'.
+    """Classify user message into 'chitchat', 'data_question', 'metric_query', or 'out_of_scope'.
 
     Uses LLM with temperature=0.0 for deterministic classification.
     Falls back to 'chitchat' on error to avoid breaking the conversation.
@@ -44,24 +53,30 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
         prompt = _CLASSIFY_PROMPT.format(user_message=user_message, history=history)
         response = await llm.ainvoke(prompt)
         raw = (response.content if hasattr(response, "content") else str(response)).strip().lower()
-
-        # Extract intent — accept exact match or substring
-        if "metric_query" in raw:
-            intent = "metric_query"
-        elif "data_question" in raw:
-            intent = "data_question"
-        else:
-            intent = "chitchat"
+        intent = _parse_intent(raw)
         logger.info(
             "Orchestrator classified message (len=%d) → intent=%s",
             len(user_message),
             intent,
         )
+        if intent == "out_of_scope":
+            return {"intent": "out_of_scope", "chat_response": _OUT_OF_SCOPE_RESPONSE}
         return {"intent": intent}
 
     except Exception as exc:
         logger.warning("Orchestrator classification failed, defaulting to chitchat: %s", exc)
         return {"intent": "chitchat"}
+
+
+def _parse_intent(raw: str) -> str:
+    """Parse raw LLM response into recognized intent string."""
+    if "metric_query" in raw:
+        return "metric_query"
+    if "data_question" in raw:
+        return "data_question"
+    if "out_of_scope" in raw or "unrelated" in raw:
+        return "out_of_scope"
+    return "chitchat"
 
 
 def _format_history(history: list[dict[str, str]]) -> str:

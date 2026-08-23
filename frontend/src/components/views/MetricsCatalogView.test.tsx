@@ -1,8 +1,15 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MetricsCatalogView } from '@/components/views/MetricsCatalogView';
-import { MetricRecord } from '@/lib/api';
+import * as apiModule from '@/lib/api';
+import {
+  MetricDefinition,
+  MetricHistory,
+  MetricRecord,
+  MetricVersion,
+  SemanticApiError,
+} from '@/lib/api';
 
 describe('MetricsCatalogView', () => {
   const mockMetrics: MetricRecord[] = [
@@ -52,6 +59,26 @@ describe('MetricsCatalogView', () => {
     },
   ];
 
+  const unverifiedMetric: MetricRecord = {
+    ...mockMetrics[1],
+    metric_id: 3,
+    name: 'Giá trị đơn trung bình',
+    status: 'unverified',
+    definition: {
+      ...mockMetrics[1].definition!,
+      metric: {
+        ...mockMetrics[1].definition!.metric,
+        name: 'Giá trị đơn trung bình',
+        status: 'unverified',
+      },
+    },
+  };
+  const dataLeadCapabilities = {
+    canSubmitMetric: true,
+    canManageMetrics: true,
+    canApproveMetrics: true,
+  };
+
   beforeEach(() => {
     cleanup();
   });
@@ -59,13 +86,14 @@ describe('MetricsCatalogView', () => {
   it('renders both Pending and Approved sections with counts', () => {
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={vi.fn()}
         onEditMetric={vi.fn()}
         onOpenStudio={vi.fn()}
         onApproveAll={vi.fn()}
-      />
+      />,
     );
 
     // Section headers with counts
@@ -80,6 +108,7 @@ describe('MetricsCatalogView', () => {
   it('shows individual approve button on pending metric cards', () => {
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={vi.fn()}
@@ -87,7 +116,7 @@ describe('MetricsCatalogView', () => {
         onOpenStudio={vi.fn()}
         onApproveAll={vi.fn()}
         onApproveMetric={vi.fn()}
-      />
+      />,
     );
 
     // Button "Phê duyệt" only appears on pending metric cards
@@ -99,6 +128,7 @@ describe('MetricsCatalogView', () => {
     const handleApprove = vi.fn();
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={vi.fn()}
@@ -106,7 +136,7 @@ describe('MetricsCatalogView', () => {
         onOpenStudio={vi.fn()}
         onApproveAll={vi.fn()}
         onApproveMetric={handleApprove}
-      />
+      />,
     );
 
     // Click the individual approve button on the pending metric card (metric_id = 2)
@@ -120,13 +150,14 @@ describe('MetricsCatalogView', () => {
     const handleApproveAll = vi.fn();
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={vi.fn()}
         onEditMetric={vi.fn()}
         onOpenStudio={vi.fn()}
         onApproveAll={handleApproveAll}
-      />
+      />,
     );
 
     // Header "Duyệt tất cả" button (only visible when pending > 0)
@@ -142,13 +173,14 @@ describe('MetricsCatalogView', () => {
 
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={handleDelete}
         onEditMetric={vi.fn()}
         onOpenStudio={vi.fn()}
         onApproveAll={vi.fn()}
-      />
+      />,
     );
 
     const deleteButtons = screen.getAllByTitle('Xóa metric');
@@ -161,13 +193,14 @@ describe('MetricsCatalogView', () => {
     const handleEdit = vi.fn();
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={vi.fn()}
         onEditMetric={handleEdit}
         onOpenStudio={vi.fn()}
         onApproveAll={vi.fn()}
-      />
+      />,
     );
 
     const editButtons = screen.getAllByRole('button', { name: /Chỉnh sửa/i });
@@ -181,17 +214,120 @@ describe('MetricsCatalogView', () => {
       <MetricsCatalogView
         dbId={3}
         metrics={mockMetrics}
+        canSubmitMetric={false}
         canManageMetrics={false}
+        canApproveMetrics={false}
       />,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent(/không có quyền lưu, chỉnh sửa, xóa hoặc phê duyệt/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/chế độ chỉ xem/i);
     expect(screen.queryByRole('button', { name: /Sinh với AI/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps Admin catalog approved-only and read-only without Data Lead instructions', () => {
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={mockMetrics}
+        canSubmitMetric={false}
+        canManageMetrics={false}
+        canApproveMetrics={false}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onApproveAll={vi.fn()}
+        onApproveMetric={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(/chế độ chỉ xem/i);
+    expect(screen.getByRole('status')).not.toHaveTextContent(/liên hệ Data Lead/i);
+    expect(screen.getByRole('button', { name: 'Tất cả (1)' })).toBeInTheDocument();
+    expect(screen.queryByText('Số lượng đơn hàng mới')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Gửi metric/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Chỉnh sửa|Duyệt tất cả|Delete/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not instruct an Admin to approve metrics when no approved metric is visible', () => {
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={[mockMetrics[1]]}
+        canSubmitMetric={false}
+        canManageMetrics={false}
+        canApproveMetrics={false}
+      />,
+    );
+
+    expect(screen.queryByText(/Hãy duyệt|Data Lead/i)).not.toBeInTheDocument();
+  });
+
+  it('lets a Member submit and track own unverified metrics without management actions', () => {
+    const onSubmitMetric = vi.fn();
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={[mockMetrics[0], unverifiedMetric]}
+        canSubmitMetric
+        canManageMetrics={false}
+        canApproveMetrics={false}
+        onSubmitMetric={onSubmitMetric}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi metric' }));
+    expect(onSubmitMetric).toHaveBeenCalledOnce();
+    expect(screen.getAllByText(/Đã gửi/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Chưa được xác minh').length).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole('button', { name: /Chỉnh sửa|Duyệt chỉ số/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Xóa metric')).not.toBeInTheDocument();
+  });
+
+  it('renders "Đề xuất với AI" button for Member when onOpenStudio is provided', () => {
+    const onOpenStudio = vi.fn();
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={[mockMetrics[0]]}
+        canSubmitMetric
+        canManageMetrics={false}
+        canApproveMetrics={false}
+        onOpenStudio={onOpenStudio}
+      />,
+    );
+
+    const aiBtn = screen.getByRole('button', { name: 'Đề xuất với AI' });
+    expect(aiBtn).toBeInTheDocument();
+    fireEvent.click(aiBtn);
+    expect(onOpenStudio).toHaveBeenCalledOnce();
+  });
+
+  it('gives Data Lead edit, approve, and delete actions for unverified metrics', () => {
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={[unverifiedMetric]}
+        canSubmitMetric
+        canManageMetrics
+        canApproveMetrics
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onApproveMetric={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Chỉnh sửa' })).toBeInTheDocument();
+    expect(screen.getByTitle('Xóa metric')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Duyệt chỉ số này/i })).toBeInTheDocument();
   });
 
   it('renders metric cards with formula expression in monospace', () => {
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={vi.fn()}
@@ -199,7 +335,7 @@ describe('MetricsCatalogView', () => {
         onOpenStudio={vi.fn()}
         onApproveAll={vi.fn()}
         onApproveMetric={vi.fn()}
-      />
+      />,
     );
     // Verify formula expression display
     expect(screen.getByText(/SUM\(price\).*Bảng.*orders/)).toBeInTheDocument();
@@ -210,6 +346,7 @@ describe('MetricsCatalogView', () => {
     const onApprove = vi.fn();
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={vi.fn()}
@@ -217,10 +354,12 @@ describe('MetricsCatalogView', () => {
         onOpenStudio={vi.fn()}
         onApproveAll={vi.fn()}
         onApproveMetric={onApprove}
-      />
+      />,
     );
     // Pending card should have individual approve button
-    const approveBtn = screen.getByRole('button', { name: /Duyệt chỉ số này/i });
+    const approveBtn = screen.getByRole('button', {
+      name: /Duyệt chỉ số này/i,
+    });
     expect(approveBtn).toBeInTheDocument();
     fireEvent.click(approveBtn);
     expect(onApprove).toHaveBeenCalledWith(2);
@@ -229,6 +368,7 @@ describe('MetricsCatalogView', () => {
   it('renders filter tabs with correct metric counts', () => {
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={vi.fn()}
@@ -236,7 +376,7 @@ describe('MetricsCatalogView', () => {
         onOpenStudio={vi.fn()}
         onApproveAll={vi.fn()}
         onApproveMetric={vi.fn()}
-      />
+      />,
     );
     // Filter tabs should show counts
     expect(screen.getByText(/Tất cả \(2\)/)).toBeInTheDocument();
@@ -244,9 +384,28 @@ describe('MetricsCatalogView', () => {
     expect(screen.getByText(/Đã phê duyệt \(1\)/)).toBeInTheDocument();
   });
 
+  it('counts only the rendered sections in the Tất cả tab for a member submitter', () => {
+    render(
+      <MetricsCatalogView
+        dbId={3}
+        metrics={[mockMetrics[0], mockMetrics[1], unverifiedMetric]}
+        canSubmitMetric
+        canManageMetrics={false}
+        canApproveMetrics={false}
+      />,
+    );
+
+    // Sections rendered: "Đã gửi" (own unverified) + "Đã phê duyệt"; another user's
+    // pending metric is not displayed anywhere, so it must not inflate the total.
+    expect(screen.getByText(/Tất cả \(2\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Đã gửi \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Đã phê duyệt \(1\)/)).toBeInTheDocument();
+  });
+
   it('filters metrics when filter tab is clicked', async () => {
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={vi.fn()}
@@ -254,7 +413,7 @@ describe('MetricsCatalogView', () => {
         onOpenStudio={vi.fn()}
         onApproveAll={vi.fn()}
         onApproveMetric={vi.fn()}
-      />
+      />,
     );
 
     // Click on "Chờ phê duyệt" tab
@@ -268,6 +427,7 @@ describe('MetricsCatalogView', () => {
   it('shows YAML definition toggle in metric cards', () => {
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={vi.fn()}
@@ -275,7 +435,7 @@ describe('MetricsCatalogView', () => {
         onOpenStudio={vi.fn()}
         onApproveAll={vi.fn()}
         onApproveMetric={vi.fn()}
-      />
+      />,
     );
     // Each card should have YAML definition toggle
     expect(screen.getAllByText(/Xem YAML definition/).length).toBeGreaterThanOrEqual(2);
@@ -284,6 +444,7 @@ describe('MetricsCatalogView', () => {
   it('shows status badges with correct labels', () => {
     render(
       <MetricsCatalogView
+        {...dataLeadCapabilities}
         dbId={3}
         metrics={mockMetrics}
         onDeleteMetric={vi.fn()}
@@ -291,10 +452,228 @@ describe('MetricsCatalogView', () => {
         onOpenStudio={vi.fn()}
         onApproveAll={vi.fn()}
         onApproveMetric={vi.fn()}
-      />
+      />,
     );
     // Status badges
     expect(screen.getByText('Đã duyệt')).toBeInTheDocument();
     expect(screen.getByText('Chờ duyệt')).toBeInTheDocument();
+  });
+});
+
+describe('MetricsCatalogView history modal', () => {
+  function makeDefinition(expression: string): MetricDefinition {
+    return {
+      schema_version: 2,
+      metric: {
+        name: 'Doanh thu thuần',
+        base_entity: 'orders',
+        base_entity_id: 10,
+        grain: { column_ids: [101] },
+        formula: { function: 'SUM', expression },
+        filters: [],
+        status: 'approved',
+        confidence: 'high',
+        excluded_notes: '',
+      },
+    };
+  }
+
+  function makeVersion(version: number, expression: string): MetricVersion {
+    return {
+      version,
+      definition: makeDefinition(expression),
+      changed_by: 1,
+      change_reason: 'update',
+      created_at: `2026-01-0${version}`,
+    };
+  }
+
+  const approvedMetric: MetricRecord = {
+    metric_id: 1,
+    name: 'Doanh thu thuần',
+    source: 'ai',
+    version: 3,
+    status: 'approved',
+    created_at: '2026-01-03',
+    definition: makeDefinition('a - b'),
+  };
+
+  const mockHistory: MetricHistory = {
+    metric_id: 1,
+    metric_name: 'Doanh thu thuần',
+    versions: [makeVersion(3, 'a - b'), makeVersion(2, 'a'), makeVersion(1, 'a')],
+  };
+
+  const historyAfterRollback: MetricHistory = {
+    ...mockHistory,
+    versions: mockHistory.versions.filter((version) => version.version <= 2),
+  };
+
+  const dataLead = { canManageMetrics: true, canSubmitMetric: true, canApproveMetrics: true };
+
+  const renderCatalog = (props: Record<string, unknown> = {}) =>
+    render(
+      <MetricsCatalogView dbId={3} metrics={[approvedMetric]} {...dataLead} {...props} />,
+    );
+
+  const openHistory = async () => {
+    fireEvent.click(screen.getByTitle('Xem lịch sử phiên bản'));
+    await screen.findByRole('dialog');
+  };
+
+  beforeEach(() => {
+    cleanup();
+    vi.spyOn(apiModule, 'getMetricHistoryApi').mockResolvedValue(mockHistory);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('defaults selectors to the latest two versions and renders the colored diff', async () => {
+    renderCatalog();
+    await openHistory();
+
+    expect(apiModule.getMetricHistoryApi).toHaveBeenCalledWith('3', 1);
+    const baseSelect = screen.getByLabelText('Bản gốc (cũ)') as HTMLSelectElement;
+    const compareSelect = screen.getByLabelText('So sánh (mới)') as HTMLSelectElement;
+    expect(baseSelect.value).toBe('2');
+    expect(compareSelect.value).toBe('3');
+
+    const diff = screen.getByTestId('metric-version-diff');
+    const removed = within(diff).getByText('SUM(a)').closest('[data-status]');
+    const added = within(diff).getByText('SUM(a - b)').closest('[data-status]');
+    expect(removed).toHaveAttribute('data-status', 'removed');
+    expect(added).toHaveAttribute('data-status', 'added');
+  });
+
+  it('rejects equal selections instead of rendering an empty diff', async () => {
+    renderCatalog();
+    await openHistory();
+
+    fireEvent.change(screen.getByLabelText('Bản gốc (cũ)'), { target: { value: '3' } });
+
+    expect(screen.getByText(/hai phiên bản khác nhau/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('metric-version-diff')).not.toBeInTheDocument();
+  });
+
+  it('hides rollback for roles without manage capability', async () => {
+    vi.spyOn(apiModule, 'rollbackMetricApi');
+    renderCatalog({ canManageMetrics: false, canApproveMetrics: false });
+    await openHistory();
+
+    expect(
+      screen.queryByRole('button', { name: 'Khôi phục phiên bản này' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows rollback for Data Lead only when the selected target is older than current', async () => {
+    renderCatalog();
+    await openHistory();
+
+    expect(screen.getByRole('button', { name: 'Khôi phục phiên bản này' })).toBeInTheDocument();
+
+    // Selecting the newest version as target hides the destructive action.
+    fireEvent.change(screen.getByLabelText('Bản gốc (cũ)'), { target: { value: '3' } });
+    expect(
+      screen.queryByRole('button', { name: 'Khôi phục phiên bản này' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('confirms destructively, refetches history, notifies parent, and resets selectors', async () => {
+    const getHistorySpy = vi
+      .spyOn(apiModule, 'getMetricHistoryApi')
+      .mockResolvedValueOnce(mockHistory)
+      .mockResolvedValueOnce(historyAfterRollback);
+    vi.spyOn(apiModule, 'rollbackMetricApi').mockResolvedValue(approvedMetric);
+    const onMetricsChanged = vi.fn().mockResolvedValue(undefined);
+    renderCatalog({ onMetricsChanged });
+    await openHistory();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Khôi phục phiên bản này' }));
+    expect(await screen.findByText(/xóa vĩnh viễn/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Khôi phục & xóa phiên bản mới' }));
+
+    await waitFor(() => expect(onMetricsChanged).toHaveBeenCalledTimes(1));
+    expect(apiModule.rollbackMetricApi).toHaveBeenCalledWith('3', 1, 2);
+    expect(getHistorySpy).toHaveBeenCalledTimes(2);
+    expect(getHistorySpy).toHaveBeenLastCalledWith('3', 1);
+    expect(screen.getByText(/Đã khôi phục/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Khôi phục & xóa phiên bản mới' }),
+    ).not.toBeInTheDocument();
+    expect((screen.getByLabelText('Bản gốc (cũ)') as HTMLSelectElement).value).toBe('1');
+    expect((screen.getByLabelText('So sánh (mới)') as HTMLSelectElement).value).toBe('2');
+  });
+
+  it('retains the history modal and shows a Vietnamese error when rollback fails', async () => {
+    vi.spyOn(apiModule, 'rollbackMetricApi').mockRejectedValue(
+      new SemanticApiError(422, 'Chỉ được phép khôi phục về phiên bản cũ hơn.'),
+    );
+    renderCatalog();
+    await openHistory();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Khôi phục phiên bản này' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Khôi phục & xóa phiên bản mới' }));
+
+    expect(await screen.findByText(/Chỉ được phép khôi phục về phiên bản cũ hơn/)).toBeInTheDocument();
+    expect(screen.getByText(/Lịch sử · Doanh thu thuần/)).toBeInTheDocument();
+  });
+
+  it('locks confirm and close controls while rollback is pending', async () => {
+    vi.spyOn(apiModule, 'rollbackMetricApi').mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    renderCatalog();
+    await openHistory();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Khôi phục phiên bản này' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Khôi phục & xóa phiên bản mới' }));
+
+    expect(await screen.findByRole('button', { name: /Đang khôi phục/i })).toBeDisabled();
+    expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Bản gốc (cũ)')).toBeDisabled();
+  });
+
+  it('shows a Vietnamese error and keeps the modal closed when history loading fails', async () => {
+    vi.spyOn(apiModule, 'getMetricHistoryApi').mockRejectedValue(new Error('network down'));
+    renderCatalog();
+
+    fireEvent.click(screen.getByTitle('Xem lịch sử phiên bản'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Không thể tải lịch sử/i);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('announces loading state while fetching history', async () => {
+    let resolveHistory!: (value: MetricHistory) => void;
+    vi.spyOn(apiModule, 'getMetricHistoryApi').mockReturnValue(
+      new Promise<MetricHistory>((resolve) => {
+        resolveHistory = resolve;
+      }),
+    );
+    renderCatalog();
+
+    fireEvent.click(screen.getByTitle('Xem lịch sử phiên bản'));
+    expect(screen.getByRole('status')).toHaveTextContent(/Đang tải lịch sử/i);
+
+    await act(async () => {
+      resolveHistory(mockHistory);
+    });
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('hides rollback when only one version exists so no older target can be selected', async () => {
+    vi.spyOn(apiModule, 'getMetricHistoryApi').mockResolvedValue({
+      ...mockHistory,
+      versions: [makeVersion(1, 'a')],
+    });
+    renderCatalog();
+    await openHistory();
+
+    expect(
+      screen.queryByRole('button', { name: 'Khôi phục phiên bản này' }),
+    ).not.toBeInTheDocument();
   });
 });

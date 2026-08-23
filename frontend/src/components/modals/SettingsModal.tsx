@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
+import { useWorkspace } from '@/context/WorkspaceContext';
 import { cn } from '@/lib/utils';
 
 interface SettingsModalProps {
@@ -24,6 +25,12 @@ interface SettingsModalProps {
   metricCount?: number;
 }
 
+const workspaceRoleLabels = {
+  admin: 'Admin',
+  data_lead: 'Data Lead',
+  member: 'Member',
+} as const;
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
@@ -32,6 +39,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const { user, token } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { role } = useWorkspace();
 
   if (!isOpen) return null;
 
@@ -69,7 +77,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </p>
             </div>
             <span className="rounded-full border border-border bg-secondary px-2.5 py-0.5 font-mono text-[10px] text-secondary-foreground">
-              Owner
+              {role ? workspaceRoleLabels[role] : 'Chưa có vai trò'}
             </span>
           </div>
 

@@ -78,7 +78,7 @@ class AgentState(TypedDict, total=False):
 
     # Chat Orchestrator — Router output
     intent: str
-    """Intent: 'chitchat', 'data_question', or 'metric_query'."""
+    """Intent: 'chitchat', 'data_question', 'metric_query', or 'out_of_scope'."""
 
     can_generate_metrics: bool
     """Server-derived capability controlling metric-authoring routing."""
@@ -88,7 +88,7 @@ class AgentState(TypedDict, total=False):
 
     # Chitchat Agent — Output
     chat_response: str
-    """Câu trả lời ngôn ngữ tự nhiên khi intent = 'chitchat'."""
+    """Câu trả lời ngôn ngữ tự nhiên khi intent = 'chitchat', 'data_question', hoặc 'out_of_scope'."""
 
     # Chat persistence — history excludes the current user message.
     session_id: str

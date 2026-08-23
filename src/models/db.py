@@ -79,7 +79,7 @@ class OrganizationMemberModel(Base):
 
     __tablename__ = "organization_members"
     __table_args__ = (
-        CheckConstraint("role IN ('data_lead', 'member')", name="ck_organization_members_role"),
+        CheckConstraint("role IN ('admin', 'data_lead', 'member')", name="ck_organization_members_role"),
         UniqueConstraint("org_id", "user_id", name="uq_organization_members_org_user"),
         Index("idx_organization_members_org_role", "org_id", "role"),
         Index("idx_organization_members_user_org", "user_id", "org_id"),
@@ -103,7 +103,7 @@ class OrganizationInvitationModel(Base):
 
     __tablename__ = "organization_invitations"
     __table_args__ = (
-        CheckConstraint("role IN ('data_lead', 'member')", name="ck_organization_invitations_role"),
+        CheckConstraint("role IN ('admin', 'data_lead', 'member')", name="ck_organization_invitations_role"),
         Index("idx_organization_invitations_org_status", "org_id", "status"),
         Index("idx_organization_invitations_token_hash", "token_hash", unique=True),
     )
@@ -156,7 +156,6 @@ class UserModel(Base):
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False, default="")
-    role: Mapped[str] = mapped_column(String(50), nullable=False, default="analyst")
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -351,7 +350,13 @@ class SemanticMetricModel(Base):
     """Metadata Store representation of a business metric."""
 
     __tablename__ = "semantic_metrics"
-    __table_args__ = (Index("idx_semantic_metrics_db_name", "db_id", "name"),)
+    __table_args__ = (
+        Index("idx_semantic_metrics_db_name", "db_id", "name"),
+        CheckConstraint(
+            "status IN ('draft', 'pending_approval', 'needs_review', 'approved', 'unverified')",
+            name="ck_semantic_metrics_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     db_id: Mapped[int] = mapped_column(Integer, ForeignKey("semantic_databases.id", ondelete="CASCADE"), nullable=False)

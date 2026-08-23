@@ -284,3 +284,26 @@ class TestGenerateResponseCanonicalFields:
             suggested_metrics=[],
         )
         assert response.raw_schema["source"]["type"] == "sql_dump"
+
+
+class TestMetricResponseStatusTyping:
+    """Tests for MetricResponse.status tightened to the MetricStatus literal."""
+
+    def test_metric_response_defaults_to_pending_approval(self) -> None:
+        """MetricResponse.status defaults to pending_approval."""
+        resp = MetricResponse(metric_id=1, source="ai")
+        assert resp.status == "pending_approval"
+
+    def test_metric_response_accepts_valid_statuses(self) -> None:
+        """All MetricStatus literal values are accepted."""
+        for status in ("draft", "pending_approval", "approved", "needs_review", "unverified"):
+            resp = MetricResponse(metric_id=1, source="ai", status=status)
+            assert resp.status == status
+
+    def test_metric_response_rejects_invalid_status(self) -> None:
+        """Values outside the MetricStatus literal raise ValidationError."""
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            MetricResponse(metric_id=1, source="ai", status="bogus")

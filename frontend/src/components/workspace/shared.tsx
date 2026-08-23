@@ -29,27 +29,39 @@ export function EngineIcon({ engine, className }: { engine: DbEngine; className?
 }
 
 export const statusMeta: Record<string, { label: string; dot: string }> = {
-  pending_approval: { label: 'Pending', dot: 'bg-amber-500' },
-  pending: { label: 'Pending', dot: 'bg-amber-500' },
-  approved: { label: 'Approved', dot: 'bg-emerald-500' },
-  needs_review: { label: 'Needs review', dot: 'bg-blue-500' },
-  review: { label: 'Needs review', dot: 'bg-blue-500' },
-  draft: { label: 'Draft', dot: 'bg-muted-foreground/50' },
+  pending_approval: { label: 'Chờ duyệt', dot: 'bg-amber-500' },
+  pending: { label: 'Chờ duyệt', dot: 'bg-amber-500' },
+  approved: { label: 'Đã duyệt', dot: 'bg-emerald-500' },
+  needs_review: { label: 'Cần xem xét', dot: 'bg-blue-500' },
+  unverified: { label: 'Chưa được xác minh', dot: 'bg-amber-500' },
+  review: { label: 'Cần xem xét', dot: 'bg-blue-500' },
+  draft: { label: 'Bản nháp', dot: 'bg-muted-foreground/50' },
 };
 
 export function StatusPill({ status }: { status: MetricStatus | string }) {
   const meta = statusMeta[status] || { label: status, dot: 'bg-amber-500' };
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary px-2.5 py-0.5 font-mono text-[11px] text-secondary-foreground">
-      <span className={cn('h-1.5 w-1.5 rounded-full', meta.dot)} />
+    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-secondary px-2.5 py-0.5 font-mono text-[11px] text-secondary-foreground">
+      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', meta.dot)} />
       {meta.label}
     </span>
   );
 }
 
-export function SectionLabel({ children, className }: { children: React.ReactNode; className?: string }) {
+export function SectionLabel({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <span className={cn('font-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground', className)}>
+    <span
+      className={cn(
+        'font-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground',
+        className,
+      )}
+    >
       {children}
     </span>
   );

@@ -15,9 +15,10 @@ export interface SemanticTable {
 }
 
 export type MetricFunction = 'SUM' | 'COUNT' | 'COUNT_DISTINCT' | 'AVG' | 'MIN' | 'MAX';
-export type MetricStatus = 'pending_approval' | 'approved' | 'needs_review';
+export type MetricStatus = 'pending_approval' | 'approved' | 'needs_review' | 'unverified';
 export type MetricConfidence = 'low' | 'medium' | 'high';
-export type FilterOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'not_in' | 'is_null' | 'is_not_null';
+export type FilterOperator =
+  'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'not_in' | 'is_null' | 'is_not_null';
 
 export interface MetricFilter {
   field: string;
@@ -189,11 +190,36 @@ const LEGACY_INITIAL_LAYERS: unknown[] = [
         business_name: 'Đơn hàng',
         description: 'Bảng chứa thông tin lịch sử mua hàng của KH',
         columns: [
-          { column_name: 'order_id', data_type: 'INTEGER (PK)', business_name: 'Mã đơn hàng', sample_value: '1001' },
-          { column_name: 'customer_id', data_type: 'INTEGER (FK→customers)', business_name: 'Mã khách hàng', sample_value: 'C-88' },
-          { column_name: 'total_amount', data_type: 'NUMERIC', business_name: 'Tổng tiền đơn hàng', sample_value: '450,000' },
-          { column_name: 'order_status', data_type: 'VARCHAR(20)', business_name: 'Trạng thái đơn', sample_value: 'COMPLETED' },
-          { column_name: 'created_at', data_type: 'TIMESTAMP', business_name: 'Ngày tạo đơn', sample_value: '2026-07-31' },
+          {
+            column_name: 'order_id',
+            data_type: 'INTEGER (PK)',
+            business_name: 'Mã đơn hàng',
+            sample_value: '1001',
+          },
+          {
+            column_name: 'customer_id',
+            data_type: 'INTEGER (FK→customers)',
+            business_name: 'Mã khách hàng',
+            sample_value: 'C-88',
+          },
+          {
+            column_name: 'total_amount',
+            data_type: 'NUMERIC',
+            business_name: 'Tổng tiền đơn hàng',
+            sample_value: '450,000',
+          },
+          {
+            column_name: 'order_status',
+            data_type: 'VARCHAR(20)',
+            business_name: 'Trạng thái đơn',
+            sample_value: 'COMPLETED',
+          },
+          {
+            column_name: 'created_at',
+            data_type: 'TIMESTAMP',
+            business_name: 'Ngày tạo đơn',
+            sample_value: '2026-07-31',
+          },
         ],
       },
       {
@@ -201,10 +227,30 @@ const LEGACY_INITIAL_LAYERS: unknown[] = [
         business_name: 'Khách hàng',
         description: 'Bảng chứa danh sách người dùng đăng ký',
         columns: [
-          { column_name: 'customer_id', data_type: 'INTEGER (PK)', business_name: 'Mã khách hàng', sample_value: 'C-88' },
-          { column_name: 'full_name', data_type: 'VARCHAR(100)', business_name: 'Họ và tên', sample_value: 'Nguyễn Văn A' },
-          { column_name: 'email', data_type: 'VARCHAR(150)', business_name: 'Địa chỉ email', sample_value: 'user@example.com' },
-          { column_name: 'created_at', data_type: 'TIMESTAMP', business_name: 'Ngày gia nhập', sample_value: '2026-01-15' },
+          {
+            column_name: 'customer_id',
+            data_type: 'INTEGER (PK)',
+            business_name: 'Mã khách hàng',
+            sample_value: 'C-88',
+          },
+          {
+            column_name: 'full_name',
+            data_type: 'VARCHAR(100)',
+            business_name: 'Họ và tên',
+            sample_value: 'Nguyễn Văn A',
+          },
+          {
+            column_name: 'email',
+            data_type: 'VARCHAR(150)',
+            business_name: 'Địa chỉ email',
+            sample_value: 'user@example.com',
+          },
+          {
+            column_name: 'created_at',
+            data_type: 'TIMESTAMP',
+            business_name: 'Ngày gia nhập',
+            sample_value: '2026-01-15',
+          },
         ],
       },
     ],
@@ -244,9 +290,24 @@ const LEGACY_INITIAL_LAYERS: unknown[] = [
         business_name: 'Giao dịch bán lẻ',
         description: 'Bảng ghi nhận hóa đơn bán lẻ tại cửa hàng',
         columns: [
-          { column_name: 'txn_id', data_type: 'INTEGER (PK)', business_name: 'Mã giao dịch', sample_value: 'TXN-9021' },
-          { column_name: 'store_id', data_type: 'INTEGER', business_name: 'Mã chi nhánh', sample_value: 'ST-01' },
-          { column_name: 'amount', data_type: 'REAL', business_name: 'Giá trị hóa đơn', sample_value: '120,000' },
+          {
+            column_name: 'txn_id',
+            data_type: 'INTEGER (PK)',
+            business_name: 'Mã giao dịch',
+            sample_value: 'TXN-9021',
+          },
+          {
+            column_name: 'store_id',
+            data_type: 'INTEGER',
+            business_name: 'Mã chi nhánh',
+            sample_value: 'ST-01',
+          },
+          {
+            column_name: 'amount',
+            data_type: 'REAL',
+            business_name: 'Giá trị hóa đơn',
+            sample_value: '120,000',
+          },
         ],
       },
     ],
@@ -312,7 +373,7 @@ const API_BASE_URL =
   'http://localhost:8000';
 const API_BASE = API_BASE_URL;
 
-export type WorkspaceRole = 'data_lead' | 'member';
+export type WorkspaceRole = 'admin' | 'data_lead' | 'member';
 
 export interface WorkspaceSummary {
   id: number;
@@ -335,7 +396,7 @@ export interface WorkspaceMember {
 export interface WorkspaceInvite {
   id: number;
   org_id: number;
-  role: 'member' | 'data_lead';
+  role: WorkspaceRole;
   status: 'pending' | 'accepted' | 'revoked' | 'expired';
   expires_at: string;
   invite_url?: string | null;
@@ -344,7 +405,7 @@ export interface WorkspaceInvite {
 export interface WorkspaceInvitePreview {
   organization_name: string;
   organization_slug: string;
-  role: 'member' | 'data_lead';
+  role: WorkspaceRole;
   expires_at: string;
 }
 
@@ -357,7 +418,9 @@ function getWorkspaceHeader(): Record<string, string> {
 function getAuthHeader(): Record<string, string> {
   const token =
     getStoredToken() ||
-    (typeof window !== 'undefined' ? localStorage.getItem('access_token') || localStorage.getItem('token') : null);
+    (typeof window !== 'undefined'
+      ? localStorage.getItem('access_token') || localStorage.getItem('token')
+      : null);
   return {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...getWorkspaceHeader(),
@@ -391,12 +454,12 @@ export function updateWorkspaceMemberApi(userId: number, role: WorkspaceRole): P
 }
 
 export function removeWorkspaceMemberApi(userId: number): Promise<void> {
-  return semanticRequest<void>(`/api/v1/org/members/${userId}`, { method: 'DELETE' });
+  return semanticRequest<void>(`/api/v1/org/members/${userId}`, {
+    method: 'DELETE',
+  });
 }
 
-export function createWorkspaceInviteApi(
-  role: 'member' | 'data_lead',
-): Promise<WorkspaceInvite> {
+export function createWorkspaceInviteApi(role: WorkspaceRole): Promise<WorkspaceInvite> {
   return semanticRequest<WorkspaceInvite>('/api/v1/org/invite', {
     method: 'POST',
     body: JSON.stringify({ role }),
@@ -404,7 +467,9 @@ export function createWorkspaceInviteApi(
 }
 
 export function revokeWorkspaceInviteApi(invitationId: number): Promise<void> {
-  return semanticRequest<void>(`/api/v1/org/invite/${invitationId}`, { method: 'DELETE' });
+  return semanticRequest<void>(`/api/v1/org/invite/${invitationId}`, {
+    method: 'DELETE',
+  });
 }
 
 export function listWorkspaceInvitesApi(): Promise<WorkspaceInvite[]> {
@@ -416,18 +481,22 @@ export function previewWorkspaceInviteApi(token: string): Promise<WorkspaceInvit
 }
 
 export function acceptWorkspaceInviteApi(token: string): Promise<WorkspaceSummary> {
-  return semanticRequest<WorkspaceSummary>(`/api/v1/invite/${token}/accept`, { method: 'POST' });
+  return semanticRequest<WorkspaceSummary>(`/api/v1/invite/${token}/accept`, {
+    method: 'POST',
+  });
 }
 
 export class SemanticApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
     super(message);
     this.name = 'SemanticApiError';
   }
 }
 
-export const METRIC_WRITE_PERMISSION_MESSAGE =
-  'Bạn không có quyền lưu hoặc chỉnh sửa metric. Chỉ Data Lead được thực hiện thao tác này.';
+export const METRIC_WRITE_PERMISSION_MESSAGE = 'Bạn không có quyền thực hiện thay đổi metric này.';
 
 export function isPermissionDenied(error: unknown): boolean {
   return error instanceof SemanticApiError && error.status === 403;
@@ -448,7 +517,9 @@ export async function semanticRequest<T>(path: string, init: RequestInit = {}): 
 }
 
 async function semanticError(response: Response): Promise<string> {
-  const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
+  const payload = (await response.json().catch(() => null)) as {
+    detail?: unknown;
+  } | null;
   if (typeof payload?.detail === 'string') return payload.detail;
   return payload?.detail ? JSON.stringify(payload.detail) : `Request failed (${response.status})`;
 }
@@ -457,12 +528,13 @@ function metricResponseToRecord(data: {
   metric_id: number;
   definition: MetricDefinition;
   source: 'ai' | 'manual';
+  status?: MetricStatus;
 }): MetricRecord {
   return {
     ...data,
     name: data.definition.metric.name,
     version: 1,
-    status: data.definition.metric.status,
+    status: data.status || data.definition.metric.status,
     created_at: new Date().toISOString(),
   };
 }
@@ -485,7 +557,10 @@ export async function generateCustomMetricsApi(
       'Content-Type': 'application/json',
       ...getAuthHeader(),
     },
-    body: JSON.stringify({ prompt, target_tables: targetTables.length ? targetTables : null }),
+    body: JSON.stringify({
+      prompt,
+      target_tables: targetTables.length ? targetTables : null,
+    }),
   });
 
   if (!res.ok) {
@@ -504,11 +579,16 @@ export async function generateCustomMetricsApi(
   if (suggestions.length === 0 && duplicates.length === 0) {
     throw new Error('LLM không tìm thấy hoặc không sinh được chỉ số phù hợp với schema');
   }
-  return { suggestions, duplicates, dedupe_performed: data.dedupe_performed !== false, isLiveLLM: true };
+  return {
+    suggestions,
+    duplicates,
+    dedupe_performed: data.dedupe_performed !== false,
+    isLiveLLM: true,
+  };
 }
 
 export interface ChatOrchestratorResponse {
-  intent: 'chitchat' | 'data_question' | 'metric_query';
+  intent: 'chitchat' | 'data_question' | 'metric_query' | 'out_of_scope';
   chat_response?: string | null;
   suggestions?: MetricSuggestion[] | null;
   duplicates?: DuplicateMetricNotice[];
@@ -555,11 +635,17 @@ export interface ChatSessionDetail extends ChatSessionItem {
 async function chatRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...getAuthHeader(), ...(init?.headers || {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+      ...(init?.headers || {}),
+    },
   });
   if (!res.ok) {
     const errData = await res.json().catch(() => ({ detail: 'Lỗi khi gọi API Chat' }));
-    throw new Error(typeof errData?.detail === 'string' ? errData.detail : 'Không thể xử lý yêu cầu chat');
+    throw new Error(
+      typeof errData?.detail === 'string' ? errData.detail : 'Không thể xử lý yêu cầu chat',
+    );
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -575,11 +661,15 @@ export async function getChatSessionDetailApi(
   beforeSequence?: number,
 ): Promise<ChatSessionDetail> {
   const cursor = beforeSequence ? `?limit=100&before_sequence=${beforeSequence}` : '?limit=100';
-  return chatRequest<ChatSessionDetail>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}${cursor}`);
+  return chatRequest<ChatSessionDetail>(
+    `${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}${cursor}`,
+  );
 }
 
 export async function deleteChatSessionApi(dbId: string, sessionId: string): Promise<void> {
-  await chatRequest<void>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}`, { method: 'DELETE' });
+  await chatRequest<void>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}`, {
+    method: 'DELETE',
+  });
 }
 
 export async function updateChatSessionTitleApi(
@@ -587,10 +677,13 @@ export async function updateChatSessionTitleApi(
   sessionId: string,
   title: string,
 ): Promise<ChatSessionItem> {
-  return chatRequest<ChatSessionItem>(`${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ title }),
-  });
+  return chatRequest<ChatSessionItem>(
+    `${API_BASE}/api/v1/semantic/${dbId}/chat/sessions/${sessionId}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    },
+  );
 }
 
 export async function sendChatOrchestratorApi(
@@ -601,7 +694,11 @@ export async function sendChatOrchestratorApi(
 ): Promise<ChatOrchestratorResponse> {
   return chatRequest<ChatOrchestratorResponse>(`${API_BASE}/api/v1/semantic/${dbId}/chat`, {
     method: 'POST',
-    body: JSON.stringify({ message, session_id: sessionId || null, client_message_id: clientMessageId }),
+    body: JSON.stringify({
+      message,
+      session_id: sessionId || null,
+      client_message_id: clientMessageId,
+    }),
   });
 }
 
@@ -677,10 +774,15 @@ export async function createMetricApi(
   dbId: string,
   payload: { definition: MetricDefinition; source: 'ai' | 'manual' },
 ): Promise<MetricRecord> {
-  const data = await semanticRequest<{ metric_id: number; definition: MetricDefinition; source: 'ai' | 'manual' }>(
-    `/api/v1/semantic/${dbId}/metric`,
-    { method: 'POST', body: JSON.stringify(payload) },
-  );
+  const data = await semanticRequest<{
+    metric_id: number;
+    definition: MetricDefinition;
+    source: 'ai' | 'manual';
+    status?: MetricStatus;
+  }>(`/api/v1/semantic/${dbId}/metric`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
   return metricResponseToRecord(data);
 }
 
@@ -689,15 +791,22 @@ export async function updateMetricApi(
   metricId: number,
   definition: MetricDefinition,
 ): Promise<MetricRecord> {
-  const data = await semanticRequest<{ metric_id: number; definition: MetricDefinition; source: 'ai' | 'manual' }>(
-    `/api/v1/semantic/${dbId}/metric/${metricId}`,
-    { method: 'PUT', body: JSON.stringify({ definition }) },
-  );
+  const data = await semanticRequest<{
+    metric_id: number;
+    definition: MetricDefinition;
+    source: 'ai' | 'manual';
+    status?: MetricStatus;
+  }>(`/api/v1/semantic/${dbId}/metric/${metricId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ definition }),
+  });
   return metricResponseToRecord(data);
 }
 
 export async function deleteMetricApi(dbId: string, metricId: number): Promise<void> {
-  await semanticRequest<void>(`/api/v1/semantic/${dbId}/metric/${metricId}`, { method: 'DELETE' });
+  await semanticRequest<void>(`/api/v1/semantic/${dbId}/metric/${metricId}`, {
+    method: 'DELETE',
+  });
 }
 
 export async function listMetricsApi(dbId: string): Promise<MetricRecord[]> {
@@ -708,21 +817,53 @@ export async function getMetricHistoryApi(dbId: string, metricId: number): Promi
   return semanticRequest<MetricHistory>(`/api/v1/semantic/${dbId}/metric/${metricId}/history`);
 }
 
-export async function approveMetricsApi(dbId: number): Promise<{ approved_count: number; message: string }> {
+/**
+ * Destructively rewinds a metric to an earlier approved version.
+ *
+ * Calls POST /api/v1/semantic/{dbId}/metric/{metricId}/rollback/{targetVersion}
+ * and maps the response into a {@link MetricRecord} (status is always "approved").
+ * The backend response does not carry version/created_at, so the mapped record
+ * fills those with placeholders (`version: 1`, current timestamp); refetch the
+ * metrics list or history for authoritative post-rollback values.
+ * Throws {@link SemanticApiError} for backend failures (401/403/404/422).
+ */
+export async function rollbackMetricApi(
+  dbId: string,
+  metricId: number,
+  targetVersion: number,
+): Promise<MetricRecord> {
+  const data = await semanticRequest<{
+    metric_id: number;
+    definition: MetricDefinition;
+    source: 'ai' | 'manual';
+    status?: MetricStatus;
+  }>(`/api/v1/semantic/${dbId}/metric/${metricId}/rollback/${targetVersion}`, {
+    method: 'POST',
+  });
+  return metricResponseToRecord(data);
+}
+
+export async function approveMetricsApi(
+  dbId: number,
+): Promise<{ approved_count: number; message: string }> {
   return semanticRequest('/api/v1/semantic/approve', {
     method: 'POST',
     body: JSON.stringify({ db_id: dbId }),
   });
 }
 
-export async function approveSingleMetricApi(dbId: string, metricId: number): Promise<MetricRecord> {
-  const data = await semanticRequest<{ metric_id: number; definition: MetricDefinition; source: 'ai' | 'manual' }>(
-    `/api/v1/semantic/${dbId}/metric/${metricId}/approve`,
-    { method: 'POST' },
-  );
+export async function approveSingleMetricApi(
+  dbId: string,
+  metricId: number,
+): Promise<MetricRecord> {
+  const data = await semanticRequest<{
+    metric_id: number;
+    definition: MetricDefinition;
+    source: 'ai' | 'manual';
+    status?: MetricStatus;
+  }>(`/api/v1/semantic/${dbId}/metric/${metricId}/approve`, { method: 'POST' });
   return metricResponseToRecord(data);
 }
-
 
 export async function getSemanticCatalogApi(dbId: string): Promise<SemanticCatalog> {
   return semanticRequest<SemanticCatalog>(`/api/v1/semantic/${dbId}/catalog`);
@@ -748,7 +889,10 @@ export async function compileSemanticQueryApi(
   });
 }
 
-export async function exportSemanticLayerApi(dbId: string, format: 'json' | 'yaml'): Promise<string> {
+export async function exportSemanticLayerApi(
+  dbId: string,
+  format: 'json' | 'yaml',
+): Promise<string> {
   const response = await fetch(`${API_BASE}/api/v1/semantic/${dbId}/export?format=${format}`, {
     headers: getAuthHeader(),
   });
@@ -854,7 +998,10 @@ export async function saveImportedSchema(
 ): Promise<ImportedSchemaRecord> {
   return requestImportedSchema('/api/v1/semantic/import/saved', token, {
     method: 'POST',
-    body: JSON.stringify({ display_name: displayName, raw_schema: preview.raw_schema }),
+    body: JSON.stringify({
+      display_name: displayName,
+      raw_schema: preview.raw_schema,
+    }),
   });
 }
 
@@ -1087,7 +1234,7 @@ export async function startWizardApi(dbId: number): Promise<WizardStartResponse>
 export async function advanceWizardApi(
   dbId: number,
   sessionId: string,
-  optionId: string
+  optionId: string,
 ): Promise<WizardStepResponse> {
   return semanticRequest<WizardStepResponse>(`/api/v1/semantic/${dbId}/query/wizard/step`, {
     method: 'POST',
@@ -1119,10 +1266,10 @@ export interface MetricDimensionsResponse {
 
 export async function getMetricRecommendedDimensionsApi(
   dbId: number | string,
-  metricId: number | string
+  metricId: number | string,
 ): Promise<MetricDimensionsResponse> {
   return semanticRequest<MetricDimensionsResponse>(
-    `/api/v1/semantic/${dbId}/metric/${metricId}/dimensions`
+    `/api/v1/semantic/${dbId}/metric/${metricId}/dimensions`,
   );
 }
 export interface FilterColumnItem {
@@ -1146,10 +1293,9 @@ export interface MetricFilterColumnsResponse {
 
 export async function getMetricFilterColumnsApi(
   dbId: number | string,
-  metricId: number | string
+  metricId: number | string,
 ): Promise<MetricFilterColumnsResponse> {
   return semanticRequest<MetricFilterColumnsResponse>(
-    `/api/v1/semantic/${dbId}/metric/${metricId}/filter-columns`
+    `/api/v1/semantic/${dbId}/metric/${metricId}/filter-columns`,
   );
 }
-

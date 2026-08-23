@@ -44,7 +44,6 @@ async def seed_user_and_db(async_db_session: AsyncSession):
         username="creator",
         hashed_password="hash",
         full_name="Test Creator",
-        role="analyst",
         status="active",
     )
     async_db_session.add(user)

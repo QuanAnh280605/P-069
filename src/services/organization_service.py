@@ -25,16 +25,30 @@ from src.models.schemas import (
     OrganizationSummaryResponse,
 )
 
-WORKSPACE_ROLES = frozenset({"data_lead", "member"})
+WORKSPACE_ROLES = frozenset({"admin", "data_lead", "member"})
 INVITE_ROLES = WORKSPACE_ROLES
 
 ROLE_PERMISSIONS: dict[str, dict[str, bool]] = {
-    "data_lead": {
+    "admin": {
         "can_manage_members": True,
         "can_manage_invitations": True,
+        "can_manage_schema": False,
+        "can_approve_metrics": False,
+        "can_submit_metric": False,
+        "can_manage_metrics": False,
+        "can_query": True,
+        "can_use_chat": True,
+        "can_use_data_assistant": True,
+        "can_use_metric_studio": False,
+        "can_view_pending_metrics": False,
+    },
+    "data_lead": {
+        "can_manage_members": False,
+        "can_manage_invitations": False,
         "can_manage_schema": True,
-        "can_create_metrics": True,
         "can_approve_metrics": True,
+        "can_submit_metric": True,
+        "can_manage_metrics": True,
         "can_query": True,
         "can_use_chat": True,
         "can_use_data_assistant": True,
@@ -45,8 +59,9 @@ ROLE_PERMISSIONS: dict[str, dict[str, bool]] = {
         "can_manage_members": False,
         "can_manage_invitations": False,
         "can_manage_schema": False,
-        "can_create_metrics": False,
         "can_approve_metrics": False,
+        "can_submit_metric": True,
+        "can_manage_metrics": False,
         "can_query": True,
         "can_use_chat": True,
         "can_use_data_assistant": True,
@@ -177,7 +192,7 @@ def require_permission(membership: OrganizationMemberModel, permission: str) -> 
 
 
 async def create_organization(db: AsyncSession, user_id: int, name: str, slug: str | None) -> OrganizationModel:
-    """Create a Workspace and make the creator its Data Lead."""
+    """Create a Workspace and make the creator its Admin."""
     base_slug = _slugify(slug or name)
     candidate = base_slug
     suffix = 2
@@ -187,9 +202,10 @@ async def create_organization(db: AsyncSession, user_id: int, name: str, slug: s
     organization = OrganizationModel(name=name.strip(), slug=candidate, created_by=user_id)
     db.add(organization)
     await db.flush()
-    db.add(OrganizationMemberModel(org_id=organization.id, user_id=user_id, role="data_lead"))
+    db.add(OrganizationMemberModel(org_id=organization.id, user_id=user_id, role="admin"))
     await db.commit()
     await db.refresh(organization)
+    invalidate_membership_cache(user_id)
     return organization
 
 
@@ -238,10 +254,10 @@ def _member_response(member: OrganizationMemberModel, user: UserModel) -> Organi
 
 
 async def change_member_role(db: AsyncSession, org_id: int, actor_id: int, user_id: int, role: str) -> None:
-    """Change a member role while preserving the last Data Lead."""
+    """Change a member role while preserving the last Admin."""
     if role not in WORKSPACE_ROLES:
         raise ValueError("Invalid Workspace role")
-    await _lock_workspace_data_leads(db, org_id)
+    await _lock_workspace_admins(db, org_id)
     actor = await get_membership(db, actor_id, org_id)
     if actor is None:
         raise PermissionError("Workspace membership required")
@@ -249,45 +265,47 @@ async def change_member_role(db: AsyncSession, org_id: int, actor_id: int, user_
     target = await get_membership(db, user_id, org_id)
     if target is None:
         raise ValueError("Member not found")
-    if target.role == "data_lead" and role != "data_lead" and await _data_lead_count(db, org_id) <= 1:
-        raise ValueError("Cannot demote the last Workspace Data Lead")
+    if target.role == "admin" and role != "admin" and await _admin_count(db, org_id) <= 1:
+        raise ValueError("Cannot demote the last Workspace Admin")
     target.role = role
     _audit(db, org_id, actor_id, "member_role_changed", user_id, metadata={"role": role})
     await db.commit()
+    invalidate_membership_cache(user_id)
 
 
 async def remove_member(db: AsyncSession, org_id: int, actor_id: int, user_id: int) -> None:
     """Remove a member according to Workspace role protections."""
-    await _lock_workspace_data_leads(db, org_id)
+    await _lock_workspace_admins(db, org_id)
     actor = await get_membership(db, actor_id, org_id)
     target = await get_membership(db, user_id, org_id)
     if actor is None or target is None:
         raise ValueError("Member not found")
     require_permission(actor, "can_manage_members")
-    if target.role == "data_lead" and await _data_lead_count(db, org_id) <= 1:
-        raise ValueError("Cannot remove the last Workspace Data Lead")
+    if target.role == "admin" and await _admin_count(db, org_id) <= 1:
+        raise ValueError("Cannot remove the last Workspace Admin")
     await db.delete(target)
     _audit(db, org_id, actor_id, "member_removed", user_id)
     await db.commit()
+    invalidate_membership_cache(user_id)
 
 
-async def _data_lead_count(db: AsyncSession, org_id: int) -> int:
+async def _admin_count(db: AsyncSession, org_id: int) -> int:
     stmt = (
         select(func.count())
         .select_from(OrganizationMemberModel)
         .where(
             OrganizationMemberModel.org_id == org_id,
-            OrganizationMemberModel.role == "data_lead",
+            OrganizationMemberModel.role == "admin",
         )
     )
     return int(await db.scalar(stmt) or 0)
 
 
-async def _lock_workspace_data_leads(db: AsyncSession, org_id: int) -> None:
-    """Serialize membership mutations that can remove the last Data Lead."""
+async def _lock_workspace_admins(db: AsyncSession, org_id: int) -> None:
+    """Serialize membership mutations that can remove the last Admin."""
     stmt = (
         select(OrganizationMemberModel.id)
-        .where(OrganizationMemberModel.org_id == org_id, OrganizationMemberModel.role == "data_lead")
+        .where(OrganizationMemberModel.org_id == org_id, OrganizationMemberModel.role == "admin")
         .with_for_update()
     )
     await db.execute(stmt)
@@ -357,6 +375,7 @@ async def accept_invitation(db: AsyncSession, raw_token: str, user: UserModel) -
     invitation.accepted_at = _now()
     _audit(db, invitation.org_id, user.id, "invitation_accepted", user.id, invitation.id)
     await db.commit()
+    invalidate_membership_cache(user.id)
     organization = await db.get(OrganizationModel, invitation.org_id)
     return _organization_response(organization, member)
 

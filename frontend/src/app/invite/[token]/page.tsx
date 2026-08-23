@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
 import { acceptWorkspaceInviteApi, previewWorkspaceInviteApi, WorkspaceInvitePreview } from '@/lib/api';
 
-const roleLabels = { member: 'Member', data_lead: 'Data Lead' } as const;
+const roleLabels = { admin: 'Admin', member: 'Member', data_lead: 'Data Lead' } as const;
 
 export default function InvitePage() {
   const params = useParams<{ token: string }>();

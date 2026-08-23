@@ -23,7 +23,6 @@ def _token_headers(user: UserModel | None = None, org_id: int | None = None) -> 
         username="tester",
         full_name="Tester",
         hashed_password="hash",
-        role="admin",
         status="active",
     )
     headers = {"Authorization": f"Bearer {create_access_token(active_user)}"}
@@ -64,9 +63,7 @@ def temp_sqlite_db():
 
 
 @pytest.mark.asyncio
-async def test_live_db_connect_endpoint_lifecycle(
-    client, async_session: AsyncSession, temp_sqlite_db: str
-):
+async def test_live_db_connect_endpoint_lifecycle(client, async_session: AsyncSession, temp_sqlite_db: str):
     """Test POST /semantic/db/connect and GET/DELETE endpoints."""
     conn_url = f"sqlite:///{temp_sqlite_db}"
     payload = {
@@ -107,9 +104,7 @@ async def test_live_db_connect_endpoint_lifecycle(
 
 
 @pytest.mark.asyncio
-async def test_live_db_connect_auto_detect_and_mismatch(
-    client, async_session: AsyncSession, temp_sqlite_db: str
-):
+async def test_live_db_connect_auto_detect_and_mismatch(client, async_session: AsyncSession, temp_sqlite_db: str):
     """Test POST /semantic/db/connect with auto-detect and strict mismatch validation."""
     conn_url = f"sqlite:///{temp_sqlite_db}"
 
@@ -130,9 +125,7 @@ async def test_live_db_connect_auto_detect_and_mismatch(
         "dialect": "mysql",
         "conn_url": conn_url,
     }
-    res_mismatch = await client.post(
-        CONNECT_ENDPOINT, json=mismatch_payload, headers=_token_headers(org_id=org_id)
-    )
+    res_mismatch = await client.post(CONNECT_ENDPOINT, json=mismatch_payload, headers=_token_headers(org_id=org_id))
     assert res_mismatch.status_code == 400
     assert "does not match selected dialect" in res_mismatch.json()["detail"]
 

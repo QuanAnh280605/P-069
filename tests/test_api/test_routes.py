@@ -14,7 +14,6 @@ def get_test_headers():
         username="tester",
         full_name="Tester",
         hashed_password="hash",
-        role="admin",
         status="active",
     )
     token = create_access_token(dummy_user)

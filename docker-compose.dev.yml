@@ -45,13 +45,20 @@ services:
       retries: 3
       start_period: 15s
 
-  pgweb:
-    image: sosedoff/pgweb
-    container_name: p-069-pgweb
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: p-069-pgadmin
     ports:
-      - "8081:8081" # Quản lý Database Web UI (Không cần mật khẩu khi mở)
+      - "8081:80" # Quản lý Database Web UI pgAdmin 4
     environment:
-      - DATABASE_URL=postgres://dev:devpassword@postgres:5432/semantic_layer_dev?sslmode=disable
+      - PGADMIN_DEFAULT_EMAIL=admin@admin.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+    volumes:
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+      - ./docker/pgadmin/pgpass:/pgadmin4/pgpass:ro
+      - pgadmin_data:/var/lib/pgadmin
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,4 +67,6 @@ services:
 volumes:
   postgres_data:
     # persist data giữa các lần restart
+  pgadmin_data:
+
 

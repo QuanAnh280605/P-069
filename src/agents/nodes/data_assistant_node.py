@@ -24,8 +24,11 @@ dùng danh sách đánh số/gạch đầu dòng, code inline cho tên bảng/c�
 GFM table hợp lệ có dòng trống trước và sau. Không nối nhiều ý vào một đoạn dài."""
 
 
+_MAX_HISTORY_CHARS = 10000
+
+
 async def data_assistant_node(state: AgentState) -> dict[str, Any]:
-    """Answer read-only schema and approved-metric questions."""
+    """Answer read-only schema and approved-metric questions with chat history context."""
     user_message = state.get("user_message", "").strip()
     if not user_message:
         return {"intent": "data_question", "chat_response": "Bạn muốn tìm hiểu phần dữ liệu nào?"}
@@ -33,8 +36,9 @@ async def data_assistant_node(state: AgentState) -> dict[str, Any]:
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "system", "content": f"Context semantic layer được phép đọc:\n{context}"},
-        {"role": "user", "content": user_message},
     ]
+    messages.extend(_history_messages(state.get("chat_history", [])))
+    messages.append({"role": "user", "content": user_message})
     try:
         response = await get_llm().ainvoke(messages)
         reply = (response.content if hasattr(response, "content") else str(response)).strip()
@@ -42,6 +46,24 @@ async def data_assistant_node(state: AgentState) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("Data assistant failed: %s", exc)
         return {"intent": "data_question", "chat_response": "Không thể đọc semantic layer lúc này."}
+
+
+def _history_messages(history: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Normalize prior messages and keep the prompt within a bounded budget."""
+    result: list[dict[str, str]] = []
+    remaining = _MAX_HISTORY_CHARS
+    for item in reversed(history):
+        role = item.get("role")
+        content = item.get("content", "").strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        content = content[-remaining:]
+        result.append({"role": role, "content": content})
+        remaining -= len(content)
+        if remaining <= 0:
+            break
+    result.reverse()
+    return result
 
 
 def _format_context(schema: dict[str, Any], metrics: list[dict[str, Any]]) -> str:

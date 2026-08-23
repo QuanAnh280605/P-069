@@ -193,8 +193,8 @@ export function StudioChatStream(props: StudioChatStreamProps) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-8">
           {!canGenerateMetrics && (
-            <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-700 dark:text-amber-300">
-              Chế độ chỉ đọc: bạn có thể hỏi về schema và metric đã phê duyệt, nhưng không có quyền tạo, sửa hoặc lưu metric. Hãy liên hệ Data Lead nếu cần thay đổi.
+            <div role="status" className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
+              Bạn có thể tra cứu dữ liệu qua các metric đã duyệt (chỉ áp dụng cho kết nối Live DB) hoặc yêu cầu AI tạo Business Metric mới. Metric sau khi tạo sẽ được lưu vào Semantic Layer ở trạng thái chờ Data Lead phê duyệt.
             </div>
           )}
           {props.messages.map((message) => (
@@ -428,22 +428,49 @@ function MessageBubble({
   );
 }
 
+function renderFormattedContent(node: React.ReactNode): React.ReactNode {
+  if (typeof node === 'string') {
+    if (!/<br\s*\/?>/i.test(node)) {
+      return node;
+    }
+    const parts = node.split(/(<br\s*\/?>)/gi);
+    return parts.map((part, i) => {
+      if (/<br\s*\/?>/i.test(part)) {
+        return <br key={i} className="my-0.5" />;
+      }
+      return part;
+    });
+  }
+  if (Array.isArray(node)) {
+    return React.Children.map(node, renderFormattedContent);
+  }
+  if (React.isValidElement(node) && (node.props as { children?: React.ReactNode })?.children) {
+    return React.cloneElement(
+      node,
+      undefined,
+      renderFormattedContent((node.props as { children?: React.ReactNode }).children),
+    );
+  }
+  return node;
+}
+
 function AssistantMarkdown({ content }: { content: string }) {
   return (
     <div className="prose prose-sm max-w-none text-card-foreground prose-headings:font-display prose-headings:text-foreground prose-p:my-2 prose-p:leading-7 prose-strong:text-foreground prose-li:my-1 prose-li:leading-6 prose-a:text-primary prose-a:underline prose-blockquote:border-primary/40 prose-blockquote:text-muted-foreground">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          h1: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold first:mt-0">{children}</h3>,
-          h2: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold first:mt-0">{children}</h3>,
-          h3: ({ children }) => <h4 className="mb-2 mt-3 text-sm font-semibold">{children}</h4>,
-          p: ({ children }) => <p className="my-2 leading-7 first:mt-0 last:mb-0">{children}</p>,
-          strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-          em: ({ children }) => <em className="text-muted-foreground">{children}</em>,
-          ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>,
-          ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>,
+          h1: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold first:mt-0">{renderFormattedContent(children)}</h3>,
+          h2: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold first:mt-0">{renderFormattedContent(children)}</h3>,
+          h3: ({ children }) => <h4 className="mb-2 mt-3 text-sm font-semibold">{renderFormattedContent(children)}</h4>,
+          p: ({ children }) => <p className="my-2 leading-7 first:mt-0 last:mb-0">{renderFormattedContent(children)}</p>,
+          strong: ({ children }) => <strong className="font-semibold text-foreground">{renderFormattedContent(children)}</strong>,
+          em: ({ children }) => <em className="text-muted-foreground">{renderFormattedContent(children)}</em>,
+          ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{renderFormattedContent(children)}</ul>,
+          ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{renderFormattedContent(children)}</ol>,
+          li: ({ children }) => <li className="my-1">{renderFormattedContent(children)}</li>,
           blockquote: ({ children }) => (
-            <blockquote className="my-3 border-l-2 pl-3 italic">{children}</blockquote>
+            <blockquote className="my-3 border-l-2 pl-3 italic">{renderFormattedContent(children)}</blockquote>
           ),
           code: ({ className, children, ...props }) => (
             <code
@@ -459,13 +486,19 @@ function AssistantMarkdown({ content }: { content: string }) {
           ),
           pre: ({ children }) => <pre className="my-3 overflow-x-auto rounded-md">{children}</pre>,
           table: ({ children }) => (
-            <div className="my-3 overflow-x-auto rounded-md border border-border">
+            <div className="my-3 overflow-x-auto rounded-lg border border-border bg-card shadow-xs">
               <table className="w-full min-w-[520px] border-collapse text-left text-xs">{children}</table>
             </div>
           ),
-          thead: ({ children }) => <thead className="bg-secondary/70">{children}</thead>,
-          th: ({ children }) => <th className="border-b border-border px-3 py-2 font-semibold">{children}</th>,
-          td: ({ children }) => <td className="border-b border-border px-3 py-2 align-top last:border-b-0">{children}</td>,
+          thead: ({ children }) => <thead className="bg-secondary/70 font-semibold">{children}</thead>,
+          tbody: ({ children }) => <tbody className="divide-y divide-border [&>tr:last-child>td]:border-b-0">{children}</tbody>,
+          tr: ({ children }) => <tr className="transition-colors hover:bg-muted/20">{children}</tr>,
+          th: ({ children }) => <th className="border-b border-border px-3.5 py-2.5 font-semibold text-foreground">{children}</th>,
+          td: ({ children }) => (
+            <td className="border-b border-border px-3.5 py-2.5 align-top text-card-foreground leading-relaxed">
+              {renderFormattedContent(children)}
+            </td>
+          ),
           hr: () => <hr className="my-4 border-border" />,
         }}
       >
@@ -535,9 +568,6 @@ function SuggestionCard({
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-foreground text-sm">{def.name}</h3>
             <StatusPill status={def.status || 'pending_approval'} />
-            <span className="font-mono text-[10px] text-muted-foreground">
-              Chờ phê duyệt
-            </span>
             <span className="rounded bg-secondary px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
               Độ tin cậy: {def.confidence === 'high' ? 'Cao' : def.confidence === 'medium' ? 'Trung bình' : 'Thấp'}
             </span>
@@ -653,7 +683,7 @@ function SuggestionCard({
         <span className="font-mono text-[11px] text-muted-foreground">
           {suggestion.conflict
             ? 'Xử lý cảnh báo trùng tên trước khi lưu'
-            : 'Pending status · Phê duyệt trong catalog trước khi truy vấn'}
+            : 'Lưu vào Semantic Layer (chờ Data Lead phê duyệt trước khi truy vấn)'}
         </span>
 
         {/* ⛔ No Save while the conflict strip is unresolved — user must clarify first */}

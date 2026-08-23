@@ -118,7 +118,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
               (profile.username as string) ||
               (profile.email as string),
             provider: 'credentials',
-            role: (profile.role as string) || 'analyst',
           });
         } else {
           removeStoredTokens();
@@ -155,7 +154,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           email: data.user.email,
           name: data.user.name || data.user.username,
           provider: 'credentials',
-          role: data.user.role || 'analyst',
         });
         return true;
       }
@@ -197,7 +195,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           email: data.user.email,
           name: data.user.name || name,
           provider: 'credentials',
-          role: data.user.role || 'analyst',
         });
         return true;
       }
@@ -231,7 +228,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           email: data.user.email,
           name: data.user.name,
           provider: 'google',
-          role: data.user.role || 'analyst',
         });
         return true;
       }

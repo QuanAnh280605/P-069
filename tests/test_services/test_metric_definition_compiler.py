@@ -100,3 +100,15 @@ async def test_compiler_rejects_legacy_metric_without_definition(async_session: 
     with pytest.raises(SemanticCompileError) as error:
         await SemanticQueryCompiler(async_session).compile(db_id, [metric_id], [])
     assert error.value.code == "METRIC_NOT_APPROVED"
+
+
+@pytest.mark.asyncio
+async def test_compiler_rejects_unverified_metric(async_session: AsyncSession) -> None:
+    """SemanticQueryCompiler rejects unverified metrics (approved-only gate)."""
+    db_id, metric_id, _ = await _seed(async_session)
+    metric = await async_session.get(SemanticMetricModel, metric_id)
+    metric.status = "unverified"
+    await async_session.commit()
+    with pytest.raises(SemanticCompileError) as error:
+        await SemanticQueryCompiler(async_session).compile(db_id, [metric_id], [])
+    assert error.value.code == "METRIC_NOT_APPROVED"

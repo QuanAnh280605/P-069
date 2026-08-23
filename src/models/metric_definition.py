@@ -13,7 +13,7 @@ from sqlglot import exp
 logger = logging.getLogger(__name__)
 
 MetricFunction = Literal["SUM", "COUNT", "COUNT_DISTINCT", "AVG", "MIN", "MAX"]
-MetricStatus = Literal["pending_approval", "approved", "needs_review"]
+MetricStatus = Literal["draft", "pending_approval", "approved", "needs_review", "unverified"]
 MetricConfidence = Literal["low", "medium", "high"]
 FilterOperator = Literal["eq", "neq", "gt", "gte", "lt", "lte", "in", "not_in", "is_null", "is_not_null"]
 ExpressionKind = Literal["column", "literal", "add", "sub", "mul", "div", "neg"]
@@ -191,8 +191,9 @@ class MetricSpec(BaseModel):
     @field_validator("status", mode="before")
     @classmethod
     def normalize_status(cls, value: Any) -> str:
-        if isinstance(value, str) and value.strip().lower() in {"pending_approval", "approved", "needs_review"}:
-            return value.strip().lower()
+        cleaned = value.strip().lower() if isinstance(value, str) else ""
+        if cleaned in {"draft", "pending_approval", "approved", "needs_review", "unverified"}:
+            return cleaned
         return "pending_approval"
 
     @field_validator("confidence", mode="before")

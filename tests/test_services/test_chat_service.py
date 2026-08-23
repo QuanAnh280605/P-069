@@ -76,7 +76,6 @@ async def test_chat_service_enforces_database_ownership(async_session):
         username="other",
         full_name="Other",
         hashed_password="hash",
-        role="analyst",
         status="active",
     )
     async_session.add(other)
@@ -129,7 +128,6 @@ async def test_workspace_member_cannot_use_chat_without_live_data_permission(asy
         username="member",
         full_name="Member",
         hashed_password="hash",
-        role="analyst",
         status="active",
     )
     async_session.add(other)

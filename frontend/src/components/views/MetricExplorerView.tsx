@@ -245,6 +245,7 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
   const [loading, setLoading] = useState(false);
   const [viewTab, setViewTab] = useState<'table' | 'chart' | 'sql'>('table');
   const [chartType, setChartType] = useState<ChartType>('bar');
+  const [metricSearch, setMetricSearch] = useState('');
   const [dimSearch, setDimSearch] = useState('');
   const [copiedSql, setCopiedSql] = useState(false);
   const [recommendedDims, setRecommendedDims] = useState<RecommendedDimensionItem[]>([]);
@@ -254,6 +255,27 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
     () => metrics.filter((item) => item.status === 'approved' && item.definition),
     [metrics],
   );
+
+  const displayedMetrics = useMemo(() => {
+    if (!metricSearch.trim()) return approved;
+    const q = metricSearch.toLowerCase();
+    return approved.filter((m) => {
+      const name = metricName(m).toLowerCase();
+      const techName = (m.name || '').toLowerCase();
+      const baseEntity = (m.definition?.metric.base_entity || '').toLowerCase();
+      const formulaFn = (m.definition?.metric.formula.function || '').toLowerCase();
+      const expr = (m.definition?.metric.formula.expression || '').toLowerCase();
+      const desc = (m.description || m.definition?.metric.excluded_notes || '').toLowerCase();
+      return (
+        name.includes(q) ||
+        techName.includes(q) ||
+        baseEntity.includes(q) ||
+        formulaFn.includes(q) ||
+        expr.includes(q) ||
+        desc.includes(q)
+      );
+    });
+  }, [approved, metricSearch]);
 
   const selectedMetric = useMemo(
     () => approved.find((m) => metricIds.includes(m.metric_id)),
@@ -496,6 +518,8 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
   const handleReset = () => {
     setMetricIds([]);
     setDimensions([]);
+    setMetricSearch('');
+    setDimSearch('');
     setOutput(null);
     setError('');
   };
@@ -621,8 +645,30 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
               <span className="text-[10px] text-muted-foreground font-mono">Measures</span>
             </div>
 
+            {/* Quick Search for Metrics */}
+            {approved.length > 0 && (
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={metricSearch}
+                  onChange={(e) => setMetricSearch(e.target.value)}
+                  placeholder="Tìm nhanh chỉ số đo lường..."
+                  className="h-8 pl-8 pr-8 text-xs bg-background"
+                />
+                {metricSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setMetricSearch('')}
+                    className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="space-y-1.5">
-              {approved.map((m) => {
+              {displayedMetrics.map((m) => {
                 const checked = metricIds.includes(m.metric_id);
                 const formulaFn = m.definition?.metric.formula.function || 'SUM';
                 return (
@@ -661,6 +707,11 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
                 <p className="p-2 text-xs text-muted-foreground italic">
                   Chưa có metric nào được phê duyệt. Hãy duyệt trong Catalog trước.
                 </p>
+              )}
+              {approved.length > 0 && displayedMetrics.length === 0 && (
+                <div className="p-3 text-center text-xs text-muted-foreground italic rounded-lg border border-dashed border-border bg-card/30">
+                  Không tìm thấy metric nào khớp với &quot;{metricSearch}&quot;.
+                </div>
               )}
             </div>
           </div>

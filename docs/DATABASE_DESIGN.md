@@ -1,6 +1,6 @@
-# 🗄️ THIẾT KẾ CƠ SỞ DỮ LIỆU / DATABASE DESIGN SPECIFICATION — METADATA STORE & AUTHENTICATION (v2.0)
+# 🗄️ THIẾT KẾ CƠ SỞ DỮ LIỆU / DATABASE DESIGN SPECIFICATION — METADATA STORE & AUTHENTICATION (v2.1)
 
-Tài liệu thiết kế chi tiết cho **Metadata Store (10 Bảng ORM)** và **Hệ thống Quản lý Người dùng (User Authentication & RBAC)** của dự án **P-069: AI Semantic Layer Agent**.
+Tài liệu thiết kế chi tiết cho **Metadata Store** và **Hệ thống Xác thực cùng Workspace RBAC** của dự án **P-069: AI Semantic Layer Agent**.
 
 ---
 
@@ -14,6 +14,11 @@ erDiagram
     users ||--o{ semantic_databases : "tạo / sở hữu semantic DB (1-N)"
     users ||--o{ semantic_metrics : "tạo / phê duyệt metric (1-N)"
     users ||--o{ metric_versions : "thay đổi phiên bản (1-N)"
+    users ||--o{ organization_members : "tham gia workspace (1-N)"
+
+    organizations ||--o{ organization_members : "có thành viên (1-N)"
+    organizations ||--o{ organization_invitations : "phát hành lời mời (1-N)"
+    organizations ||--o{ semantic_databases : "sở hữu semantic DB (1-N)"
 
     semantic_databases ||--o{ semantic_tables : "chứa các bảng (1-N)"
     semantic_databases ||--o{ semantic_metrics : "sở hữu metrics (1-N)"
@@ -31,10 +36,38 @@ erDiagram
         string username UK "Tên tài khoản độc nhất"
         string hashed_password "Mật khẩu băm Bcrypt"
         string full_name "Họ và tên người dùng"
-        string role "admin | analyst"
         string status "active | inactive | suspended"
         timestamp created_at "UTC"
         timestamp updated_at "UTC"
+    }
+
+    organizations {
+        int id PK
+        string name
+        string slug UK
+        int created_by FK
+        timestamp created_at "UTC"
+        timestamp updated_at "UTC"
+    }
+
+    organization_members {
+        int id PK
+        int org_id FK
+        int user_id FK
+        string role "admin | data_lead | member"
+        timestamp joined_at "UTC"
+        timestamp updated_at "UTC"
+    }
+
+    organization_invitations {
+        int id PK
+        int org_id FK
+        int inviter_id FK
+        string invitee_email
+        string role "admin | data_lead | member"
+        string token_hash UK
+        timestamp expires_at "UTC"
+        string status "pending | accepted | revoked | expired"
     }
 
     user_sessions {
@@ -122,7 +155,7 @@ erDiagram
         text description "Mô tả ý nghĩa nghiệp vụ"
         text sql_template "SQL template tham chiếu"
         string source "ai | manual"
-        string status "draft | active | archived"
+        string status "draft | pending_approval | needs_review | approved | unverified"
         int base_entity_id FK "FK -> semantic_tables.id (NULLABLE)"
         text formula "Công thức tính toán biểu thức"
         string aggregation_type "SUM | COUNT | AVG | MIN | MAX"
@@ -161,10 +194,10 @@ erDiagram
 
 ---
 
-## 2. Quy chuẩn Chi tiết 10 Bảng (Table Specifications)
+## 2. Quy chuẩn Chi tiết các Bảng Cốt lõi (Table Specifications)
 
 ### 2.1. Bảng `users` (Quản lý Tài khoản & Xác thực)
-Lưu trữ thông tin tài khoản, mật khẩu băm và phân quyền RBAC.
+Lưu trữ thông tin tài khoản và mật khẩu băm. Bảng này không chứa vai trò ứng dụng; phân quyền nằm trên membership của từng Workspace.
 
 | Tên cột | Kiểu dữ liệu | Ràng buộc | Giá trị mặc định | Mô tả |
 |---|---|---|---|---|
@@ -173,12 +206,18 @@ Lưu trữ thông tin tài khoản, mật khẩu băm và phân quyền RBAC.
 | `username` | `VARCHAR(100)` | `NOT NULL`, `UNIQUE` | — | Tên đăng nhập độc nhất |
 | `hashed_password` | `VARCHAR(255)` | `NOT NULL` | — | Mật khẩu băm an toàn (Bcrypt) |
 | `full_name` | `VARCHAR(200)` | `NOT NULL` | `''` | Họ tên hiển thị người dùng |
-| `role` | `VARCHAR(50)` | `NOT NULL` | `'analyst'` | Phân quyền: `admin` hoặc `analyst` |
 | `status` | `VARCHAR(50)` | `NOT NULL` | `'active'` | Trạng thái: `active`, `inactive`, `suspended` |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL` | `utc_now` | Thời gian tạo tài khoản |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL` | `utc_now` | Thời gian cập nhật gần nhất |
 
 - **Indexes:** `idx_users_email (email UNIQUE)`, `idx_users_username (username UNIQUE)`
+
+### 2.1.1. Ràng buộc Workspace RBAC
+
+- `organization_members` duy nhất theo `(org_id, user_id)` và CHECK role chỉ nhận `admin`, `data_lead`, `member`.
+- `organization_invitations.role` có cùng CHECK constraint. Chỉ Workspace Admin tạo/thu hồi link; token ngẫu nhiên chỉ lưu dạng SHA-256 hash, dùng một lần, hết hạn sau 7 ngày và có thể giới hạn email người nhận.
+- Người tạo Workspace trở thành `admin`. Mọi thay đổi vai trò hoặc xóa membership phải bảo toàn ít nhất một Admin trong Workspace, kể cả thao tác tự hạ vai trò hoặc tự xóa.
+- `admin` chỉ quản trị member/invitation; `data_lead` quản trị schema và metric; `member` chỉ gửi metric mới. Không vai trò nào có hiệu lực ngoài Workspace chứa membership đó.
 
 ---
 
@@ -311,7 +350,7 @@ Quản trị chỉ số kinh doanh chính thức, công thức tính toán và t
 | `description` | `TEXT` | `NOT NULL` | — | Mô tả ý nghĩa kinh doanh |
 | `sql_template` | `TEXT` | `NOT NULL` | — | Mẫu câu truy vấn SQL tham chiếu |
 | `source` | `VARCHAR(20)` | `NOT NULL` | `'manual'` | Nguồn gốc: `ai` hoặc `manual` |
-| `status` | `VARCHAR(20)` | `NOT NULL` | `'draft'` | Trạng thái: `draft`, `active`, `archived` |
+| `status` | `VARCHAR(20)` | `NOT NULL`, CHECK | `'draft'` | `draft`, `pending_approval`, `needs_review`, `unverified`, `approved` |
 | `base_entity_id` | `INTEGER` | `NULLABLE`, `FK -> semantic_tables.id ON DELETE SET NULL` | `NULL` | Bảng cơ sở chứa metric |
 | `formula` | `TEXT` | `NOT NULL` | `''` | Công thức tính toán (biểu thức) |
 | `aggregation_type`| `VARCHAR(50)` | `NULLABLE` | `NULL` | Loại tổng hợp: `SUM`, `COUNT`, `AVG`... |
@@ -322,6 +361,8 @@ Quản trị chỉ số kinh doanh chính thức, công thức tính toán và t
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL` | `utc_now` | Thời gian cập nhật |
 
 - **Indexes:** `idx_semantic_metrics_db_name (db_id, name)`
+
+Submission do Member tạo luôn được server gán `unverified`. Member chỉ xem submission của chính mình và không thể sửa/xóa sau khi gửi; Data Lead xem, sửa, xóa hoặc phê duyệt thành `approved`. Admin chỉ xem catalog `approved`. Metric chưa duyệt không được biên dịch hoặc thực thi trong Flow 2.
 
 ---
 
