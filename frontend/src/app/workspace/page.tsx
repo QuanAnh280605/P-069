@@ -3,11 +3,12 @@
 import { CheckCircle2, ClipboardCheck, Database, Loader2, Plus } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { AIStudioView } from '@/components/views/AIStudioView';
 import { MetricsCatalogView } from '@/components/views/MetricsCatalogView';
+import type { ExplorerInitialSelection } from '@/components/views/MetricExplorerView';
 import { WorkspaceApp } from '@/components/workspace/WorkspaceApp';
 import type { ViewId, WorkspaceDatabase } from '@/components/workspace/shared';
 import { useAuth } from '@/context/AuthContext';
@@ -44,6 +45,11 @@ import {
   updateChatSessionTitleApi,
   updateMetricApi,
 } from '@/lib/api';
+import {
+  resolveDrillDownDateFilters,
+  type DashboardDatePreset,
+  type DashboardWidgetConfig,
+} from '@/lib/dashboard';
 
 // Dynamic imports for heavy views & modals to optimize initial bundle size & LCP
 const MetricExplorerView = dynamic(
@@ -85,6 +91,19 @@ const SchemaReviewView = dynamic(
   },
 );
 
+const MetricsDashboardView = dynamic(
+  () => import('@/components/views/MetricsDashboardView').then((m) => m.MetricsDashboardView),
+  {
+    loading: () => (
+      <div className="flex flex-1 items-center justify-center p-8 text-xs font-semibold text-muted-foreground gap-2">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Đang tải Bảng điều khiển chỉ số...
+      </div>
+    ),
+    ssr: false,
+  },
+);
+
 const ConnectDbModal = dynamic(
   () => import('@/components/modals/ConnectDbModal').then((m) => m.ConnectDbModal),
   { ssr: false },
@@ -106,7 +125,7 @@ const MetricModal = dynamic(
   { ssr: false },
 );
 
-type WorkspaceTab = 'studio' | 'schema' | 'metrics' | 'explorer' | 'export';
+type WorkspaceTab = 'studio' | 'schema' | 'metrics' | 'explorer' | 'dashboard' | 'export';
 
 function layerToDatabase(layer: SemanticLayerData): WorkspaceDatabase {
   return {
@@ -128,6 +147,8 @@ function tabToViewId(tab: WorkspaceTab): ViewId {
       return 'catalog';
     case 'explorer':
       return 'explorer';
+    case 'dashboard':
+      return 'dashboard';
     case 'export':
       return 'export';
   }
@@ -143,6 +164,8 @@ function viewIdToTab(view: ViewId): WorkspaceTab {
       return 'metrics';
     case 'explorer':
       return 'explorer';
+    case 'dashboard':
+      return 'dashboard';
     case 'export':
       return 'export';
   }
@@ -152,7 +175,7 @@ export default function WorkspacePage() {
   const router = useRouter();
   const { user, token, logout, isLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { currentWorkspace, permissions } = useWorkspace();
+  const { currentWorkspace, permissions, role } = useWorkspace();
   const [layers, setLayers] = useState<SemanticLayerData[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<WorkspaceTab>('studio');
@@ -169,6 +192,9 @@ export default function WorkspacePage() {
     tables: 0,
     columns: 0,
   });
+  const [explorerInitialSelection, setExplorerInitialSelection] =
+    useState<ExplorerInitialSelection | null>(null);
+  const explorerSelectionKey = useRef(0);
 
   // Chat sessions state lifted to page level
   const [sessions, setSessions] = useState<ChatSessionItem[]>([]);
@@ -187,6 +213,7 @@ export default function WorkspacePage() {
   const canManageMetrics = Boolean(permissions.can_manage_metrics);
   const canApproveMetrics = Boolean(permissions.can_approve_metrics);
   const canManageSchema = Boolean(permissions.can_manage_schema);
+  const canEditDashboard = Boolean(permissions.can_manage_metrics || role === 'data_lead' || role === 'admin');
   const canChat = Boolean(
     permissions.can_use_chat &&
     (canUseDataAssistant || canUseMetricStudio) &&
@@ -324,6 +351,22 @@ export default function WorkspacePage() {
     [notify, semanticDbId],
   );
 
+  const handleDashboardDrillDown = useCallback(
+    (widget: DashboardWidgetConfig, datePreset: DashboardDatePreset | null) => {
+      const dateFilters = resolveDrillDownDateFilters(widget, datePreset, new Date());
+      explorerSelectionKey.current += 1;
+      setExplorerInitialSelection({
+        metricId: widget.metric_id,
+        dimensionColId: widget.dimension_col_id ?? null,
+        timeGrain: widget.time_grain ?? null,
+        dateFilters,
+        requestKey: explorerSelectionKey.current,
+      });
+      setTab('explorer');
+    },
+    [],
+  );
+
   const refreshSemanticData = useCallback(async () => {
     if (!activeLayerId || !semanticDbId) return;
     const dbId = String(semanticDbId);
@@ -332,7 +375,7 @@ export default function WorkspacePage() {
       setLayers((current) =>
         current.map((item) => (item.id === activeLayerId ? { ...item, metrics } : item)),
       );
-      if (tab === 'explorer') {
+      if (tab === 'explorer' || tab === 'dashboard') {
         const nextCatalog = await getSemanticCatalogApi(dbId);
         setCatalog(nextCatalog);
       }
@@ -341,9 +384,9 @@ export default function WorkspacePage() {
     }
   }, [activeLayerId, semanticDbId, notify, tab]);
 
-  // Load catalog on-demand when user opens Explorer tab
+  // Load catalog on-demand when user opens Explorer or Dashboard tabs
   useEffect(() => {
-    if (tab === 'explorer' && semanticDbId) {
+    if ((tab === 'explorer' || tab === 'dashboard') && semanticDbId) {
       const dbId = String(semanticDbId);
       if (!catalog || catalog.db_id !== Number(semanticDbId)) {
         void getSemanticCatalogApi(dbId)
@@ -473,6 +516,7 @@ export default function WorkspacePage() {
       canChat={canChat}
       chatMode={studioMode}
       onSelectView={(v) => {
+        setExplorerInitialSelection(null);
         if (v === 'ai-studio' && !canChat) {
           setTab('metrics');
           return;
@@ -482,6 +526,7 @@ export default function WorkspacePage() {
       onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
       onToggleTheme={toggleTheme}
       onSelectDatabase={(id) => {
+        setExplorerInitialSelection(null);
         setSelectedId(id);
         const nextLayer = layers.find((item) => item.id === id);
         const nextCanChat = Boolean(
@@ -617,6 +662,17 @@ export default function WorkspacePage() {
               catalog={catalog}
               theme={theme}
               database={layerToDatabase(activeLayer)}
+              initialSelection={explorerInitialSelection}
+            />
+          )}
+          {tab === 'dashboard' && activeLayer.semantic_db_id != null && (
+            <MetricsDashboardView
+              dbId={activeLayer.semantic_db_id}
+              metrics={activeLayer.metrics}
+              catalog={catalog}
+              database={layerToDatabase(activeLayer)}
+              canEdit={canEditDashboard}
+              onDrillDown={handleDashboardDrillDown}
             />
           )}
           {tab === 'export' && (

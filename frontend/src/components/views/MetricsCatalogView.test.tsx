@@ -263,8 +263,7 @@ describe('MetricsCatalogView', () => {
     expect(screen.queryByText(/Hãy duyệt|Data Lead/i)).not.toBeInTheDocument();
   });
 
-  it('lets a Member submit and track own unverified metrics without management actions', () => {
-    const onSubmitMetric = vi.fn();
+  it('lets a Member view and track own unverified metrics without management actions', () => {
     render(
       <MetricsCatalogView
         dbId={3}
@@ -272,12 +271,10 @@ describe('MetricsCatalogView', () => {
         canSubmitMetric
         canManageMetrics={false}
         canApproveMetrics={false}
-        onSubmitMetric={onSubmitMetric}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Gửi metric' }));
-    expect(onSubmitMetric).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: /Gửi metric/i })).not.toBeInTheDocument();
     expect(screen.getAllByText(/Đã gửi/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Chưa được xác minh').length).toBeGreaterThan(0);
     expect(

@@ -17,7 +17,7 @@ from src.models.db import (
     OrganizationMemberModel,
     SemanticDatabaseModel,
 )
-from src.services.organization_service import require_permission
+from src.services.organization_service import ROLE_PERMISSIONS, require_permission
 
 DEFAULT_SESSION_TITLE = "Cuộc trò chuyện mới"
 ALLOWED_SENDERS = {"user", "assistant", "system"}
@@ -27,10 +27,9 @@ class ChatAuthorizationError(Exception):
     """Raised when a chat resource is missing or belongs to another user."""
 
 
-async def get_chat_database(
-    db: AsyncSession, user_id: int, db_id: int, require_live: bool = False, org_id: int | None = None
-) -> SemanticDatabaseModel:
-    """Return an owned semantic database and optionally require a live source."""
+async def _fetch_chat_database(
+    db: AsyncSession, user_id: int, db_id: int, org_id: int | None
+) -> SemanticDatabaseModel | None:
     stmt = (
         select(SemanticDatabaseModel)
         .outerjoin(OrganizationMemberModel, OrganizationMemberModel.org_id == SemanticDatabaseModel.org_id)
@@ -46,7 +45,25 @@ async def get_chat_database(
             (OrganizationMemberModel.user_id == user_id)
             | ((SemanticDatabaseModel.org_id.is_(None)) & (SemanticDatabaseModel.created_by == user_id))
         )
-    database = (await db.execute(stmt)).scalar_one_or_none()
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+def _verify_chat_membership(membership: OrganizationMemberModel | None) -> bool:
+    if membership is None:
+        return False
+    try:
+        require_permission(membership, "can_use_chat")
+    except PermissionError as exc:
+        raise ChatAuthorizationError("Workspace role cannot use AI Chat") from exc
+    perms = ROLE_PERMISSIONS.get(membership.role, {})
+    return not perms.get("can_use_metric_studio", False)
+
+
+async def get_chat_database(
+    db: AsyncSession, user_id: int, db_id: int, require_live: bool = False, org_id: int | None = None
+) -> SemanticDatabaseModel:
+    """Return an owned semantic database and optionally require a live source."""
+    database = await _fetch_chat_database(db, user_id, db_id, org_id)
     if database is None:
         raise ChatAuthorizationError("Chat database not found")
     membership = await db.scalar(
@@ -55,12 +72,8 @@ async def get_chat_database(
             OrganizationMemberModel.user_id == user_id,
         )
     )
-    if membership is not None:
-        try:
-            require_permission(membership, "can_use_chat")
-        except PermissionError as exc:
-            raise ChatAuthorizationError("Workspace role cannot use AI Chat") from exc
-    if require_live and not await _has_live_source(db, db_id):
+    needs_live = _verify_chat_membership(membership) or require_live
+    if needs_live and not await _has_live_source(db, db_id):
         raise ChatAuthorizationError("Chat is only supported for live databases")
     return database
 

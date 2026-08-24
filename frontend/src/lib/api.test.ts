@@ -77,7 +77,7 @@ describe('semantic adapter', () => {
     );
 
     await expect(createMetricApi('5', { definition, source: 'manual' })).rejects.toEqual(
-      new SemanticApiError(403, 'Member chỉ được gửi metric mới.'),
+      new SemanticApiError(403, 'Member chỉ được gửi metric mới.', 'Member chỉ được gửi metric mới.'),
     );
   });
 
@@ -150,7 +150,11 @@ describe('semantic adapter', () => {
     );
 
     await expect(rollbackMetricApi('5', 7, 3)).rejects.toEqual(
-      new SemanticApiError(422, 'Chỉ được phép khôi phục về phiên bản cũ hơn.'),
+      new SemanticApiError(
+        422,
+        'Chỉ được phép khôi phục về phiên bản cũ hơn.',
+        'Chỉ được phép khôi phục về phiên bản cũ hơn.',
+      ),
     );
   });
 });

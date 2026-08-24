@@ -36,6 +36,7 @@ graph TB
         V3["🔍 Metric Explorer View\n(Visual Query Builder & Live Table)"]
         V4["💬 AI Studio View\n(Multi-agent Streaming Chat & SQL Preview)"]
         V5["📤 Export Playground View\n(JSON / YAML Exporter)"]
+        V6["📊 Metrics Dashboard View\n(Shared Singleton Layout, Widgets, Drill-down)"]
     end
 
     subgraph API["🌐 API Layer — FastAPI (Async REST Endpoints)"]
@@ -44,6 +45,7 @@ graph TB
         CATALOG_API["📚 Catalog & Edit Routes\n/semantic/{db_id}/catalog, /table, /column"]
         METRIC_API["🎯 Metric Lifecycle Routes\n/semantic/{db_id}/metrics, /approve, /history"]
         QUERY_API["⚡ Query Engine Routes\n/semantic/{db_id}/query/compile & /query"]
+        DASH_API["📊 Dashboard Routes\n/semantic/{db_id}/dashboard (GET/PUT singleton)"]
         AGENT_API["🤖 Conversational & Wizard Routes\n/semantic/{db_id}/chat & /query/clarify/*"]
         EXPORT_API["📦 Export Routes\n/semantic/{db_id}/export?format=json|yaml"]
     end
@@ -80,8 +82,10 @@ graph TB
     end
 
     Client --> API
+    V6 --> DASH_API
     API --> Flow1
     API --> Flow2
+    DASH_API --> Flow2
     API --> MultiAgent
 
     G_INGEST -.->|"Read Schema Only"| TARGET
@@ -184,6 +188,43 @@ flowchart LR
 
 ---
 
+### 3.4. Visual Dashboard — Shared Singleton Layout (Live DB Only)
+
+```mermaid
+flowchart TD
+    OPEN(["Mở Metrics Dashboard View từ Workspace Sidebar"]) --> LOAD
+    LOAD["GET /semantic/{db_id}/dashboard\nTrả về singleton layout (hoặc version-0 rỗng)"] --> CHECK
+
+    CHECK{"catalog.query_supported?\n(Live DB hay SQL Dump?)"}
+    CHECK -->|"SQL Dump"| DUMP(["❌ Không query\nHiển thị trạng thái SQL Dump, không compile/execute"])
+    CHECK -->|"Live DB"| RENDER
+
+    subgraph Widgets["1. Bounded Widget Engine (mỗi card)"]
+        RENDER["Render từng Widget (KPI / Line / Area / Bar / Pie / Table)"] --> COMPILE
+        COMPILE["compileSemanticQueryApi\nLấy label & chẩn đoán (không thực thi)"] --> EXEC
+        EXEC["executeSemanticQueryApi\nSELECT read-only, LIMIT <= 100, timeout 15s\n(chỉ metric approved, không Text-to-SQL)"]
+    end
+
+    EXEC --> PERSIST
+    PERSIST["PUT /semantic/{db_id}/dashboard\nLưu singleton layout (optimistic concurrency)"]
+
+    subgraph Concurrency["2. Optimistic Concurrency & All-Role Editing"]
+        PERSIST --> VER["Kiểm tra expected_version == stored version"]
+        VER -->|"Khớp"| SAVE["Lưu version = expected_version + 1"]
+        VER -->|"Lệch"| CONFLICT(["❌ 409 dashboard_version_conflict\n{current_version} — hiển thị banner, tải bản mới / ghi đè"])
+    end
+```
+
+**Quy tắc an toàn cốt lõi của Dashboard:**
+
+1. **Singleton chia sẻ (Shared Singleton):** Mỗi Semantic Database có đúng một hàng `dashboard_layouts` (khóa `uq_dashboard_layouts_db_id`). Layout là tài sản chung của toàn Workspace, không lưu trên `localStorage` và không phân biệt người dùng — mọi thay đổi đều hiển thị cho tất cả thành viên.
+2. **Live-DB-only execution:** Dashboard chỉ gọi `compileSemanticQueryApi` / `executeSemanticQueryApi` khi `catalog.query_supported = true` (Live DB). Với SQL Dump, Dashboard hiển thị trạng thái riêng và **không bao giờ** phát sinh bất kỳ lệnh compile/execute nào.
+3. **Approved-only & Deterministic:** Chỉ các metric có `status = approved`, định nghĩa v2 và không có diagnostics mới khả dụng; mỗi widget biên dịch qua `SemanticQueryCompiler` (không dùng Text-to-SQL tự do). Mọi truy vấn chạy qua `executeSemanticQueryApi` nên thừa hưởng guardrail `sqlglot` (SELECT-only, `LIMIT <= 100`, `statement_timeout = 15s`).
+4. **All-role shared editing:** Mọi vai trò Workspace (`admin`, `data_lead`, `member`) đều có thể sửa Dashboard chia sẻ, với điều kiện là thành viên Workspace và có quyền `can_query`. Database cá nhân chỉ cho phép người tạo; database Workspace không có header org dùng membership đơn lẻ; database ngoài org bị che thành 404.
+5. **Optimistic concurrency:** Mỗi `PUT` mang `expected_version`. Nếu không khớp với version đang lưu, backend trả `409` với payload ổn định `{"code": "dashboard_version_conflict", "current_version": <int>}`; xung đột hiển thị rõ ràng và có thể phục hồi (tải bản mới hoặc ghi đè sau khi tải lại), không áp dụng last-write-wins thầm lặng.
+
+---
+
 ## 4. Tech Stack Specification
 
 | Thành phần / Tầng | Công nghệ / Thư viện | Phiên bản | Vai trò & Lý do lựa chọn |
@@ -221,6 +262,7 @@ flowchart LR
 | **Lưu trữ Thông tin Nhạy cảm** | **Fernet Symmetric Encryption** | Lưu Plaintext / Hashing một chiều | Fernet cho phép giải mã 2 chiều an toàn trong bộ nhớ khi cần kết nối lại DB mà không để lộ connection string ra ngoài. |
 | **Quản trị Chỉ số (Metrics)** | **MetricDefinition v2 + Version History** | Lưu chuỗi SQL tự do | Hỗ trợ quản trị công thức, kiểu tổng hợp (`SUM`, `COUNT`, `AVG`...), bộ lọc độc lập và truy vết lịch sử thay đổi phiên bản. |
 | **Phân quyền Ứng dụng** | **Workspace-scoped RBAC** (`admin`, `data_lead`, `member`) | Vai trò toàn cục trên tài khoản | Một người có thể giữ vai trò khác nhau theo Workspace; JWT/profile không chứa vai trò ứng dụng toàn cục. |
+| **Visual Dashboard Layout** | **Singleton chia sẻ + Optimistic Concurrency** | `localStorage` / nhiều dashboard theo user / last-write-wins | Một layout chung mỗi Semantic Database (key `db_id`), mọi vai trò Workspace có `can_query` đều sửa được; xung đột version hiển thị rõ và phục hồi được, không ghi đè thầm lặng. |
 
 ---
 
@@ -245,6 +287,8 @@ erDiagram
     semantic_databases ||--o{ semantic_tables : "contains (1-N)"
     semantic_databases ||--o{ semantic_metrics : "contains (1-N)"
     semantic_databases ||--o{ canonical_relationships : "contains (1-N)"
+    semantic_databases ||--o| dashboard_layouts : "has singleton layout (1-1)"
+    users ||--o| dashboard_layouts : "updated_by (0-1, SET NULL)"
 
     semantic_tables ||--o{ semantic_columns : "contains (1-N)"
     semantic_tables ||--o{ canonical_relationships : "joins from/to (1-N)"
@@ -333,6 +377,16 @@ erDiagram
         string db_type "postgresql | mysql | sqlite"
         text conn_url_enc "Fernet ciphertext"
         string status "draft | active | archived"
+        datetime created_at
+        datetime updated_at
+    }
+
+    dashboard_layouts {
+        int id PK
+        int db_id FK "UK uq_dashboard_layouts_db_id (singleton per db)"
+        json layout_json "Widget configs (chart, dimension, filters)"
+        int version "default 1, optimistic concurrency"
+        int updated_by FK "NULL on user delete (SET NULL)"
         datetime created_at
         datetime updated_at
     }
@@ -426,3 +480,4 @@ erDiagram
 6. **Last-admin Invariant:** Workspace luôn phải còn ít nhất một `admin`; mọi thao tác hạ vai trò hoặc xóa admin cuối cùng đều bị từ chối, kể cả tự hạ vai trò hoặc tự rời Workspace.
 7. **Invitation Safety:** Chỉ Workspace Admin tạo/thu hồi URL mời. Link chứa vai trò `admin|data_lead|member`, token chỉ lưu dưới dạng hash, dùng một lần và hết hạn sau 7 ngày.
 8. **Metric Review Boundary:** Submission của Member được server ép thành `unverified`, bất biến đối với Member, và trước khi duyệt chỉ hiển thị cho người tạo cùng Data Lead. Data Lead có thể sửa, xóa hoặc chuyển `unverified` thành `approved`; Admin chỉ xem catalog `approved`. Query compiler chỉ chấp nhận metric `approved`.
+9. **Shared Dashboard Governance:** Dashboard là tài sản chung của Workspace, mọi vai trò có `can_query` đều được sửa (không phân biệt admin/data_lead/member). Truy vấn chỉ chạy trên Live DB đã duyệt (`query_supported`); SQL Dump không phát sinh query. Xung đột ghi đồng thời được phát hiện qua `expected_version` và trả `409 dashboard_version_conflict` với `current_version` để người dùng phục hồi, không ghi đè thầm lặng.

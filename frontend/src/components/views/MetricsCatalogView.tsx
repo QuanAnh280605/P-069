@@ -8,7 +8,6 @@ import {
   Search,
   Sigma,
   Sparkles,
-  Send,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
@@ -125,12 +124,6 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
         database={props.database}
         actions={
           <div className="flex items-center gap-2">
-            {isMemberSubmitter && props.onSubmitMetric && (
-              <Button size="sm" className="gap-1.5 text-xs" onClick={props.onSubmitMetric}>
-                <Send className="h-3.5 w-3.5" />
-                Gửi metric
-              </Button>
-            )}
             {props.onOpenStudio && (
               <Button
                 size="sm"

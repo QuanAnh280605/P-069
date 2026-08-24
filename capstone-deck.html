@@ -1,0 +1,1713 @@
+<!doctype html>
+<html lang="vi">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Semantic Layer Agent</title>
+  <meta name="description"
+    content="Bộ slides capstone P-069: bài toán, giải pháp, tính khả thi và định hướng phát triển của AI Semantic Layer Agent.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+    rel="stylesheet">
+  <style>
+    /* ---------- Tokens ---------- */
+    :root {
+      --ground: #F4F7FB;
+      --surface: #FFFFFF;
+      --ink: #0F2440;
+      --muted: #54687F;
+      --accent: #1A5DC8;
+      --accent-deep: #103A75;
+      --accent-soft: #E6EEFA;
+      --good: #0F7A4E;
+      --good-soft: #E1F3EA;
+      --bad: #B23B2E;
+      --bad-soft: #FBEAE7;
+      --line: #D8E1EC;
+      --code-bg: #0E2138;
+      --code-ink: #D9E6F5;
+      --code-blue: #8FB9FF;
+      --code-good: #74D9A9;
+      --code-bad: #FF9C8F;
+      --font-body: "Be Vietnam Pro", "Segoe UI", -apple-system, Roboto, Arial, sans-serif;
+      --font-mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--ground);
+      color: var(--ink);
+      overflow: hidden;
+    }
+
+    /* ---------- Stage: fixed 16:9 canvas, scaled to viewport ---------- */
+    .stage-root {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: var(--ground);
+    }
+
+    .stage {
+      position: relative;
+      width: 1280px;
+      height: 720px;
+      background: var(--surface);
+      box-shadow: 0 18px 60px rgba(15, 36, 64, 0.14);
+      overflow: hidden;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      padding: 50px 64px 46px;
+      display: flex;
+      flex-direction: column;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateX(14px);
+      transition: opacity 0.28s ease, transform 0.28s ease, visibility 0.28s;
+    }
+
+    .slide.active {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(0);
+    }
+
+    /* ---------- Slide anatomy ---------- */
+    .eyebrow-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .eyebrow {
+      font-size: 12.5px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent-deep);
+    }
+
+    .slide-sec {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    h2 {
+      font-size: 37px;
+      font-weight: 800;
+      line-height: 1.16;
+      letter-spacing: -0.01em;
+      text-wrap: balance;
+      margin-bottom: 6px;
+    }
+
+    h2 .hl {
+      color: var(--accent);
+    }
+
+    .lede {
+      font-size: 16.5px;
+      color: var(--muted);
+      max-width: 62ch;
+      line-height: 1.5;
+    }
+
+    .content {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    /* ---------- Cards, chips, generic ---------- */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 20px 22px;
+    }
+
+    .card-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .tag {
+      display: inline-block;
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-deep);
+      white-space: nowrap;
+    }
+
+    .tag.good {
+      background: var(--good-soft);
+      color: var(--good);
+    }
+
+    .tag.mono {
+      font-family: var(--font-mono);
+    }
+
+    .mono {
+      font-family: var(--font-mono);
+      font-size: 0.92em;
+      background: var(--accent-soft);
+      color: var(--accent-deep);
+      padding: 2px 7px;
+      border-radius: 5px;
+      white-space: nowrap;
+    }
+
+    /* Signature motif: technical name -> Vietnamese business name */
+    .motif {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .motif .from {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--muted);
+      background: transparent;
+      border: 1px dashed var(--line);
+      border-radius: 6px;
+      padding: 4px 9px;
+    }
+
+    .motif .arrow {
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 15px;
+    }
+
+    .motif .to {
+      font-size: 14.5px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    /* ---------- Controls (viewport-fixed, independent of stage scale) ---------- */
+    .controls {
+      position: fixed;
+      right: 18px;
+      bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      z-index: 10;
+    }
+
+    .controls button {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 16px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 2px 8px rgba(15, 36, 64, 0.1);
+    }
+
+    .controls button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .controls button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .counter {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hint {
+      position: fixed;
+      left: 18px;
+      bottom: 22px;
+      font-size: 11.5px;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      z-index: 10;
+    }
+
+    .progress {
+      position: fixed;
+      left: 0;
+      bottom: 0;
+      height: 4px;
+      width: 100%;
+      background: transparent;
+      z-index: 10;
+    }
+
+    .progress .bar {
+      height: 100%;
+      width: 0;
+      background: var(--accent);
+      transition: width 0.28s ease;
+    }
+
+    .click-zone {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 9%;
+      z-index: 5;
+      cursor: pointer;
+    }
+
+    .click-zone.prev {
+      left: 0;
+    }
+
+    .click-zone.next {
+      right: 0;
+    }
+
+    /* =========================================================
+     Slide 1 — Cover
+     ========================================================= */
+    .cover {
+      justify-content: center;
+      gap: 26px;
+    }
+
+    .cover .kicker {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent-deep);
+    }
+
+    .cover h1 {
+      font-size: 66px;
+      font-weight: 800;
+      line-height: 1.06;
+      letter-spacing: -0.015em;
+      max-width: 17ch;
+      text-wrap: balance;
+    }
+
+    .cover h1 .hl {
+      color: var(--accent);
+    }
+
+    .cover .tagline {
+      font-size: 20px;
+      color: var(--muted);
+      max-width: 56ch;
+      line-height: 1.5;
+    }
+
+    .cover .motifs {
+      display: flex;
+      gap: 28px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+
+    .cover .meta {
+      position: absolute;
+      left: 64px;
+      bottom: 40px;
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .cover .meta .dot {
+      color: var(--line);
+    }
+
+    .cover-rule {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 6px;
+      background: linear-gradient(90deg, var(--accent-deep), var(--accent) 55%, var(--accent-soft));
+    }
+
+    /* =========================================================
+     Slide 2 — Problem (3 Core Pain Points)
+     ========================================================= */
+    .problem-grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .p-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 16px 18px;
+      border-top: 4px solid var(--accent);
+      background: var(--surface);
+    }
+
+    .idx-tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent-deep);
+      background: var(--accent-soft);
+      padding: 2px 8px;
+      border-radius: 4px;
+      width: fit-content;
+    }
+
+    .p-card .card-title {
+      font-size: 15.5px;
+      font-weight: 800;
+      line-height: 1.3;
+      color: var(--ink);
+      margin-bottom: 0;
+    }
+
+    .p-sub {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--bad);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .p-card .note {
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.45;
+      flex: 1;
+    }
+
+    .p-foot {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--good);
+      background: var(--good-soft);
+      border-radius: 6px;
+      padding: 6px 10px;
+      line-height: 1.35;
+    }
+
+    .verdict {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bad-soft);
+      border: 1px solid #EDD2CC;
+      color: var(--bad);
+      border-radius: 9px;
+      padding: 10px 16px;
+      font-size: 13.5px;
+      font-weight: 600;
+    }
+
+    /* =========================================================
+     Slide 3 — Solution overview
+     ========================================================= */
+    .flow-duo {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .flow-card {
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--accent);
+      border-radius: 10px;
+      background: var(--surface);
+      padding: 18px 20px;
+    }
+
+    .flow-card .badge {
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent-deep);
+      background: var(--accent-soft);
+      border-radius: 999px;
+      padding: 3px 11px;
+    }
+
+    .flow-card h3 {
+      font-size: 20px;
+      font-weight: 800;
+      margin: 10px 0 12px;
+    }
+
+    .mini-pipe {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+      font-size: 13.5px;
+      font-weight: 500;
+    }
+
+    .mini-pipe .step {
+      background: var(--ground);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 6px 10px;
+      color: var(--ink);
+    }
+
+    .mini-pipe .sep {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .conv-band {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--ground);
+      padding: 13px 20px;
+      font-size: 14.5px;
+    }
+
+    .conv-band .lead {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .conv-band .item b {
+      display: block;
+      font-size: 14.5px;
+    }
+
+    .conv-band .item span {
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    .principle-row {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+    }
+
+    .principle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14.5px;
+      font-weight: 600;
+      color: var(--accent-deep);
+    }
+
+    .principle .glyph {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--accent-soft);
+      color: var(--accent-deep);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    /* =========================================================
+     Slide 4 — Flow 1 pipeline (real sequence -> numbered)
+     ========================================================= */
+    .pipeline {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .pstep {
+      flex: 1;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      padding: 14px 14px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .pstep .num {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .pstep h4 {
+      font-size: 15.5px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .pstep p {
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .pstep .code {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--accent-deep);
+      background: var(--accent-soft);
+      border-radius: 5px;
+      padding: 3px 6px;
+      width: fit-content;
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .psep {
+      align-self: center;
+      color: var(--accent);
+      font-size: 17px;
+      font-weight: 700;
+      padding: 0 6px;
+    }
+
+    .safety-strip {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--good-soft);
+      border: 1px solid #CBE8D9;
+      border-radius: 9px;
+      color: var(--good);
+      padding: 11px 16px;
+      font-size: 14.5px;
+      font-weight: 600;
+    }
+
+    .safety-strip .glyph {
+      font-weight: 800;
+    }
+
+    /* =========================================================
+     Slide 5 — Flow 2 + guardrails (the one dark moment)
+     ========================================================= */
+    .f2-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.08fr;
+      gap: 22px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .vpipe {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .vstep {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 9px 14px;
+      background: var(--surface);
+      font-size: 13.5px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .vstep b {
+      font-size: 14px;
+    }
+
+    .vstep span {
+      color: var(--muted);
+      font-size: 12.5px;
+    }
+
+    .vstep.io {
+      background: var(--accent-soft);
+      border-color: #CBDCF5;
+      font-weight: 600;
+    }
+
+    .varrow {
+      text-align: center;
+      color: var(--accent);
+      font-weight: 700;
+      line-height: 1;
+      font-size: 14px;
+    }
+
+    .sql-panel {
+      background: var(--code-bg);
+      border-radius: 12px;
+      padding: 20px 24px 18px;
+      color: var(--code-ink);
+      display: flex;
+      flex-direction: column;
+      gap: 13px;
+      box-shadow: 0 10px 30px rgba(14, 33, 56, 0.25);
+    }
+
+    .sql-panel .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--code-blue);
+    }
+
+    .sql-panel .panel-title .engine {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      letter-spacing: 0;
+      text-transform: none;
+      color: var(--code-ink);
+      opacity: 0.75;
+    }
+
+    .sql-line {
+      font-family: var(--font-mono);
+      font-size: 13.5px;
+      line-height: 1.6;
+    }
+
+    .sql-line .kw {
+      color: var(--code-blue);
+      font-weight: 600;
+    }
+
+    .sql-line .ok-kw {
+      color: var(--code-good);
+      font-weight: 600;
+    }
+
+    .sql-line .blocked {
+      color: var(--code-bad);
+      text-decoration: line-through;
+      opacity: 0.85;
+    }
+
+    .guard-meta {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .guard-chip {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      border: 1px solid rgba(143, 185, 255, 0.35);
+      border-radius: 7px;
+      padding: 5px 10px;
+      color: var(--code-ink);
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .guard-chip .ok {
+      color: var(--code-good);
+      font-weight: 600;
+    }
+
+    .f2-note {
+      background: var(--accent-soft);
+      border: 1px solid #CBDCF5;
+      border-radius: 9px;
+      color: var(--accent-deep);
+      padding: 11px 16px;
+      font-size: 14.5px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    /* =========================================================
+     Slide 6 — Architecture
+     ========================================================= */
+    .layers {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex: 1;
+      justify-content: center;
+    }
+
+    .layer {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .layer .head {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 340px;
+    }
+
+    .layer .head b {
+      font-size: 17px;
+      color: var(--ink);
+    }
+
+    .layer .head span {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .layer .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .layer .chips .chip {
+      font-size: 13px;
+      font-weight: 500;
+      border: 1px solid var(--line);
+      background: var(--ground);
+      border-radius: 6px;
+      padding: 5px 12px;
+      color: var(--ink);
+    }
+
+    .layer-gap {
+      text-align: center;
+      color: var(--accent);
+      font-size: 14px;
+      line-height: 1;
+      padding: 0;
+    }
+
+    /* =========================================================
+     Slide 7 — Feasibility: stat tiles + evidence
+     ========================================================= */
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      padding: 16px 18px 14px;
+    }
+
+    .stat .value {
+      font-size: 44px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat .value small {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+
+    .stat .label {
+      margin-top: 7px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .evidence-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 16px;
+    }
+
+    .ev {
+      display: flex;
+      gap: 11px;
+      align-items: flex-start;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface);
+      padding: 12px 14px;
+    }
+
+    .ev .mark {
+      flex: none;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--good-soft);
+      color: var(--good);
+      font-size: 12px;
+      font-weight: 800;
+      margin-top: 1px;
+    }
+
+    .ev b {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 2px;
+    }
+
+    .ev p {
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    /* =========================================================
+     Slide 8 — Roadmap (3 horizons — real order)
+     ========================================================= */
+    .roadmap {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 18px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .horizon {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .horizon.now {
+      border-top: 4px solid var(--accent);
+    }
+
+    .horizon.next {
+      border-top: 4px solid #7FA6DE;
+    }
+
+    .horizon.v2 {
+      border-top: 4px solid var(--line);
+    }
+
+    .horizon .when {
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .horizon.now .when {
+      color: var(--accent-deep);
+    }
+
+    .horizon h3 {
+      font-size: 18px;
+      font-weight: 800;
+      line-height: 1.25;
+      text-wrap: balance;
+    }
+
+    .horizon ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+
+    .horizon li {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+      padding-left: 14px;
+      position: relative;
+    }
+
+    .horizon li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 8px;
+      width: 6px;
+      height: 6px;
+      border-radius: 2px;
+      background: var(--accent);
+    }
+
+    .horizon.v2 li::before {
+      background: var(--line);
+    }
+
+    .horizon li b {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    /* =========================================================
+     Slide 9 — Close
+     ========================================================= */
+    .close .content {
+      gap: 20px;
+    }
+
+    .value-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+
+    .value-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      padding: 20px 22px;
+    }
+
+    .value-card .idx {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+
+    .value-card h3 {
+      font-size: 17.5px;
+      font-weight: 800;
+      line-height: 1.3;
+      margin-bottom: 8px;
+      text-wrap: balance;
+    }
+
+    .value-card p {
+      font-size: 13.5px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .thanks {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      background: var(--accent-deep);
+      border-radius: 12px;
+      color: #FFFFFF;
+      padding: 22px 28px;
+    }
+
+    .thanks .big {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+    }
+
+    .thanks .sub {
+      font-size: 13.5px;
+      opacity: 0.82;
+      margin-top: 4px;
+    }
+
+    .thanks .motif .from {
+      color: #C8D9F2;
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .thanks .motif .arrow {
+      color: #FFFFFF;
+    }
+
+    .thanks .motif .to {
+      color: #FFFFFF;
+    }
+
+    /* ---------- Reduced motion ---------- */
+    @media (prefers-reduced-motion: reduce) {
+
+      .slide,
+      .slide.active {
+        transition: none;
+      }
+
+      .progress .bar {
+        transition: none;
+      }
+    }
+
+    /* =========================================================
+       Print / PDF Export Configuration
+       Optimized for 16:9 Landscape PDF Export (Chrome, Edge, Safari, Headless/Puppeteer)
+       ========================================================= */
+    @page {
+      size: 1280px 720px;
+      margin: 0;
+    }
+
+    @media print {
+      *,
+      *::before,
+      *::after {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+      }
+
+      html,
+      body {
+        width: 1280px !important;
+        height: auto !important;
+        min-height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #FFFFFF !important;
+        overflow: visible !important;
+      }
+
+      .stage-root {
+        position: static !important;
+        display: block !important;
+        width: 1280px !important;
+        height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        inset: auto !important;
+        background: transparent !important;
+      }
+
+      .stage {
+        position: static !important;
+        width: 1280px !important;
+        height: auto !important;
+        transform: none !important;
+        box-shadow: none !important;
+        background: transparent !important;
+        overflow: visible !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+
+      .slide {
+        position: relative !important;
+        width: 1280px !important;
+        height: 720px !important;
+        min-height: 720px !important;
+        max-height: 720px !important;
+        box-sizing: border-box !important;
+        padding: 50px 64px 46px !important;
+        margin: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        transform: none !important;
+        overflow: hidden !important;
+        background: var(--surface) !important;
+        page-break-before: auto !important;
+        page-break-inside: avoid !important;
+        page-break-after: always !important;
+        break-before: auto !important;
+        break-inside: avoid !important;
+        break-after: page !important;
+      }
+
+      .slide:last-of-type {
+        page-break-after: avoid !important;
+        break-after: avoid !important;
+      }
+
+      .card,
+      .flow-card,
+      .pstep,
+      .vstep,
+      .layer,
+      .stat,
+      .ev,
+      .horizon,
+      .value-card {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+
+      .sql-panel {
+        background: var(--code-bg) !important;
+        color: var(--code-ink) !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+
+      .controls,
+      .hint,
+      .progress,
+      .click-zone {
+        display: none !important;
+        visibility: hidden !important;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="stage-root">
+    <main class="stage" id="stage" aria-live="polite">
+
+      <!-- ============ Slide 1 — Cover ============ -->
+      <section class="slide cover active" aria-label="Trang bìa">
+        <div class="cover-rule"></div>
+        <p class="kicker">VinUni AI20K Build Phase · Capstone Defense · Cohort 3</p>
+        <h1>AI <span class="hl">Semantic Layer</span> Agent</h1>
+        <p class="tagline">Biến cấu trúc dữ liệu kỹ thuật thành ngôn ngữ kinh doanh thống nhất — Truy vấn an toàn, chuẩn
+          xác 100%.</p>
+        <div class="motifs" aria-label="Ví dụ chuyển tên kỹ thuật sang tên nghiệp vụ">
+          <span class="motif"><span class="from">usr_tbl_01</span><span class="arrow">→</span><span class="to">Người
+              dùng</span></span>
+          <span class="motif"><span class="from">amt_vat_inc</span><span class="arrow">→</span><span class="to">Thành
+              tiền (gồm VAT)</span></span>
+          <span class="motif"><span class="from">ord_sts_cd</span><span class="arrow">→</span><span class="to">Trạng
+              thái đơn hàng</span></span>
+        </div>
+        <p class="meta">
+          <span>Đề tài: AI Semantic Layer Agent</span><span class="dot">·</span><span>Nhóm: P-069</span><span
+            class="dot">·</span><span>Tháng 8 / 2026</span>
+        </p>
+      </section>
+
+      <!-- ============ Slide 2 — Problem ============ -->
+      <section class="slide" aria-label="Bài toán">
+        <div class="eyebrow-row"><span class="eyebrow">01 · Vấn đề thực tế</span><span class="slide-sec">02 / 10</span>
+        </div>
+        <h2>3 Nỗi đau lớn khiến doanh nghiệp <span class="hl">tắc nghẽn dữ liệu</span></h2>
+        <div class="content">
+          <div class="problem-grid-3">
+            <div class="card p-card">
+              <div class="idx-tag">Nỗi đau #1 · Người dùng</div>
+              <div class="card-title">“Tôi không biết SQL nhưng cần số liệu ngay”</div>
+              <p class="p-sub">Tắc nghẽn tự phục vụ (Self-serve)</p>
+              <p class="note">Quy trình chuẩn đòi hỏi kỹ sư dựng Semantic Layer thủ công (dbt, LookML) cả tuần. Người
+                làm kinh doanh không thể tự lấy số, phụ thuộc 100% vào IT.</p>
+              <div class="p-foot">👉 AI tự động dựng Semantic Layer ngay khi kết nối DB.</div>
+            </div>
+            <div class="card p-card">
+              <div class="idx-tag">Nỗi đau #2 · Tổ chức</div>
+              <div class="card-title">“Mỗi phòng ban tính số liệu một kiểu khác nhau”</div>
+              <p class="p-sub">Thiếu một nguồn chuẩn duy nhất</p>
+              <p class="note">Cùng chỉ số "Doanh thu" hay "Active User", Marketing tính một đằng, Kế toán tính một nẻo.
+                Họp giao ban mất thời gian tranh cãi xem số của ai đúng.</p>
+              <div class="p-foot">👉 Định nghĩa công thức chỉ số tập trung 1 lần, dùng chung.</div>
+            </div>
+            <div class="card p-card">
+              <div class="idx-tag">Nỗi đau #3 · Thị trường</div>
+              <div class="card-title">“Doanh nghiệp vừa &amp; nhỏ không nuôi nổi Data Team”</div>
+              <p class="p-sub">Rào cản chi phí &amp; nhân sự</p>
+              <p class="note">Các công cụ như Looker, Cube.dev vẫn cần kỹ sư viết code. Doanh nghiệp SME không đủ ngân
+                sách thuê Data Engineer nhưng vẫn cần BI bài bản.</p>
+              <div class="p-foot">👉 Kết nối DB là có ngay giải pháp BI hoàn chỉnh.</div>
+            </div>
+          </div>
+          <div class="verdict">🎯 AI Semantic Layer Agent giải quyết trọn vẹn khoảng trống này: Tự động hóa tạo Semantic
+            Layer — Không cần SQL, chuẩn xác 100% và không cần Data Team cồng kềnh.</div>
+        </div>
+      </section>
+
+      <!-- ============ Slide 3 — Solution overview ============ -->
+      <section class="slide" aria-label="Giải pháp tổng quan">
+        <div class="eyebrow-row"><span class="eyebrow">02 · Giải pháp tổng quan</span><span class="slide-sec">03 /
+            10</span></div>
+        <h2>Một Nền tảng AI Agent — <span class="hl">Hai luồng xử lý</span> khép kín</h2>
+        <div class="content">
+          <div class="flow-duo">
+            <div class="flow-card">
+              <span class="badge">Luồng 1 · Xây dựng &amp; Quản trị</span>
+              <h3>Tự động tạo Semantic Layer</h3>
+              <div class="mini-pipe">
+                <span class="step">Đọc schema DB</span><span class="sep">→</span>
+                <span class="step">Dựng Canonical Model</span><span class="sep">→</span>
+                <span class="step">AI đề xuất Metric</span><span class="sep">→</span>
+                <span class="step">Con người duyệt</span>
+              </div>
+            </div>
+            <div class="flow-card">
+              <span class="badge">Luồng 2 · Khai thác &amp; Truy vấn (Live DB)</span>
+              <h3>Truy vấn Tự nhiên Chuẩn xác 100%</h3>
+              <div class="mini-pipe">
+                <span class="step">Hỏi tiếng Việt tự nhiên</span><span class="sep">→</span>
+                <span class="step">Ánh xạ Semantic Layer</span><span class="sep">→</span>
+                <span class="step">Biên dịch SQL an toàn</span><span class="sep">→</span>
+                <span class="step">Trả kết quả tức thì</span>
+              </div>
+            </div>
+          </div>
+          <div class="conv-band">
+            <span class="lead">Lớp hội thoại thông minh</span>
+            <span class="item"><b>Bộ điều phối AI</b><span>Phân loại ý định: chào hỏi thông thường hay cần gợi ý chỉ số
+                kinh doanh</span></span>
+            <span class="item"><b>Trình hướng dẫn từng bước (Wizard)</b><span>Tương tác hỏi đáp để làm rõ câu hỏi mơ hồ
+                trước khi truy vấn</span></span>
+          </div>
+          <div class="principle-row">
+            <span class="principle"><span class="glyph">1</span>Con người kiểm duyệt (HITL) — AI đề xuất, chuyên viên
+              phê duyệt &amp; quản trị phiên bản</span>
+            <span class="principle"><span class="glyph">2</span>Chuẩn xác tuyệt đối (Deterministic) — SQL sinh từ
+              Semantic Layer chuẩn, không để AI đoán mò</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Slide 4 — Flow 1 ============ -->
+      <section class="slide" aria-label="Luồng 1 — Tự động tạo và Quản trị Semantic Layer">
+        <div class="eyebrow-row"><span class="eyebrow">03 · Luồng 1 — Xây dựng &amp; Quản trị</span><span
+            class="slide-sec">04 / 10</span></div>
+        <h2>Từ Database thô đến <span class="hl">Semantic Layer chuẩn chỉnh</span></h2>
+        <div class="content">
+          <div class="pipeline">
+            <div class="pstep">
+              <span class="num">01</span>
+              <h4>Nạp cấu trúc DB</h4>
+              <p>Quét schema Live DB hoặc phân tích file SQL Dump DDL (PostgreSQL, MySQL, SQLite).</p>
+              <span class="code">SQLAlchemy · Dump Parser</span>
+            </div>
+            <span class="psep">→</span>
+            <div class="pstep">
+              <span class="num">02</span>
+              <h4>Dựng Canonical Model</h4>
+              <p>AI gán ngữ cảnh tiếng Việt, chuẩn hóa thực thể, nhận diện Time Dimension &amp; nối bảng.</p>
+              <span class="code">canonical_relationships</span>
+            </div>
+            <span class="psep">→</span>
+            <div class="pstep">
+              <span class="num">03</span>
+              <h4>AI đề xuất Metrics</h4>
+              <p>Tự động sinh sẵn công thức chỉ số cốt lõi ban đầu (Doanh thu, Đơn hàng, Tăng trưởng...).</p>
+              <span class="code">on_demand_metric_suggest</span>
+            </div>
+            <span class="psep">→</span>
+            <div class="pstep">
+              <span class="num">04</span>
+              <h4>Kiểm duyệt &amp; Lưu vết</h4>
+              <p>Chuyên viên chỉnh sửa, phê duyệt chỉ số, tự động lưu vết lịch sử phiên bản thay đổi.</p>
+              <span class="code">metric_versions</span>
+            </div>
+            <span class="psep">→</span>
+            <div class="pstep">
+              <span class="num">05</span>
+              <h4>Xuất file tích hợp</h4>
+              <p>Đóng gói Semantic Layer sẵn sàng tích hợp với các công cụ BI (dbt, Metabase, PowerBI).</p>
+              <span class="code">JSON · YAML · Metabase</span>
+            </div>
+          </div>
+          <div class="safety-strip"><span class="glyph">✓</span> An toàn dữ liệu: Hệ thống chỉ đọc cấu trúc bảng/cột —
+            Tuyệt đối không đọc dữ liệu khách hàng ở bước này.</div>
+        </div>
+      </section>
+
+      <!-- ============ Slide 5 — Flow 2 ============ -->
+      <section class="slide" aria-label="Luồng 2 — Truy vấn Ngôn ngữ Tự nhiên Chuẩn xác & An toàn">
+        <div class="eyebrow-row"><span class="eyebrow">04 · Luồng 2 — Truy vấn Tự nhiên Chuẩn xác</span><span
+            class="slide-sec">05 / 10</span></div>
+        <h2>Truy vấn tự nhiên <span class="hl">chuẩn xác 100%</span> — An toàn tuyệt đối</h2>
+        <div class="content">
+          <div class="f2-grid">
+            <div class="vpipe">
+              <div class="vstep io"><b>01. Đặt câu hỏi tự nhiên</b><span>Hỏi bằng tiếng Việt qua Chat &amp;
+                  Wizard</span></div>
+              <span class="varrow">▼</span>
+              <div class="vstep"><b>02. Ánh xạ Chỉ số &amp; Chiều</b><span>AI gợi ý hoặc chọn trên Metric
+                  Explorer</span></div>
+              <span class="varrow">▼</span>
+              <div class="vstep"><b>03. Tự động giải nối bảng</b><span>SemanticQueryCompiler tìm đường JOIN tối
+                  ưu</span></div>
+              <span class="varrow">▼</span>
+              <div class="vstep"><b>04. Biên dịch câu lệnh SQL</b><span>Tự động định dạng PostgreSQL / MySQL /
+                  SQLite</span></div>
+              <span class="varrow">▼</span>
+              <div class="vstep io"><b>05. Thực thi Live DB</b><span>Chạy Read-Only, hiển thị bảng &amp; biểu đồ tức
+                  thì</span></div>
+            </div>
+            <div class="sql-panel">
+              <div class="panel-title">Khung bảo vệ an toàn tự động <span class="engine">sqlglot</span></div>
+              <div class="sql-line"><span class="ok-kw">SELECT</span> p.ten_san_pham, <span
+                  class="kw">SUM</span>(o.tong_tien) <span class="kw">AS</span> doanh_thu</div>
+              <div class="sql-line"><span class="kw">FROM</span> don_hang o <span class="kw">JOIN</span> chi_tiet_don oi
+                ON o.id = oi.don_hang_id</div>
+              <div class="sql-line"><span class="kw">WHERE</span> o.trang_thai = <span class="ok-kw">'HOAN_THANH'</span>
+                <span class="kw">LIMIT</span> 100;</div>
+              <div class="sql-line"><span class="blocked">INSERT · UPDATE · DELETE · DROP · ALTER · TRUNCATE</span> — Bị
+                chặn đứng 100%</div>
+              <div class="guard-meta">
+                <span class="guard-chip"><span class="ok">✓</span> Chỉ cho phép SELECT</span>
+                <span class="guard-chip"><span class="ok">✓</span> Giới hạn trần 100 dòng</span>
+                <span class="guard-chip"><span class="ok">✓</span> Giới hạn thời gian 15s</span>
+                <span class="guard-chip"><span class="ok">✓</span> Mã hóa kết nối DB</span>
+              </div>
+            </div>
+          </div>
+          <div class="f2-note">AI không tự viết SQL lúc truy vấn — Câu lệnh sinh từ công thức chuẩn và quan hệ đã duyệt
+            → Loại trừ 100% rủi ro ảo giác, sai số và thay đổi dữ liệu.</div>
+        </div>
+      </section>
+
+      <!-- ============ Slide 6 — Architecture ============ -->
+      <section class="slide" aria-label="Kiến trúc hệ thống">
+        <div class="eyebrow-row"><span class="eyebrow">05 · Kiến trúc hệ thống</span><span class="slide-sec">06 /
+            10</span></div>
+        <h2>Kiến trúc <span class="hl">4 tầng</span></h2>
+        <div class="content">
+          <div class="layers">
+            <div class="layer">
+              <div class="head"><b>1. Giao diện người dùng — Next.js</b><span>5 màn hình làm việc chuyên biệt</span>
+              </div>
+              <div class="chips">
+                <span class="chip">Mô hình dữ liệu</span>
+                <span class="chip">Danh mục chỉ số</span>
+                <span class="chip">Trình truy vấn dữ liệu</span>
+                <span class="chip">Phòng Studio AI</span>
+                <span class="chip">Xuất file BI</span>
+              </div>
+            </div>
+            <div class="layer-gap">▼</div>
+            <div class="layer">
+              <div class="head"><b>2. Cổng dịch vụ API — FastAPI</b><span>25+ cổng xử lý nhanh, bảo mật</span></div>
+              <div class="chips">
+                <span class="chip">Đăng nhập JWT &amp; Google</span>
+                <span class="chip">Phân quyền theo nhóm</span>
+                <span class="chip">Kiểm soát tần suất AI</span>
+                <span class="chip">Thông báo thời gian thực</span>
+              </div>
+            </div>
+            <div class="layer-gap">▼</div>
+            <div class="layer">
+              <div class="head"><b>3. Bộ não điều phối AI — LangGraph</b><span>Có chuyên viên kiểm duyệt (HITL)</span>
+              </div>
+              <div class="chips">
+                <span class="chip">Quy trình dịch nghĩa AI</span>
+                <span class="chip">Điều phối chat</span>
+                <span class="chip">Hướng dẫn truy vấn</span>
+                <span class="chip">Trình biên dịch SQL</span>
+              </div>
+            </div>
+            <div class="layer-gap">▼</div>
+            <div class="layer">
+              <div class="head"><b>4. Tầng dữ liệu &amp; Lưu trữ</b><span>Kho lưu trữ Metadata &amp; Cơ sở dữ liệu
+                  nguồn</span></div>
+              <div class="chips">
+                <span class="chip">Lưu từ điển &amp; lịch sử phiên bản chỉ số</span>
+                <span class="chip">DB nguồn: Chỉ đọc dữ liệu an toàn</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Slide 7 — Feasibility ============ -->
+      <section class="slide" aria-label="Tính khả thi">
+        <div class="eyebrow-row"><span class="eyebrow">06 · Tính khả thi &amp; Thực nghiệm</span><span
+            class="slide-sec">07 / 10</span></div>
+        <h2>Sản phẩm <span class="hl">hoàn thiện 100%</span> — Kiểm chứng thực tế</h2>
+        <div class="content">
+          <div class="kpi-row">
+            <div class="stat">
+              <div class="value">12<small>/12</small></div>
+              <div class="label">Tính năng cốt lõi hoàn thành (F-01 → F-12)</div>
+            </div>
+            <div class="stat">
+              <div class="value">4<small>/4</small></div>
+              <div class="label">Giai đoạn phát triển Backend · AI · Web · QA</div>
+            </div>
+            <div class="stat">
+              <div class="value">25<small>+</small></div>
+              <div class="label">Cổng API hoàn thiện và kiểm thử tự động</div>
+            </div>
+            <div class="stat">
+              <div class="value">35</div>
+              <div class="label">Bài kiểm thử logic đánh giá chất lượng</div>
+            </div>
+          </div>
+          <div class="evidence-grid">
+            <div class="ev"><span class="mark">✓</span>
+              <div><b>Đo lường chất lượng độc lập</b>
+                <p>Bộ dữ liệu mẫu chuẩn và thuật toán chấm điểm độ tương đồng tiếng Việt tự động, không phụ thuộc cảm
+                  tính của AI.</p>
+              </div>
+            </div>
+            <div class="ev"><span class="mark">✓</span>
+              <div><b>Bảo mật nhiều lớp nghiêm ngặt</b>
+                <p>Mã hóa chuỗi kết nối database trong RAM, phân quyền chặt chẽ giữa Quản trị viên, Trưởng nhóm dữ liệu
+                  và Thành viên.</p>
+              </div>
+            </div>
+            <div class="ev"><span class="mark">✓</span>
+              <div><b>Chất lượng mã nguồn chuẩn chỉnh</b>
+                <p>Kiểm thử tự động toàn diện từ dịch vụ AI đến API và cơ sở dữ liệu; quản lý thay đổi schema an toàn
+                  với Alembic.</p>
+              </div>
+            </div>
+            <div class="ev"><span class="mark">✓</span>
+              <div><b>Sẵn sàng ứng dụng thực tế</b>
+                <p>Tự động phát hiện chỉ số trùng lặp, thông báo kết quả tức thì, hỗ trợ làm việc nhóm đa người dùng.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Slide 8 — Roadmap ============ -->
+      <section class="slide" aria-label="Định hướng phát triển">
+        <div class="eyebrow-row"><span class="eyebrow">07 · Định hướng phát triển</span><span class="slide-sec">08 /
+            10</span></div>
+        <h2>Lộ trình phát triển: <span class="hl">Rõ ràng</span> &amp; Thực tế</h2>
+        <div class="content">
+          <div class="roadmap">
+            <div class="horizon now">
+              <span class="when">Đang triển khai</span>
+              <h3>Hoàn thiện Mô hình Ngữ nghĩa</h3>
+              <ul>
+                <li><b>Quy trình 4 giai đoạn chuẩn:</b> Khám phá → Kiểm duyệt → Định nghĩa chỉ số → Truy vấn trực tiếp
+                </li>
+                <li><b>Tách biệt rõ ràng</b> giữa cấu trúc bảng vật lý và công thức chỉ số kinh doanh</li>
+                <li><b>AI phát hiện trùng lặp:</b> Cảnh báo ngay khi công thức mới bị trùng hoặc mâu thuẫn với chỉ số cũ
+                </li>
+              </ul>
+            </div>
+            <div class="horizon next">
+              <span class="when">Giai đoạn tiếp theo</span>
+              <h3>Mở rộng Khả năng Đánh giá</h3>
+              <ul>
+                <li><b>Mở rộng bộ dữ liệu chuẩn</b> sang nhiều ngành nghề mới (Tài chính, Y tế, Bán lẻ ngoài TMĐT)</li>
+                <li><b>Cơ chế đánh giá kết hợp:</b> Đánh giá logic tự động kết hợp chuyên gia kiểm định</li>
+                <li><b>Thiết lập chuẩn chất lượng:</b> Đảm bảo độ chính xác trên 90% trước khi triển khai thực tế</li>
+              </ul>
+            </div>
+            <div class="horizon v2">
+              <span class="when">Tầm nhìn tương lai</span>
+              <h3>Hệ sinh thái Tích hợp Mở rộng</h3>
+              <ul>
+                <li><b>Đồng bộ tự động lên công cụ BI:</b> Đẩy từ điển dữ liệu lên Metabase, dbt Cloud qua Webhook</li>
+                <li><b>Truy vấn liên cơ sở dữ liệu:</b> Ghép nối và truy vấn an toàn giữa nhiều database khác nhau</li>
+                <li><b>Tự động lập hồ sơ dữ liệu:</b> Thống kê số lượng dòng, độ phủ dữ liệu định kỳ</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Slide 9 — Value Proposition ============ -->
+      <section class="slide" aria-label="Giá trị cốt lõi">
+        <div class="eyebrow-row"><span class="eyebrow">08 · Giá trị cốt lõi</span><span class="slide-sec">09 / 10</span>
+        </div>
+        <h2>3 Giá trị cốt lõi <span class="hl">mang lại</span></h2>
+        <div class="content">
+          <div class="value-grid">
+            <div class="value-card">
+              <div class="idx">01</div>
+              <h3>Dữ liệu tự phục vụ — Không cần SQL</h3>
+              <p>Người làm kinh doanh lấy số liệu tức thì qua giao diện trực quan &amp; trợ lý AI — không còn cảnh xếp
+                hàng chờ đợi IT.</p>
+            </div>
+            <div class="value-card">
+              <div class="idx">02</div>
+              <h3>Một nguồn chuẩn duy nhất (Single Source of Truth)</h3>
+              <p>Chỉ số cốt lõi định nghĩa tập trung 1 lần, cả công ty dùng chung — chấm dứt hoàn toàn tình trạng mỗi
+                phòng ban một con số.</p>
+            </div>
+            <div class="value-card">
+              <div class="idx">03</div>
+              <h3>Xóa bỏ rào cản chi phí cho SME</h3>
+              <p>Chỉ cần kết nối database là AI tự tạo Semantic Layer — doanh nghiệp vừa và nhỏ có ngay hệ thống BI
+                chuẩn chỉnh mà không cần thuê Data Team đắt đỏ.</p>
+            </div>
+          </div>
+          <div class="verdict">🎯 AI Semantic Layer Agent mở khóa tiềm năng dữ liệu toàn diện: Tự phục vụ tức thì —
+            Chuẩn xác 100% — Tối ưu chi phí.</div>
+        </div>
+      </section>
+
+      <!-- ============ Slide 10 — Thank You & Demo ============ -->
+      <section class="slide cover thank-you" aria-label="Lời cảm ơn &amp; Q&amp;A">
+        <div class="cover-rule"></div>
+        <p class="kicker">VinUni AI20K Build Phase · Capstone Defense · Cohort 3</p>
+        <h1>Xin Chân Thành <span class="hl">Cảm Ơn!</span></h1>
+        <div class="motifs" aria-label="Thông điệp chuyển tiếp">
+          <span class="motif"><span class="from">Đề tài</span><span class="arrow">→</span><span class="to">AI Semantic
+              Layer Agent</span></span>
+          <span class="motif"><span class="from">Nhóm</span><span class="arrow">→</span><span
+              class="to">P-069</span></span>
+          <span class="motif"><span class="from">Bước tiếp theo</span><span class="arrow">→</span><span class="to">Live
+              Demo Sản phẩm</span></span>
+        </div>
+        <p class="meta">
+          <span>Sẵn sàng cho phần Trình diễn Sản phẩm Trực tiếp (Live Demo) &amp; Trả lời Câu hỏi (Q&amp;A)</span>
+        </p>
+      </section>
+
+      <div class="click-zone prev" id="zonePrev" title="Slide trước" role="button" tabindex="0"
+        aria-label="Slide trước"></div>
+      <div class="click-zone next" id="zoneNext" title="Slide sau" role="button" tabindex="0" aria-label="Slide sau">
+      </div>
+    </main>
+  </div>
+
+  <div class="progress" aria-hidden="true">
+    <div class="bar" id="bar"></div>
+  </div>
+  <p class="hint">← / → hoặc Space để chuyển slide</p>
+  <div class="controls">
+    <span class="counter" id="counter" aria-live="polite">01 / 10</span>
+    <button type="button" id="btnPrev" aria-label="Slide trước" title="Slide trước (←)">←</button>
+    <button type="button" id="btnNext" aria-label="Slide sau" title="Slide sau (→)">→</button>
+    <button type="button" id="btnPrint" aria-label="Xuất PDF" title="Xuất PDF / In (Ctrl+P)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+    </button>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+      var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+      var total = slides.length;
+      var idx = 0;
+
+      var m = window.location.hash.match(/^#(\d+)$/);
+      if (m) {
+        var n = parseInt(m[1], 10);
+        if (n >= 1 && n <= total) { idx = n - 1; }
+      }
+
+      var bar = document.getElementById("bar");
+      var counter = document.getElementById("counter");
+
+      function pad(x) { return (x < 10 ? "0" : "") + x; }
+
+      function render() {
+        slides.forEach(function (s, i) {
+          s.classList.toggle("active", i === idx);
+          s.setAttribute("aria-hidden", i === idx ? "false" : "true");
+        });
+        bar.style.width = (((idx + 1) / total) * 100) + "%";
+        counter.textContent = pad(idx + 1) + " / " + pad(total);
+        window.location.hash = String(idx + 1);
+      }
+
+      function go(n) {
+        idx = Math.max(0, Math.min(total - 1, n));
+        render();
+      }
+
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "PageDown" || e.key === " ") {
+          e.preventDefault(); go(idx + 1);
+        } else if (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp") {
+          e.preventDefault(); go(idx - 1);
+        } else if (e.key === "Home") {
+          e.preventDefault(); go(0);
+        } else if (e.key === "End") {
+          e.preventDefault(); go(total - 1);
+        }
+      });
+
+      document.getElementById("btnPrev").addEventListener("click", function () { go(idx - 1); });
+      document.getElementById("btnNext").addEventListener("click", function () { go(idx + 1); });
+      var btnPrint = document.getElementById("btnPrint");
+      if (btnPrint) {
+        btnPrint.addEventListener("click", function () {
+          window.print();
+        });
+      }
+      document.getElementById("zonePrev").addEventListener("click", function () { go(idx - 1); });
+      document.getElementById("zoneNext").addEventListener("click", function () { go(idx + 1); });
+
+      function zoneActivate(el, dir) {
+        el.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") { e.preventDefault(); go(idx + dir); }
+        });
+      }
+      zoneActivate(document.getElementById("zonePrev"), -1);
+      zoneActivate(document.getElementById("zoneNext"), 1);
+
+      /* Scale the fixed 1280x720 stage to fit the viewport (letterboxed). */
+      var stage = document.getElementById("stage");
+      function fit() {
+        var s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+        stage.style.transformOrigin = "center center";
+        stage.style.transform = "scale(" + s + ")";
+      }
+      window.addEventListener("resize", fit);
+      fit();
+      render();
+    })();
+  </script>
+
+</body>
+
+</html>

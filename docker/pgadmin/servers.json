@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Semantic Layer Dev DB",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "semantic_layer_dev",
+      "Username": "dev",
+      "PassFile": "/pgadmin4/pgpass",
+      "SSLMode": "prefer"
+    }
+  }
+}

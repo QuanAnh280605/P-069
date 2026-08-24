@@ -16,11 +16,11 @@ from src.models.db import (
     ChatSessionModel,
     ImportedSchemaModel,
     LiveTargetDbModel,
+    MetricVersionModel,
     OrganizationMemberModel,
     SemanticDatabaseModel,
     SemanticMetricModel,
     SemanticTableModel,
-    MetricVersionModel,
     UserModel,
 )
 from src.models.metric_definition import MetricDefinition

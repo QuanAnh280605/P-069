@@ -68,7 +68,7 @@ describe('WorkspaceSidebar', () => {
   };
 
   describe('navigation order and labels', () => {
-    it('renders nav items in reference order: AI Studio, Metrics Catalog, Metric Explorer, Export Playground', () => {
+    it('renders nav items in reference order: AI Studio, Metrics Catalog, Metric Explorer, Metrics Dashboard, Export Playground', () => {
       render(<WorkspaceSidebar {...defaultProps} />);
 
       const nav = screen.getByRole('navigation');
@@ -77,7 +77,8 @@ describe('WorkspaceSidebar', () => {
       expect(buttons[0]).toHaveTextContent('AI Studio');
       expect(buttons[1]).toHaveTextContent('Metrics Catalog');
       expect(buttons[2]).toHaveTextContent('Metric Explorer');
-      expect(buttons[3]).toHaveTextContent('Export Playground');
+      expect(buttons[3]).toHaveTextContent('Metrics Dashboard');
+      expect(buttons[4]).toHaveTextContent('Export Playground');
     });
   });
 
@@ -185,12 +186,13 @@ describe('WorkspaceSidebar', () => {
       const nav = screen.getByRole('navigation');
       const buttons = within(nav).getAllByRole('button');
 
-      expect(buttons).toHaveLength(5);
+      expect(buttons).toHaveLength(6);
       expect(buttons[0]).toHaveAttribute('aria-label', 'AI Studio');
       expect(buttons[1]).toHaveAttribute('aria-label', 'Metrics Catalog');
       expect(buttons[2]).toHaveAttribute('aria-label', 'Metric Explorer');
-      expect(buttons[3]).toHaveAttribute('aria-label', 'Export Playground');
-      expect(buttons[4]).toHaveAttribute('aria-label', 'Mở lịch sử trò chuyện');
+      expect(buttons[3]).toHaveAttribute('aria-label', 'Metrics Dashboard');
+      expect(buttons[4]).toHaveAttribute('aria-label', 'Export Playground');
+      expect(buttons[5]).toHaveAttribute('aria-label', 'Mở lịch sử trò chuyện');
     });
   });
 
@@ -209,6 +211,31 @@ describe('WorkspaceSidebar', () => {
       const nav = screen.getByRole('navigation');
       const studioButton = within(nav).getByRole('button', { name: 'AI Studio' });
       expect(studioButton).not.toHaveAttribute('aria-current');
+    });
+
+    it('renders the Metrics Dashboard nav item with the LayoutDashboard icon', () => {
+      render(<WorkspaceSidebar {...defaultProps} />);
+
+      const nav = screen.getByRole('navigation');
+      const dashboardButton = within(nav).getByRole('button', { name: 'Metrics Dashboard' });
+      expect(dashboardButton).toBeInTheDocument();
+      expect(dashboardButton.querySelector('svg')).toBeInTheDocument();
+    });
+
+    it('marks the dashboard view with aria-current="page" when active', () => {
+      render(<WorkspaceSidebar {...defaultProps} view="dashboard" />);
+
+      const nav = screen.getByRole('navigation');
+      const dashboardButton = within(nav).getByRole('button', { name: 'Metrics Dashboard' });
+      expect(dashboardButton).toHaveAttribute('aria-current', 'page');
+    });
+
+    it('shows the dashboard nav item in the collapsed rail', () => {
+      render(<WorkspaceSidebar {...defaultProps} collapsed={true} />);
+
+      const nav = screen.getByRole('navigation');
+      const dashboardButton = within(nav).getByRole('button', { name: 'Metrics Dashboard' });
+      expect(dashboardButton).toHaveAttribute('aria-label', 'Metrics Dashboard');
     });
   });
 

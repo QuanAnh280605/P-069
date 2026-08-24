@@ -37,6 +37,14 @@
 - [x] **Task 4.4:** Bộ Unit Tests cho 10 ORM Models và Pydantic Schemas (`tests/test_models/`).
 - [x] **Task 4.5:** Kiểm tra Linting và Formatting nghiêm ngặt với Ruff (`ruff check src/`).
 
+### 🟢 FEATURE: Metrics Visual Dashboard (v1.0 — Hoàn thành)
+- [x] **Singleton Dashboard Layout:** Bảng `dashboard_layouts` (một layout chung mỗi Semantic Database, khóa `uq_dashboard_layouts_db_id`) + migration Alembic `95ff234b973e`.
+- [x] **Strict Schemas & Optimistic Concurrency:** `DashboardWidgetConfig`/`DashboardLayout` schemas + service `save_dashboard_layout` đối chiếu `expected_version`, trả `409 dashboard_version_conflict` khi lệch version.
+- [x] **Singleton API:** `GET/PUT /api/v1/semantic/{db_id}/dashboard` (X-Organization-ID header, masking 404, 403, 422, 409).
+- [x] **Frontend Contracts & Engine:** `lib/dashboard.ts`, `dashboardApi.ts`, bounded widget query/chart engine (LIMIT ≤ 100, chỉ Live DB `query_supported`, không Text-to-SQL).
+- [x] **UI:** Widget config modal, cards, accessible sortable grid (dnd-kit), persistence, empty states, navigation & Explorer drill-down.
+- [x] **Verification:** Ruff sạch, pytest backend (1064 passed), ESLint 0 error, Vitest frontend (398 passed), `next build` thành công, round-trip migration trên SQLite cô lập.
+
 ---
 
 ## 2. Kế hoạch Duy trì & Định hướng Tương lai (Future Roadmap v2.0+)

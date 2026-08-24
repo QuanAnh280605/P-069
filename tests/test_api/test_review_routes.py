@@ -413,9 +413,7 @@ async def test_put_published_metric_returns_pending_version(client: AsyncClient,
     """Editing a published metric answers with the queued draft, live definition unchanged."""
     user = await async_session.get(UserModel, 1)
     sem_db = await _seed_pending_schema(async_session)
-    orders = await async_session.scalar(
-        select(SemanticTableModel).where(SemanticTableModel.db_id == sem_db.id)
-    )
+    orders = await async_session.scalar(select(SemanticTableModel).where(SemanticTableModel.db_id == sem_db.id))
     async_session.add(
         SemanticColumnModel(
             table_id=orders.id,

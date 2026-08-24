@@ -507,6 +507,7 @@ export class SemanticApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public readonly detail?: unknown,
   ) {
     super(message);
     this.name = 'SemanticApiError';
@@ -528,17 +529,27 @@ export async function semanticRequest<T>(path: string, init: RequestInit = {}): 
       ...init.headers,
     },
   });
-  if (!response.ok) throw new SemanticApiError(response.status, await semanticError(response));
+  if (!response.ok) throw await toSemanticApiError(response);
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
-async function semanticError(response: Response): Promise<string> {
+async function toSemanticApiError(response: Response): Promise<SemanticApiError> {
   const payload = (await response.json().catch(() => null)) as {
     detail?: unknown;
   } | null;
-  if (typeof payload?.detail === 'string') return payload.detail;
-  return payload?.detail ? JSON.stringify(payload.detail) : `Request failed (${response.status})`;
+  const detail = payload?.detail;
+  const message =
+    typeof detail === 'string'
+      ? detail
+      : detail
+        ? JSON.stringify(detail)
+        : `Request failed (${response.status})`;
+  return new SemanticApiError(response.status, message, detail);
+}
+
+async function semanticError(response: Response): Promise<string> {
+  return (await toSemanticApiError(response)).message;
 }
 
 function metricResponseToRecord(data: {

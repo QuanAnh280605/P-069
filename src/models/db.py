@@ -15,6 +15,7 @@ Includes tables:
   - metric_versions
   - chat_sessions
   - chat_messages
+  - dashboard_layouts
 """
 
 from datetime import datetime
@@ -44,6 +45,7 @@ __all__ = [
     "CanonicalRelationshipModel",
     "ChatMessageModel",
     "ChatSessionModel",
+    "DashboardLayoutModel",
     "ImportedSchemaModel",
     "LiveTargetDbModel",
     "MetricVersionModel",
@@ -306,6 +308,9 @@ class SemanticDatabaseModel(Base):
     chat_sessions: Mapped[list["ChatSessionModel"]] = relationship(
         "ChatSessionModel", back_populates="database", cascade="all, delete-orphan"
     )
+    dashboard_layout: Mapped["DashboardLayoutModel | None"] = relationship(
+        "DashboardLayoutModel", back_populates="database", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class SemanticTableModel(ReviewStateMixin, Base):
@@ -494,3 +499,23 @@ class MetricVersionModel(Base):
     metric: Mapped["SemanticMetricModel"] = relationship("SemanticMetricModel", back_populates="versions")
     changer: Mapped["UserModel | None"] = relationship("UserModel", foreign_keys=[changed_by])
     approver: Mapped["UserModel | None"] = relationship("UserModel", foreign_keys=[approved_by])
+
+
+class DashboardLayoutModel(Base):
+    """Singleton visual dashboard layout owned by one Semantic Database workspace."""
+
+    __tablename__ = "dashboard_layouts"
+    __table_args__ = (UniqueConstraint("db_id", name="uq_dashboard_layouts_db_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    db_id: Mapped[int] = mapped_column(Integer, ForeignKey("semantic_databases.id", ondelete="CASCADE"), nullable=False)
+    layout_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    updated_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    database: Mapped["SemanticDatabaseModel"] = relationship("SemanticDatabaseModel", back_populates="dashboard_layout")
+    updater: Mapped["UserModel | None"] = relationship("UserModel")

@@ -521,6 +521,91 @@ class SemanticQueryCompileResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Visual Dashboard (Singleton Layout Metadata)
+# ---------------------------------------------------------------------------
+
+
+DashboardChartType = Literal["kpi", "line", "area", "bar", "pie", "table"]
+DashboardWidgetWidth = Literal["third", "half", "full"]
+DashboardWidgetHeight = Literal["compact", "normal", "expanded"]
+
+
+class DashboardWidgetConfig(BaseModel):
+    """One persisted dashboard widget referencing approved semantic metadata."""
+
+    id: str = Field(..., min_length=1, max_length=64, description="Stable client widget key")
+    metric_id: int = Field(..., gt=0, description="Exactly one approved metric per widget")
+    dimension_col_id: int | None = Field(default=None, gt=0)
+    date_filter_column_id: int | None = Field(default=None, gt=0)
+    time_grain: TimeGrain | None = None
+    chart_type: DashboardChartType
+    width: DashboardWidgetWidth
+    height: DashboardWidgetHeight
+    col_span: int | None = Field(default=None, ge=1, le=24, description="Custom 24-column grid span")
+    row_span: int | None = Field(default=None, ge=1, le=48, description="Custom granular row blocks span")
+    custom_title: str | None = Field(default=None, max_length=200)
+
+    @field_validator("custom_title")
+    @classmethod
+    def normalize_custom_title(cls, value: str | None) -> str | None:
+        """Collapse whitespace-only titles to null."""
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_chart_compatibility(self) -> DashboardWidgetConfig:
+        """Enforce per-chart reference requirements from the canonical contract."""
+        if self.chart_type == "kpi":
+            if self.date_filter_column_id is None:
+                raise ValueError("KPI widgets require date_filter_column_id")
+            if self.dimension_col_id is not None or self.time_grain is not None:
+                raise ValueError("KPI widgets must not define a dimension column or time grain")
+        elif self.chart_type in ("line", "area"):
+            if self.dimension_col_id is None or self.time_grain is None:
+                raise ValueError("Line and area charts require a time dimension and grain")
+        elif self.dimension_col_id is None:
+            raise ValueError("Bar, pie, and table charts require a categorical dimension")
+        return self
+
+
+class DashboardLayout(BaseModel):
+    """Ordered widget list persisted as the singleton dashboard layout."""
+
+    widgets: list[DashboardWidgetConfig] = Field(default_factory=list, max_length=24)
+
+    @model_validator(mode="after")
+    def reject_duplicate_widget_ids(self) -> DashboardLayout:
+        """Keep widget identity stable and unique for drag-and-drop keys."""
+        identifiers = [widget.id for widget in self.widgets]
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("Widget IDs must be unique within a layout")
+        return self
+
+
+class DashboardSaveRequest(BaseModel):
+    """Request payload for saving the singleton dashboard layout."""
+
+    layout: DashboardLayout
+    expected_version: int = Field(
+        ...,
+        ge=0,
+        description="API sentinel 0 creates the singleton; otherwise the exact stored version",
+    )
+
+
+class DashboardLayoutResponse(BaseModel):
+    """Singleton dashboard state returned to clients."""
+
+    db_id: int
+    layout: DashboardLayout | None = None
+    version: int = 0
+    updated_at: datetime | None = None
+    updated_by: int | None = None
+
+
+# ---------------------------------------------------------------------------
 # Canonical Relationships
 # ---------------------------------------------------------------------------
 

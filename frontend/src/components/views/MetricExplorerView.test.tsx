@@ -548,4 +548,426 @@ describe('MetricExplorerView', () => {
     expect(screen.getByText('Doanh thu thuần')).toBeInTheDocument();
     expect(screen.getByText('Số lượng khách hàng')).toBeInTheDocument();
   });
+
+  it('applies dashboard drill-down selection (metric, dimension, grain, date range) to the execution request', async () => {
+    const executeSpy = vi
+      .spyOn(apiModule, 'executeSemanticQueryApi')
+      .mockResolvedValue({
+        sql: 'SELECT status, SUM(price) FROM orders GROUP BY status',
+        parameters: {},
+        columns: ['status', 'total_price'],
+        rows: [
+          ['Hoàn thành', 1500000],
+          ['Đang giao', 800000],
+        ],
+        row_count: 2,
+        execution_time_ms: 12,
+      });
+
+    const mockMetrics: MetricRecord[] = [
+      {
+        metric_id: 1,
+        name: 'Doanh thu thuần',
+        source: 'ai',
+        version: 1,
+        status: 'approved',
+        created_at: '2026-01-01',
+        definition: {
+          schema_version: 2,
+          metric: {
+            name: 'Doanh thu thuần',
+            base_entity: 'orders',
+            base_entity_id: 10,
+            grain: { column_ids: [101] },
+            formula: { function: 'SUM', expression: 'price' },
+            filters: [],
+            status: 'approved',
+            confidence: 'high',
+            excluded_notes: '',
+          },
+        },
+      },
+    ];
+
+    const mockCatalog: SemanticCatalog = {
+      db_id: 3,
+      source_type: 'live',
+      query_supported: true,
+      tables: [
+        {
+          table_id: 10,
+          table_name: 'orders',
+          business_name: 'Đơn hàng',
+          columns: [
+            {
+              column_id: 101,
+              column_name: 'created_at',
+              business_name: 'Ngày tạo đơn',
+              data_type: 'TIMESTAMP',
+              is_time_dimension: true,
+              allowed_values: null,
+            },
+            {
+              column_id: 102,
+              column_name: 'status',
+              business_name: 'Trạng thái đơn',
+              data_type: 'VARCHAR',
+              is_time_dimension: false,
+              allowed_values: null,
+            },
+          ],
+        },
+      ],
+      relationships: [],
+    };
+
+    render(
+      <MetricExplorerView
+        dbId={3}
+        metrics={mockMetrics}
+        catalog={mockCatalog}
+        theme="light"
+        initialSelection={{
+          metricId: 1,
+          dimensionColId: 102,
+          timeGrain: 'month',
+          dateFilters: [
+            { column_id: 101, operator: 'gte', value: '2026-01-01' },
+            { column_id: 101, operator: 'lt', value: '2026-02-01' },
+          ],
+          requestKey: 1,
+        }}
+      />,
+    );
+
+    // Metric auto-selected from the drill-down
+    const metricCheckbox = await screen.findByRole('checkbox', { name: /Doanh thu thuần/i });
+    expect(metricCheckbox).toBeChecked();
+
+    // Removable dashboard filter chip is shown
+    expect(screen.getByText(/Bộ lọc từ Dashboard/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Thực thi/i }));
+
+    await waitFor(() => {
+      expect(executeSpy).toHaveBeenCalledTimes(1);
+      const req = executeSpy.mock.calls[0][1] as apiModule.SemanticQueryRequest;
+      expect(req.metric_ids).toEqual([1]);
+      expect(req.dimensions).toEqual(
+        expect.arrayContaining([
+          { column_id: 102, time_grain: undefined },
+          { column_id: 101, time_grain: 'month' },
+        ]),
+      );
+      expect(req.filters).toEqual([
+        { column_id: 101, operator: 'gte', value: '2026-01-01' },
+        { column_id: 101, operator: 'lt', value: '2026-02-01' },
+      ]);
+    });
+
+    // Removing the dashboard filter clears the date range
+    fireEvent.click(screen.getByLabelText('Xóa bộ lọc từ Dashboard'));
+    fireEvent.click(screen.getByRole('button', { name: /Thực thi/i }));
+
+    await waitFor(() => {
+      const req = executeSpy.mock.calls[1][1] as apiModule.SemanticQueryRequest;
+      expect(req.filters).toEqual([]);
+    });
+    expect(screen.queryByText(/Bộ lọc từ Dashboard/i)).not.toBeInTheDocument();
+  });
+
+  it('emits a single time-dimension entry with grain when the dimension is the time column', async () => {
+    const executeSpy = vi
+      .spyOn(apiModule, 'executeSemanticQueryApi')
+      .mockResolvedValue({
+        sql: 'SELECT created_at, SUM(price) FROM orders GROUP BY created_at',
+        parameters: {},
+        columns: ['created_at', 'total_price'],
+        rows: [
+          ['2026-01', 1500000],
+          ['2026-02', 800000],
+        ],
+        row_count: 2,
+        execution_time_ms: 12,
+      });
+
+    const mockMetrics: MetricRecord[] = [
+      {
+        metric_id: 1,
+        name: 'Doanh thu thuần',
+        source: 'ai',
+        version: 1,
+        status: 'approved',
+        created_at: '2026-01-01',
+        definition: {
+          schema_version: 2,
+          metric: {
+            name: 'Doanh thu thuần',
+            base_entity: 'orders',
+            base_entity_id: 10,
+            grain: { column_ids: [101] },
+            formula: { function: 'SUM', expression: 'price' },
+            filters: [],
+            status: 'approved',
+            confidence: 'high',
+            excluded_notes: '',
+          },
+        },
+      },
+    ];
+
+    const mockCatalog: SemanticCatalog = {
+      db_id: 3,
+      source_type: 'live',
+      query_supported: true,
+      tables: [
+        {
+          table_id: 10,
+          table_name: 'orders',
+          business_name: 'Đơn hàng',
+          columns: [
+            {
+              column_id: 101,
+              column_name: 'created_at',
+              business_name: 'Ngày tạo đơn',
+              data_type: 'TIMESTAMP',
+              is_time_dimension: true,
+              allowed_values: null,
+            },
+            {
+              column_id: 102,
+              column_name: 'status',
+              business_name: 'Trạng thái đơn',
+              data_type: 'VARCHAR',
+              is_time_dimension: false,
+              allowed_values: null,
+            },
+          ],
+        },
+      ],
+      relationships: [],
+    };
+
+    render(
+      <MetricExplorerView
+        dbId={3}
+        metrics={mockMetrics}
+        catalog={mockCatalog}
+        theme="light"
+        initialSelection={{
+          metricId: 1,
+          dimensionColId: 101,
+          timeGrain: 'month',
+          dateFilters: [],
+          requestKey: 1,
+        }}
+      />,
+    );
+
+    const metricCheckbox = await screen.findByRole('checkbox', { name: /Doanh thu thuần/i });
+    expect(metricCheckbox).toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: /Thực thi/i }));
+
+    await waitFor(() => {
+      expect(executeSpy).toHaveBeenCalledTimes(1);
+      const req = executeSpy.mock.calls[0][1] as apiModule.SemanticQueryRequest;
+      expect(req.dimensions).toEqual([{ column_id: 101, time_grain: 'month' }]);
+    });
+  });
+
+  it('ignores dashboard drill-down selection for SQL Dump sources', () => {
+    render(
+      <MetricExplorerView
+        dbId={3}
+        metrics={[]}
+        catalog={{
+          db_id: 3,
+          source_type: 'sql_dump',
+          query_supported: false,
+          tables: [],
+          relationships: [],
+        }}
+        theme="light"
+        initialSelection={{
+          metricId: 1,
+          dimensionColId: 102,
+          timeGrain: 'month',
+          dateFilters: [{ column_id: 101, operator: 'gte', value: '2026-01-01' }],
+          requestKey: 1,
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/SQL Dump chỉ chứa metadata DDL/)).toBeInTheDocument();
+    expect(screen.queryByText('Preview SQL')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Bộ lọc từ Dashboard/i)).not.toBeInTheDocument();
+  });
+
+  it('applies the time grain from a dashboard drill-down to the time dimension control', async () => {
+    const mockMetrics: MetricRecord[] = [
+      {
+        metric_id: 1,
+        name: 'Doanh thu thuần',
+        source: 'ai',
+        version: 1,
+        status: 'approved',
+        created_at: '2026-01-01',
+        definition: {
+          schema_version: 2,
+          metric: {
+            name: 'Doanh thu thuần',
+            base_entity: 'orders',
+            base_entity_id: 10,
+            grain: { column_ids: [101] },
+            formula: { function: 'SUM', expression: 'price' },
+            filters: [],
+            status: 'approved',
+            confidence: 'high',
+            excluded_notes: '',
+          },
+        },
+      },
+    ];
+
+    const mockCatalog: SemanticCatalog = {
+      db_id: 3,
+      source_type: 'live',
+      query_supported: true,
+      tables: [
+        {
+          table_id: 10,
+          table_name: 'orders',
+          business_name: 'Đơn hàng',
+          columns: [
+            {
+              column_id: 101,
+              column_name: 'created_at',
+              business_name: 'Ngày tạo đơn',
+              data_type: 'TIMESTAMP',
+              is_time_dimension: true,
+              allowed_values: null,
+            },
+          ],
+        },
+      ],
+      relationships: [],
+    };
+
+    render(
+      <MetricExplorerView
+        dbId={3}
+        metrics={mockMetrics}
+        catalog={mockCatalog}
+        theme="light"
+        initialSelection={{
+          metricId: 1,
+          dimensionColId: null,
+          timeGrain: 'quarter',
+          dateFilters: [],
+          requestKey: 1,
+        }}
+      />,
+    );
+
+    const metricCheckbox = await screen.findByRole('checkbox', { name: /Doanh thu thuần/i });
+    expect(metricCheckbox).toBeChecked();
+
+    const quarterButton = screen.getByRole('button', { name: /Quý/ });
+    expect(quarterButton).toHaveClass('bg-primary');
+  });
+
+  it('renders an interactive chart after a dashboard drill-down execute', async () => {
+    vi.spyOn(apiModule, 'executeSemanticQueryApi').mockResolvedValue({
+      sql: 'SELECT status, SUM(price) FROM orders GROUP BY status',
+      parameters: {},
+      columns: ['status', 'total_price'],
+      rows: [
+        ['Hoàn thành', 1500000],
+        ['Đang giao', 800000],
+        ['Đã hủy', 200000],
+      ],
+      row_count: 3,
+      execution_time_ms: 12,
+    });
+
+    const mockMetrics: MetricRecord[] = [
+      {
+        metric_id: 1,
+        name: 'Doanh thu thuần',
+        source: 'ai',
+        version: 1,
+        status: 'approved',
+        created_at: '2026-01-01',
+        definition: {
+          schema_version: 2,
+          metric: {
+            name: 'Doanh thu thuần',
+            base_entity: 'orders',
+            base_entity_id: 10,
+            grain: { column_ids: [101] },
+            formula: { function: 'SUM', expression: 'price' },
+            filters: [],
+            status: 'approved',
+            confidence: 'high',
+            excluded_notes: '',
+          },
+        },
+      },
+    ];
+
+    const mockCatalog: SemanticCatalog = {
+      db_id: 3,
+      source_type: 'live',
+      query_supported: true,
+      tables: [
+        {
+          table_id: 10,
+          table_name: 'orders',
+          business_name: 'Đơn hàng',
+          columns: [
+            {
+              column_id: 102,
+              column_name: 'status',
+              business_name: 'Trạng thái đơn',
+              data_type: 'VARCHAR',
+              is_time_dimension: false,
+              allowed_values: null,
+            },
+          ],
+        },
+      ],
+      relationships: [],
+    };
+
+    render(
+      <MetricExplorerView
+        dbId={3}
+        metrics={mockMetrics}
+        catalog={mockCatalog}
+        theme="light"
+        initialSelection={{
+          metricId: 1,
+          dimensionColId: 102,
+          timeGrain: null,
+          dateFilters: [],
+          requestKey: 1,
+        }}
+      />,
+    );
+
+    const metricCheckbox = await screen.findByRole('checkbox', { name: /Doanh thu thuần/i });
+    expect(metricCheckbox).toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: /Thực thi/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Hoàn thành')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Biểu đồ/i }));
+
+    expect(screen.getByText(/Biểu đồ trực quan/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Cột/i })).toBeInTheDocument();
+  });
 });

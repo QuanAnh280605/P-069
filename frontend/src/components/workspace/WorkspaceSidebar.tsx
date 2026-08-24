@@ -10,6 +10,7 @@ import {
   ClipboardCheck,
   Compass,
   History,
+  LayoutDashboard,
   LogOut,
   Moon,
   PanelLeftClose,
@@ -63,6 +64,7 @@ const navItems: { id: ViewId; label: string; icon: typeof Bot }[] = [
   { id: 'schema', label: 'Schema Review', icon: ClipboardCheck },
   { id: 'catalog', label: 'Metrics Catalog', icon: BookMarked },
   { id: 'explorer', label: 'Metric Explorer', icon: Compass },
+  { id: 'dashboard', label: 'Metrics Dashboard', icon: LayoutDashboard },
   { id: 'export', label: 'Export Playground', icon: Upload },
 ];
 
