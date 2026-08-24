@@ -30,6 +30,19 @@ async def test_classifies_metric_request_for_direct_generation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_classifies_semantic_query_request() -> None:
+    """Asking for live metric numbers routes to semantic_query."""
+    with patch("src.agents.nodes.orchestrator_node.get_llm") as mock_get_llm:
+        llm = AsyncMock()
+        llm.ainvoke.return_value = _response("semantic_query")
+        mock_get_llm.return_value = llm
+
+        result = await orchestrator_node({"user_message": "Tổng doanh thu theo khách hàng năm 2024"})
+
+    assert result["intent"] == "semantic_query"
+
+
+@pytest.mark.asyncio
 async def test_classifies_schema_request_for_data_assistant() -> None:
     """Schema exploration remains on the read-only guidance flow."""
     with patch("src.agents.nodes.orchestrator_node.get_llm") as mock_get_llm:

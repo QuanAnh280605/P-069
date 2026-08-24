@@ -717,6 +717,60 @@ class MetricHistoryResponse(BaseModel):
     versions: list[MetricVersionItem]
 
 
+class SemanticTimeRange(BaseModel):
+    """Normalized half-open date interval [start_date, end_date) in Asia/Ho_Chi_Minh."""
+
+    column_id: int
+    start_date: str
+    end_date: str
+    label: str
+
+
+class ChatClarificationOption(BaseModel):
+    """Self-contained pre-validated clarification option containing executable spec."""
+
+    id: str
+    label: str
+    description: str | None = None
+    spec: SemanticQuerySpec
+
+
+class ChatClarificationSelection(BaseModel):
+    """Payload sent when clicking a clarification option button."""
+
+    assistant_message_id: str = Field(..., min_length=1, max_length=100)
+    option_id: str = Field(..., min_length=1, max_length=100)
+
+
+class ChatClarificationPayload(BaseModel):
+    """Structured clarification request returned to the user."""
+
+    prompt: str
+    options: list[ChatClarificationOption] = Field(default_factory=list)
+
+
+class ChatSemanticQueryResult(BaseModel):
+    """Structured result of a semantic query execution for chat presentation."""
+
+    spec: SemanticQuerySpec
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[Any]] = Field(default_factory=list)
+    row_count: int = Field(default=0)
+    explanation: str
+    sql: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SemanticQueryInterpretation(BaseModel):
+    """Semantic parse interpretation emitted by semantic_parse_node."""
+
+    status: Literal["resolved", "needs_clarification"]
+    spec: SemanticQuerySpec | None = None
+    time_ranges: list[SemanticTimeRange] = Field(default_factory=list)
+    clarification: ChatClarificationPayload | None = None
+    rationale: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Chat Orchestrator (Multi-Agent)
 # ---------------------------------------------------------------------------
@@ -733,6 +787,7 @@ class ChatRequest(BaseModel):
     )
     session_id: str | None = Field(default=None, min_length=36, max_length=36)
     client_message_id: str | None = Field(default=None, min_length=1, max_length=100)
+    clarification_selection: ChatClarificationSelection | None = None
 
 
 class ChatMessageResponse(BaseModel):
@@ -787,7 +842,10 @@ class ChatSessionUpdateRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Response từ chatbot orchestrator sau khi phân loại intent."""
 
-    intent: str = Field(..., description="'chitchat', 'data_question', 'metric_query' hoặc 'out_of_scope'")
+    intent: str = Field(
+        ...,
+        description="'chitchat', 'data_question', 'metric_query', 'semantic_query' hoặc 'out_of_scope'",
+    )
     chat_response: str | None = Field(
         default=None,
         description="Câu trả lời ngôn ngữ tự nhiên cho chitchat/data_question/out_of_scope",
@@ -800,6 +858,8 @@ class ChatResponse(BaseModel):
     dedupe_performed: bool = True
     suggestion_action: Literal["save_metric", "submit_metric_request"] | None = None
     diagnostics: dict[str, Any] | None = None
+    semantic_query_result: ChatSemanticQueryResult | None = None
+    clarification: ChatClarificationPayload | None = None
     session_id: str
     user_message_id: str
     assistant_message_id: str

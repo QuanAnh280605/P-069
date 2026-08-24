@@ -199,7 +199,7 @@ class SemanticQueryCompiler:
         joins: list[dict[str, str]] = []
         joined = {base.id}
         for table_id in {item["table_id"] for item in dimensions} - joined:
-            for relationship in _safe_join_path(relationships, base.id, table_id):
+            for relationship in _safe_join_path(relationships, base.id, table_id, tables, column_names):
                 target_id = relationship.to_entity_id
                 if target_id not in joined:
                     joins.append(
@@ -280,9 +280,27 @@ def _safe_join_path(
     relationships: list[CanonicalRelationshipModel],
     base_id: int,
     table_id: int,
+    tables: dict[int, SemanticTableModel] | None = None,
+    column_names: dict[int, tuple[str, str]] | None = None,
 ) -> list[CanonicalRelationshipModel]:
     paths = _many_to_one_paths(relationships, base_id, table_id)
     if len(paths) > 1:
+        if tables and column_names and table_id in tables:
+            target_table = tables[table_id].table_name.lower().rstrip("s")
+
+            def _path_score(p: list[CanonicalRelationshipModel]) -> tuple[int, int, int]:
+                hop_len = len(p)
+                match_name = 0
+                if hop_len == 1 and p[0].column_pairs:
+                    from_col_id = p[0].column_pairs[0].get("from_column_id")
+                    if from_col_id in column_names:
+                        col_name = column_names[from_col_id][1].lower()
+                        if col_name in {f"{target_table}_id", f"{target_table}id", target_table}:
+                            match_name = -1
+                return (hop_len, match_name, p[0].id if p else 0)
+
+            ranked = sorted(paths, key=_path_score)
+            return ranked[0]
         raise SemanticCompileError("AMBIGUOUS_JOIN_PATH", "Multiple safe join paths exist", {"table_id": table_id})
     if not paths:
         _raise_unreachable(relationships, base_id, table_id)

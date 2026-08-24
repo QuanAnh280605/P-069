@@ -16,3 +16,8 @@ def test_metric_query_reaches_metric_generator_for_data_lead() -> None:
 def test_data_question_reaches_data_assistant() -> None:
     """Schema questions remain on the data-assistant route."""
     assert _route_by_intent({"intent": "data_question"}) == "data_question"
+
+
+def test_semantic_query_reaches_semantic_parse() -> None:
+    """Live query questions route to the semantic parser node."""
+    assert _route_by_intent({"intent": "semantic_query"}) == "semantic_query"

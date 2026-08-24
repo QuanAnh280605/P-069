@@ -161,33 +161,47 @@ export function AIStudioView({
         requestSessionId,
         clientMessageId,
       );
-        if (requestSessionId && activeSessionId !== requestSessionId) return;
-        if (response.session_id) {
-          setActiveSessionId?.(response.session_id);
-          if (typeof window !== 'undefined') {
-            const url = new URL(window.location.href);
-            url.searchParams.set('chat', response.session_id);
-            window.history.replaceState({}, '', url);
-          }
+      if (requestSessionId && activeSessionId !== requestSessionId) return;
+      if (response.session_id) {
+        setActiveSessionId?.(response.session_id);
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          url.searchParams.set('chat', response.session_id);
+          window.history.replaceState({}, '', url);
         }
-        if (response.session) {
-          setSessions?.((current) => [
-            response.session!,
-            ...current.filter((item) => item.id !== response.session!.id),
-          ]);
-        }
-        if (response.intent === 'chitchat' || response.intent === 'data_question' || response.intent === 'out_of_scope') {
-          setMessages((current) => [
-            ...current,
-            {
-              id: response.assistant_message_id || crypto.randomUUID(),
-              sender: 'assistant',
-              text: response.chat_response || 'Xin chào! Tôi có thể giúp gì cho bạn?',
-              timestamp: now(),
-            },
-          ]);
-          return;
-        }
+      }
+      if (response.session) {
+        setSessions?.((current) => [
+          response.session!,
+          ...current.filter((item) => item.id !== response.session!.id),
+        ]);
+      }
+      if (response.intent === 'semantic_query') {
+        setMessages((current) => [
+          ...current,
+          {
+            id: response.assistant_message_id || crypto.randomUUID(),
+            sender: 'assistant',
+            text: response.chat_response || '',
+            queryResult: response.semantic_query_result,
+            clarification: response.clarification,
+            timestamp: now(),
+          },
+        ]);
+        return;
+      }
+      if (response.intent === 'chitchat' || response.intent === 'data_question' || response.intent === 'out_of_scope') {
+        setMessages((current) => [
+          ...current,
+          {
+            id: response.assistant_message_id || crypto.randomUUID(),
+            sender: 'assistant',
+            text: response.chat_response || 'Xin chào! Tôi có thể giúp gì cho bạn?',
+            timestamp: now(),
+          },
+        ]);
+        return;
+      }
       const suggestions = response.suggestions || [];
       setMessages((current) => [
         ...current,
@@ -208,6 +222,56 @@ export function AIStudioView({
       ]);
     } catch (error) {
       appendError(setMessages, error instanceof Error ? error.message : 'Không thể xử lý yêu cầu');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectClarification = async (
+    assistantMessageId: string,
+    optionId: string,
+    label: string,
+  ) => {
+    if (!semanticDbId) return;
+    const clientMessageId = crypto.randomUUID();
+    const requestSessionId = activeSessionId;
+
+    setMessages((current) => [
+      ...current,
+      { id: clientMessageId, sender: 'user', text: label, timestamp: now() },
+    ]);
+    setLoading(true);
+    try {
+      const response = await sendChatOrchestratorApi(
+        String(semanticDbId),
+        label,
+        requestSessionId,
+        clientMessageId,
+        { assistant_message_id: assistantMessageId, option_id: optionId },
+      );
+      if (requestSessionId && activeSessionId !== requestSessionId) return;
+      if (response.session_id) {
+        setActiveSessionId?.(response.session_id);
+      }
+      if (response.session) {
+        setSessions?.((current) => [
+          response.session!,
+          ...current.filter((item) => item.id !== response.session!.id),
+        ]);
+      }
+      setMessages((current) => [
+        ...current,
+        {
+          id: response.assistant_message_id || crypto.randomUUID(),
+          sender: 'assistant',
+          text: response.chat_response || '',
+          queryResult: response.semantic_query_result,
+          clarification: response.clarification,
+          timestamp: now(),
+        },
+      ]);
+    } catch (error) {
+      appendError(setMessages, error instanceof Error ? error.message : 'Không thể thực thi lựa chọn');
     } finally {
       setLoading(false);
     }
@@ -365,6 +429,7 @@ export function AIStudioView({
           onDismissDuplicate={dismissDuplicate}
           onUseExistingDuplicate={useExistingDuplicate}
           onSubmitMetricRequest={!canGenerateMetrics ? submitRequest : undefined}
+          onSelectClarification={handleSelectClarification}
           submittedRequestKeys={submittedRequestKeys}
           approvedRequestKeys={approvedRequestKeys}
           savedMetricNames={layer.metrics.map((metric) => metricName(metric))}
@@ -383,6 +448,8 @@ function toChatMessage(message: ChatMessageItem): ChatMessage {
     duplicates: message.metadata_json?.duplicates,
     dedupeSkipped: message.metadata_json?.dedupe_performed === false,
     suggestionAction: message.metadata_json?.suggestion_action,
+    queryResult: message.metadata_json?.semantic_query_result,
+    clarification: message.metadata_json?.clarification,
     timestamp: new Date(message.created_at).toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',

@@ -494,17 +494,77 @@ describe('StudioChatStream', () => {
     expect(screen.getByRole('button', { name: /Chỉnh sửa thủ công/i })).toBeInTheDocument();
   });
 
-  it('shows loading state with analysis message', () => {
+  it('renders semantic query result card when queryResult is present', () => {
     render(
       <StudioChatStream
-        messages={[]}
+        messages={[
+          {
+            id: 'msg-res-1',
+            sender: 'assistant',
+            text: 'Số liệu doanh thu',
+            timestamp: '10:00',
+            queryResult: {
+              spec: { metric_ids: [1], dimensions: [], filters: [], limit: 100 },
+              columns: ['total_revenue'],
+              rows: [[50000000]],
+              row_count: 1,
+              explanation: 'Doanh thu thuần',
+              sql: 'SELECT SUM(amount) AS total_revenue FROM orders',
+            },
+          },
+        ]}
         onSendMessage={vi.fn()}
-        isLoading={true}
+        isLoading={false}
         tableNames={[]}
       />
     );
-    expect(screen.getByText(/AI đang phân tích/i)).toBeInTheDocument();
+
+    expect(screen.getByText('total_revenue')).toBeInTheDocument();
+    expect(screen.getByText('50,000,000')).toBeInTheDocument();
+    expect(screen.getByText('Doanh thu thuần')).toBeInTheDocument();
+  });
+
+  it('renders clarification buttons and triggers onSelectClarification on click', () => {
+    const handleSelect = vi.fn();
+    render(
+      <StudioChatStream
+        messages={[
+          {
+            id: 'msg-clar-1',
+            sender: 'assistant',
+            text: 'Bạn muốn xem doanh thu theo chiều nào?',
+            timestamp: '10:00',
+            clarification: {
+              prompt: 'Bạn muốn xem theo?',
+              options: [
+                {
+                  id: 'opt_by_customer',
+                  label: 'Theo khách hàng',
+                  spec: { metric_ids: [1], dimensions: [{ column_id: 10 }] },
+                },
+                {
+                  id: 'opt_by_month',
+                  label: 'Theo tháng',
+                  spec: { metric_ids: [1], dimensions: [{ column_id: 20 }] },
+                },
+              ],
+            },
+          },
+        ]}
+        onSendMessage={vi.fn()}
+        onSelectClarification={handleSelect}
+        isLoading={false}
+        tableNames={[]}
+      />
+    );
+
+    expect(screen.getByText(/Theo khách hàng/i)).toBeInTheDocument();
+    expect(screen.getByText(/Theo tháng/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/Theo khách hàng/i));
+    expect(handleSelect).toHaveBeenCalledWith('msg-clar-1', 'opt_by_customer', 'Theo khách hàng');
   });
 });
+
 
 

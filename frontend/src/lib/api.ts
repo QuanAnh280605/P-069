@@ -587,14 +587,53 @@ export async function generateCustomMetricsApi(
   };
 }
 
+export interface ChatClarificationOption {
+  id: string;
+  label: string;
+  description?: string | null;
+  spec: {
+    metric_ids: number[];
+    dimensions?: { column_id: number; time_grain?: string | null }[];
+    filters?: { column_id: number; operator: string; value?: unknown }[];
+    limit?: number;
+  };
+}
+
+export interface ChatClarificationSelection {
+  assistant_message_id: string;
+  option_id: string;
+}
+
+export interface ChatClarificationPayload {
+  prompt: string;
+  options: ChatClarificationOption[];
+}
+
+export interface ChatSemanticQueryResult {
+  spec: {
+    metric_ids: number[];
+    dimensions?: { column_id: number; time_grain?: string | null }[];
+    filters?: { column_id: number; operator: string; value?: unknown }[];
+    limit?: number;
+  };
+  columns: string[];
+  rows: (string | number | boolean | null)[][];
+  row_count: number;
+  explanation: string;
+  sql?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
 export interface ChatOrchestratorResponse {
-  intent: 'chitchat' | 'data_question' | 'metric_query' | 'out_of_scope';
+  intent: 'chitchat' | 'data_question' | 'metric_query' | 'semantic_query' | 'out_of_scope';
   chat_response?: string | null;
   suggestions?: MetricSuggestion[] | null;
   duplicates?: DuplicateMetricNotice[];
   dedupe_performed?: boolean;
   diagnostics?: { status: string; message?: string; tables?: string[]; relationship_count?: number } | null;
   suggestion_action?: 'save_metric' | 'submit_metric_request' | null;
+  semantic_query_result?: ChatSemanticQueryResult | null;
+  clarification?: ChatClarificationPayload | null;
   session_id: string;
   user_message_id: string;
   assistant_message_id: string;
@@ -625,6 +664,8 @@ export interface ChatMessageItem {
     duplicates?: DuplicateMetricNotice[];
     dedupe_performed?: boolean;
     suggestion_action?: 'save_metric' | 'submit_metric_request' | null;
+    semantic_query_result?: ChatSemanticQueryResult | null;
+    clarification?: ChatClarificationPayload | null;
     error?: string | null;
   } | null;
   created_at: string;
@@ -694,6 +735,7 @@ export async function sendChatOrchestratorApi(
   message: string,
   sessionId?: string | null,
   clientMessageId?: string,
+  clarificationSelection?: ChatClarificationSelection | null,
 ): Promise<ChatOrchestratorResponse> {
   return chatRequest<ChatOrchestratorResponse>(`${API_BASE}/api/v1/semantic/${dbId}/chat`, {
     method: 'POST',
@@ -701,6 +743,7 @@ export async function sendChatOrchestratorApi(
       message,
       session_id: sessionId || null,
       client_message_id: clientMessageId,
+      clarification_selection: clarificationSelection || null,
     }),
   });
 }

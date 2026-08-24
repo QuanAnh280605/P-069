@@ -27,6 +27,8 @@ import {
   ConflictWarningStrip,
   DuplicateNoticeCard,
 } from '@/components/studio/DedupeWarnings';
+import { ChatSemanticQueryResult, ChatClarificationPayload } from '@/lib/api';
+import { ChatQueryResultCard } from '@/components/studio/ChatQueryResultCard';
 
 export interface ChatMessage {
   id: string;
@@ -36,6 +38,8 @@ export interface ChatMessage {
   duplicates?: ChatDuplicateNotice[];
   dedupeSkipped?: boolean;
   suggestionAction?: 'save_metric' | 'submit_metric_request' | null;
+  queryResult?: ChatSemanticQueryResult | null;
+  clarification?: ChatClarificationPayload | null;
   timestamp: string;
   isError?: boolean;
 }
@@ -63,6 +67,7 @@ interface StudioChatStreamProps {
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
   onSubmitMetricRequest?: (messageId: string, suggestionIndex: number) => Promise<void>;
+  onSelectClarification?: (assistantMessageId: string, optionId: string, label: string) => void;
 }
 
 export function metricRequestKey(messageId: string, suggestionIndex: number): string {
@@ -96,6 +101,16 @@ const DEFAULT_SUGGESTIONS: PromptSuggestionItem[] = [
 
 const DATA_ASSISTANT_SUGGESTIONS: PromptSuggestionItem[] = [
   {
+    icon: '📊',
+    title: 'Doanh thu theo khách hàng',
+    prompt: 'Tổng doanh thu theo khách hàng năm 2024',
+  },
+  {
+    icon: '📅',
+    title: 'Doanh thu tháng này',
+    prompt: 'Doanh thu tháng này theo chi nhánh',
+  },
+  {
     icon: '🔎',
     title: 'Tìm metric doanh thu đã duyệt',
     prompt: 'Có những metric doanh thu nào đã được phê duyệt? Giải thích ngắn gọn từng metric.',
@@ -104,16 +119,6 @@ const DATA_ASSISTANT_SUGGESTIONS: PromptSuggestionItem[] = [
     icon: '🧭',
     title: 'Tìm bảng khách hàng',
     prompt: 'Bảng hoặc cột nào liên quan đến khách hàng trong semantic layer này?',
-  },
-  {
-    icon: '🧩',
-    title: 'Hướng dẫn chọn dữ liệu',
-    prompt: 'Nếu muốn xem doanh thu theo tháng và cửa hàng, tôi nên chọn metric và dimension nào?',
-  },
-  {
-    icon: '📖',
-    title: 'Giải thích metric',
-    prompt: 'Giải thích công thức và phạm vi dữ liệu của metric doanh thu đã được duyệt.',
   },
 ];
 
@@ -259,6 +264,8 @@ export function StudioChatStream(props: StudioChatStreamProps) {
               onDiscardSuggestion={props.onDiscardSuggestion}
               onDismissDuplicate={props.onDismissDuplicate}
               onUseExistingDuplicate={props.onUseExistingDuplicate}
+              onSelectClarification={props.onSelectClarification}
+              theme={props.theme}
             />
           ))}
 
@@ -390,6 +397,8 @@ function MessageBubble({
   onDiscardSuggestion,
   onDismissDuplicate,
   onUseExistingDuplicate,
+  onSelectClarification,
+  theme,
 }: {
   message: ChatMessage;
   saved: ReadonlySet<string>;
@@ -404,6 +413,8 @@ function MessageBubble({
   onDiscardSuggestion?: SuggestionIndexHandler;
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
+  onSelectClarification?: (assistantMessageId: string, optionId: string, label: string) => void;
+  theme?: 'light' | 'dark';
 }) {
   const isUser = message.sender === 'user';
 
@@ -443,6 +454,31 @@ function MessageBubble({
             {isUser ? message.text : <AssistantMarkdown content={message.text} />}
           </div>
         ) : null}
+
+        {/* 📊 Semantic Query Result Snapshot */}
+        {message.queryResult && (
+          <div className="w-full pt-1">
+            <ChatQueryResultCard result={message.queryResult} theme={theme} />
+          </div>
+        )}
+
+        {/* ❓ Clarification Options */}
+        {message.clarification?.options && message.clarification.options.length > 0 && (
+          <div className="w-full space-y-2 pt-1">
+            <div className="flex flex-wrap gap-2">
+              {message.clarification.options.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => onSelectClarification?.(message.id, opt.id, opt.label)}
+                  className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/20 hover:border-primary/50 transition-all cursor-pointer shadow-2xs"
+                >
+                  <span>👉 {opt.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {message.dedupeSkipped && (
           <div

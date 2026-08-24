@@ -19,25 +19,26 @@ _OUT_OF_SCOPE_RESPONSE = (
 )
 
 _CLASSIFY_PROMPT = """Bạn là bộ phân loại câu hỏi thông minh cho hệ thống AI Semantic Layer.
-Phân loại câu hỏi của người dùng vào đúng 1 trong 4 nhóm:
+Phân loại câu hỏi của người dùng vào đúng 1 trong 5 nhóm:
 
+- "semantic_query": Câu hỏi yêu cầu xem số liệu, kết quả, báo cáo, truy vấn, thống kê hoặc tính toán dữ liệu thực tế từ Live Database (ví dụ: "cho tôi kết quả Tổng doanh thu theo từng khách hàng", "Xem kết quả doanh thu", "Tổng doanh thu theo khách hàng năm 2024", "Doanh thu tháng này theo chi nhánh", "Số lượng đơn hàng hoàn thành", "Báo cáo doanh số theo sản phẩm", "Thống kê đơn hàng"). BẤT KỲ CÂU HỎI NÀO YÊU CẦU LẤY SỐ LIỆU/KẾT QUẢ/TÍNH TOÁN ĐỀU THUỘC NHÓM NÀY.
+- "metric_query": Yêu cầu tạo mới, chỉnh sửa, xây dựng hoặc đề xuất công thức định nghĩa Business Metric mới vào hệ thống (ví dụ: "Tạo metric mới Doanh thu thuần", "Đề xuất metric cho bảng orders", "Định nghĩa công thức AOV", "Tạo chỉ số tỷ lệ hủy đơn"). CHỈ phân loại vào nhóm này khi người dùng muốn định nghĩa/tạo thêm metric mới vào catalog, KHÔNG phân loại vào đây nếu người dùng muốn xem số liệu/kết quả thực tế.
+- "data_question": Hỏi về cấu trúc database, schema, bảng, cột, kiểu dữ liệu, glossary, quan hệ bảng, danh sách metric đã có hoặc hướng dẫn chọn dữ liệu/dimension/filter để tìm hiểu dữ liệu (không yêu cầu lấy số liệu cụ thể).
 - "chitchat": Chào hỏi (xin chào, cảm ơn, tạm biệt), hỏi về danh tính/khả năng của AI trợ lý hoặc hỏi thông tin/tính năng chung của hệ thống AI Semantic Layer.
-- "data_question": Hỏi về cấu trúc database, schema, bảng, cột, kiểu dữ liệu, glossary, quan hệ bảng, danh sách metric đã có hoặc hướng dẫn chọn dữ liệu/dimension/filter để truy vấn.
-- "metric_query": Yêu cầu tạo mới, chỉnh sửa, tính toán hoặc đề xuất công thức Business Metric từ schema dữ liệu.
 - "out_of_scope": Câu hỏi hoặc yêu cầu KHÔNG LIÊN QUAN đến dữ liệu, database, Business Metrics hay tính năng hệ thống (ví dụ: thời tiết, công thức nấu ăn, viết thơ, kể chuyện, giải toán ngoài lề, tin tức xã hội, thể thao, giải trí, lập trình ứng dụng ngoài lề...).
 
-Chỉ trả về DUY NHẤT 1 từ trong 4 từ: "chitchat", "data_question", "metric_query", hoặc "out_of_scope"
+Chỉ trả về DUY NHẤT 1 từ trong 5 từ: "semantic_query", "metric_query", "data_question", "chitchat", hoặc "out_of_scope"
 
 Câu hỏi trước đây:
 {history}
 
 Latest request: {user_message}"""
 
-_INTENTS = {"chitchat", "data_question", "metric_query", "out_of_scope"}
+_INTENTS = {"chitchat", "semantic_query", "data_question", "metric_query", "out_of_scope"}
 
 
 async def orchestrator_node(state: AgentState) -> dict[str, Any]:
-    """Classify user message into 'chitchat', 'data_question', 'metric_query', or 'out_of_scope'.
+    """Classify user message into chitchat, semantic_query, data_question, metric_query, or out_of_scope.
 
     Uses LLM with temperature=0.0 for deterministic classification.
     Falls back to 'chitchat' on error to avoid breaking the conversation.
@@ -73,6 +74,8 @@ def _classification_prompt(state: AgentState, user_message: str) -> str:
 
 def _parse_intent(raw: str) -> str:
     """Parse raw LLM response into recognized intent string."""
+    if "semantic_query" in raw:
+        return "semantic_query"
     if "metric_query" in raw:
         return "metric_query"
     if "data_question" in raw:
