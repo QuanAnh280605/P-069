@@ -8,9 +8,9 @@ from typing import Any
 from src.agents.state import AgentState
 from src.models.metric_definition import MetricDefinition
 from src.models.schemas import MetricSuggestionItem, MetricSuggestions
-from src.services.metric_dedupe import format_existing_metrics_context, merge_dedupe
 from src.services.llm import get_llm
 from src.services.llm_json import ainvoke_json
+from src.services.metric_dedupe import format_existing_metrics_context, merge_dedupe
 from src.services.metrics import (
     _parse_metric_payload,
     _references_schema,

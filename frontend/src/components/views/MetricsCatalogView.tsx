@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import {
   AlertTriangle,
@@ -46,7 +46,6 @@ interface MetricsCatalogViewProps {
   canManageMetrics?: boolean;
   canApproveMetrics?: boolean;
   database?: WorkspaceDatabase | null;
-  refreshKey?: number;
 }
 
 export function MetricsCatalogView(props: MetricsCatalogViewProps) {

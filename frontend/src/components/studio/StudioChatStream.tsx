@@ -63,8 +63,6 @@ interface StudioChatStreamProps {
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
   onSubmitMetricRequest?: (messageId: string, suggestionIndex: number) => Promise<void>;
-  savedMetricNames?: string[];
-  submittedRequestKeys?: ReadonlySet<string>;
 }
 
 export function metricRequestKey(messageId: string, suggestionIndex: number): string {
@@ -88,11 +86,6 @@ const DEFAULT_SUGGESTIONS: PromptSuggestionItem[] = [
     icon: '📦',
     title: 'Tổng số lượng đơn đặt hàng',
     prompt: 'Tính tổng số lượng đơn đặt hàng phát sinh trong toàn hệ thống',
-  },
-  {
-    icon: '👥',
-    title: 'Số khách hàng active',
-    prompt: 'Đếm số lượng khách hàng duy nhất (Unique Customers) có phát sinh giao dịch',
   },
   {
     icon: '🎫',
@@ -131,6 +124,48 @@ export function StudioChatStream(props: StudioChatStreamProps) {
   const [saved, setSaved] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(true);
   const endRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startX: number; scrollLeft: number; isDragging: boolean; moved: boolean }>({
+    startX: 0,
+    scrollLeft: 0,
+    isDragging: false,
+    moved: false,
+  });
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = stripRef.current;
+    if (!el) return;
+    dragRef.current = {
+      startX: e.clientX,
+      scrollLeft: el.scrollLeft,
+      isDragging: true,
+      moved: false,
+    };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current.isDragging || !stripRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    if (Math.abs(dx) > 5) {
+      dragRef.current.moved = true;
+    }
+    stripRef.current.scrollLeft = dragRef.current.scrollLeft - dx;
+  };
+
+  const handlePointerUp = () => {
+    dragRef.current.isDragging = false;
+  };
+
+  const allSavedNames = useMemo(() => {
+    const set = new Set<string>();
+    (props.savedMetricNames || []).forEach((name) => {
+      if (name) set.add(name.trim().toLowerCase());
+    });
+    saved.forEach((name) => {
+      if (name) set.add(name.trim().toLowerCase());
+    });
+    return set;
+  }, [props.savedMetricNames, saved]);
 
   useEffect(() => {
     if (props.activePromptText) {
@@ -205,14 +240,14 @@ export function StudioChatStream(props: StudioChatStreamProps) {
         <div className="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-8">
           {!canGenerateMetrics && (
             <div role="status" className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
-              Bạn có thể tra cứu dữ liệu qua các metric đã duyệt (chỉ áp dụng cho kết nối Live DB) hoặc yêu cầu AI tạo Business Metric mới. Metric sau khi tạo sẽ được lưu vào Semantic Layer ở trạng thái chờ Data Lead phê duyệt.
+              Bạn không có quyền tạo, sửa hoặc lưu metric trực tiếp. Bạn có thể tra cứu dữ liệu qua các metric đã duyệt (chỉ áp dụng cho kết nối Live DB) hoặc yêu cầu AI tạo Business Metric mới. Metric sau khi tạo sẽ được lưu vào Semantic Layer ở trạng thái chờ Data Lead phê duyệt.
             </div>
           )}
           {props.messages.map((message) => (
             <MessageBubble
               key={message.id}
               message={message}
-              saved={saved}
+              saved={allSavedNames}
               onSave={save}
               onEdit={props.onEditMetric}
               onRefine={props.onRefineWithAI}
@@ -224,8 +259,6 @@ export function StudioChatStream(props: StudioChatStreamProps) {
               onDiscardSuggestion={props.onDiscardSuggestion}
               onDismissDuplicate={props.onDismissDuplicate}
               onUseExistingDuplicate={props.onUseExistingDuplicate}
-              onSubmitMetricRequest={props.onSubmitMetricRequest}
-              submittedKeys={props.submittedRequestKeys || new Set()}
             />
           ))}
 
@@ -259,49 +292,54 @@ export function StudioChatStream(props: StudioChatStreamProps) {
       <div className="border-t border-border bg-card/40 px-6 py-4">
         <div className="mx-auto max-w-4xl space-y-3">
           {/* Suggested Questions Chips */}
-          {!hasUserSentMessage && (
-            <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
-                  <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                    {canGenerateMetrics ? 'GỢI Ý CÂU HỎI TẠO METRIC' : 'GỢI Ý CÂU HỎI VỀ DỮ LIỆU'}
+          <div className="space-y-2 rounded-lg border border-border bg-card p-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+                <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                  {canGenerateMetrics ? 'GỢI Ý CÂU HỎI TẠO METRIC' : 'GỢI Ý CÂU HỎI VỀ DỮ LIỆU'}
+                </span>
+                {showSuggestions && (
+                  <span className="font-mono text-[10px] text-muted-foreground/70">
+                    ({contextualSuggestions.length} mẫu)
                   </span>
-                  {showSuggestions && (
-                    <span className="font-mono text-[10px] text-muted-foreground/70">
-                      ({contextualSuggestions.length} mẫu)
-                    </span>
-                  )}
-                </div>
-
-                <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={showSuggestions}
-                    onChange={toggleShowSuggestions}
-                    className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
-                  />
-                  <span>{showSuggestions ? 'Hiển thị gợi ý' : 'Đã ẩn (Tick để hiện)'}</span>
-                </label>
+                )}
               </div>
 
-              {showSuggestions && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {contextualSuggestions.map((item, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => handleSelectSuggestion(item.prompt)}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/60 px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-secondary hover:text-foreground cursor-pointer"
-                    >
-                      <span>{item.icon}</span>
-                      <span>{item.title}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showSuggestions}
+                  onChange={toggleShowSuggestions}
+                  className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
+                />
+                <span>{showSuggestions ? 'Hiển thị gợi ý' : 'Đã ẩn (Tick để hiện)'}</span>
+              </label>
             </div>
-          )}
+
+            {showSuggestions && (
+              <div
+                ref={stripRef}
+                data-testid="prompt-suggestion-strip"
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                className="flex overflow-x-auto whitespace-nowrap gap-1.5 pt-1"
+              >
+                {contextualSuggestions.map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleSelectSuggestion(item.prompt)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/60 px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-secondary hover:text-foreground cursor-pointer shrink-0"
+                  >
+                    <span>{item.icon}</span>
+                    <span>{item.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Composer Input Box */}
           <div className="flex items-end gap-2 rounded-xl border border-border bg-card p-2 shadow-xs focus-within:border-foreground/30 focus-within:ring-1 focus-within:ring-ring/20">
@@ -352,11 +390,9 @@ function MessageBubble({
   onDiscardSuggestion,
   onDismissDuplicate,
   onUseExistingDuplicate,
-  onSubmitMetricRequest,
-  submittedKeys,
 }: {
   message: ChatMessage;
-  saved: string[];
+  saved: ReadonlySet<string>;
   onSave: (suggestion: MetricSuggestion) => Promise<void>;
   onEdit?: (suggestion: MetricSuggestion) => void;
   onRefine?: (suggestion: MetricSuggestion) => void;
@@ -368,8 +404,6 @@ function MessageBubble({
   onDiscardSuggestion?: SuggestionIndexHandler;
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
-  onSubmitMetricRequest?: (messageId: string, suggestionIndex: number) => Promise<void>;
-  submittedKeys: ReadonlySet<string>;
 }) {
   const isUser = message.sender === 'user';
 
@@ -425,14 +459,17 @@ function MessageBubble({
               <SuggestionCard
                 key={idx}
                 suggestion={sug}
-                isSaved={saved.includes(sug.definition.metric.name)}
+                isSaved={saved.has(sug.definition.metric.name.trim().toLowerCase())}
                 onSave={() => onSave(sug)}
                 onEdit={() => onEdit?.(sug)}
                 onRefine={() => onRefine?.(sug)}
                 onOpenCatalog={onOpenCatalog}
                 action={message.suggestionAction}
                 isSubmitted={submittedKeys.has(metricRequestKey(message.id, idx))}
-                isApproved={approvedKeys.has(metricRequestKey(message.id, idx))}
+                isApproved={
+                  approvedKeys.has(metricRequestKey(message.id, idx)) ||
+                  saved.has(sug.definition.metric.name.trim().toLowerCase())
+                }
                 onSubmitRequest={
                   onSubmitMetricRequest ? () => onSubmitMetricRequest(message.id, idx) : undefined
                 }
@@ -578,6 +615,8 @@ function SuggestionCard({
     setSaving(true);
     try {
       await onSave();
+    } catch {
+      // Handled by parent error notification
     } finally {
       setSaving(false);
     }
@@ -587,6 +626,8 @@ function SuggestionCard({
     setSaving(true);
     try {
       await onSubmitRequest?.();
+    } catch {
+      // Handled by parent error notification
     } finally {
       setSaving(false);
     }
@@ -617,6 +658,9 @@ function SuggestionCard({
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-foreground text-sm">{def.name}</h3>
             <StatusPill status={def.status || 'pending_approval'} />
+            <span className="font-mono text-[10px] text-muted-foreground">
+              Chờ phê duyệt
+            </span>
             <span className="rounded bg-secondary px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
               Độ tin cậy: {def.confidence === 'high' ? 'Cao' : def.confidence === 'medium' ? 'Trung bình' : 'Thấp'}
             </span>
@@ -705,6 +749,17 @@ function SuggestionCard({
           </div>
         </div>
 
+        {def.excluded_notes && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5">
+            <span className="font-mono text-[10px] uppercase text-amber-700 dark:text-amber-300 font-semibold">
+              Giả định cần xác nhận
+            </span>
+            <p className="mt-0.5 text-xs text-amber-800 dark:text-amber-200">
+              {def.excluded_notes}
+            </p>
+          </div>
+        )}
+
         {/* YAML Preview */}
         {showYaml && (
           <div className="mt-3 overflow-hidden rounded-md border border-border bg-secondary/20">
@@ -732,13 +787,13 @@ function SuggestionCard({
         <span className="font-mono text-[11px] text-muted-foreground">
           {suggestion.conflict
             ? 'Xử lý cảnh báo trùng tên trước khi lưu'
-            : 'Lưu vào Semantic Layer (chờ Data Lead phê duyệt trước khi truy vấn)'}
+            : 'Pending status · Phê duyệt trong catalog trước khi truy vấn'}
         </span>
 
         {/* ⛔ No Save/Submit while the conflict strip is unresolved — user must clarify first */}
         {!suggestion.conflict &&
           (action === 'submit_metric_request' ? (
-            isApproved ? (
+            isApproved || isSaved ? (
               <Button
                 size="sm"
                 variant="secondary"

@@ -19,7 +19,7 @@ import {
 } from '@/lib/api';
 import { ChatMessage, metricRequestKey, StudioChatStream } from '@/components/studio/StudioChatStream';
 import { ViewHeader } from '@/components/workspace/ViewHeader';
-import { applySuggestedName } from '@/lib/metrics';
+import { applySuggestedName, metricName } from '@/lib/metrics';
 
 interface AIStudioViewProps {
   layer: SemanticLayerData;
@@ -367,7 +367,7 @@ export function AIStudioView({
           onSubmitMetricRequest={!canGenerateMetrics ? submitRequest : undefined}
           submittedRequestKeys={submittedRequestKeys}
           approvedRequestKeys={approvedRequestKeys}
-          savedMetricNames={layer.metrics.map((metric) => metric.name)}
+          savedMetricNames={layer.metrics.map((metric) => metricName(metric))}
         />
       </div>
     </div>

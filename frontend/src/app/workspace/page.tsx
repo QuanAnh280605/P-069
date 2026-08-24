@@ -177,7 +177,9 @@ export default function WorkspacePage() {
   const semanticDbId = activeLayer?.semantic_db_id;
   const canUseDataAssistant = Boolean(permissions.can_use_data_assistant);
   const canUseMetricStudio = Boolean(permissions.can_use_metric_studio);
-  const canManageMetrics = Boolean(permissions.can_create_metrics);
+  const canManageSchema = Boolean(permissions.can_manage_schema);
+  const canManageMetrics = Boolean(permissions.can_manage_metrics ?? permissions.can_create_metrics);
+  const canSubmitMetric = Boolean(permissions.can_submit_metric);
   const canApproveMetrics = Boolean(permissions.can_approve_metrics);
   const canChat = Boolean(
     permissions.can_use_chat &&
@@ -514,14 +516,18 @@ export default function WorkspacePage() {
         );
         setTab(nextCanChat ? 'studio' : 'metrics');
       }}
-      onRemoveDatabase={async (id) => {
-        const layer = layers.find((l) => l.id === id);
-        if (!layer || !token || !window.confirm(`Xóa database ${layer.db_name}?`)) return;
-        await deleteDatabaseApi(layer.id, token);
-        deleteLayer(layer.id);
-        setLayers((current) => current.filter((item) => item.id !== layer.id));
-      }}
-      onConnectDatabase={() => setConnectOpen(true)}
+      onRemoveDatabase={
+        canManageSchema
+          ? async (id) => {
+              const layer = layers.find((l) => l.id === id);
+              if (!layer || !token || !window.confirm(`Xóa database ${layer.db_name}?`)) return;
+              await deleteDatabaseApi(layer.id, token);
+              deleteLayer(layer.id);
+              setLayers((current) => current.filter((item) => item.id !== layer.id));
+            }
+          : undefined
+      }
+      onConnectDatabase={canManageSchema ? () => setConnectOpen(true) : undefined}
       onOpenSettings={() => setSettingsOpen(true)}
       onOpenWorkspaceManagement={
         permissions.can_manage_members ? () => setWorkspaceManagementOpen(true) : undefined
@@ -573,6 +579,8 @@ export default function WorkspacePage() {
               metrics={activeLayer.metrics}
               database={layerToDatabase(activeLayer)}
               canManageMetrics={canManageMetrics}
+              canApproveMetrics={canApproveMetrics}
+              canSubmitMetric={canSubmitMetric}
               onDeleteMetric={canManageMetrics ? removeMetric : undefined}
               onEditMetric={canManageMetrics ? (item) => openEditor(item) : undefined}
               onOpenStudio={canUseMetricStudio ? () => setTab('studio') : undefined}
@@ -611,10 +619,12 @@ export default function WorkspacePage() {
               định nghĩa các chỉ số.
             </p>
           </div>
-          <Button onClick={() => setConnectOpen(true)} className="gap-2 text-xs">
-            <Plus className="h-4 w-4" />
-            Thêm kết nối Database
-          </Button>
+          {canManageSchema && (
+            <Button onClick={() => setConnectOpen(true)} className="gap-2 text-xs">
+              <Plus className="h-4 w-4" />
+              Thêm kết nối Database
+            </Button>
+          )}
         </div>
       )}
 

@@ -100,8 +100,8 @@ from src.services.live_db_service import (
     get_live_target_db,
     list_live_target_dbs,
 )
-from src.services.metric_dedupe import load_existing_for_dedupe
 from src.services.metric_context import MetricContextResult, build_data_context, build_metric_context
+from src.services.metric_dedupe import load_existing_for_dedupe
 from src.services.metric_request_service import (
     MetricRequestError,
     approve_metric_request,
@@ -126,7 +126,6 @@ from src.services.schema_ingestion import parse_sql_dump_preview
 from src.services.semantic_compile_error import SemanticCompileError
 from src.services.semantic_service import (
     DuplicateMetricError,
-    MetricRequiresReviewError,
     _coerce_metric_definition,
     approve_metric,
     create_metric,
