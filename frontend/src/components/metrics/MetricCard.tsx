@@ -31,6 +31,11 @@ export function MetricCard({ metric, onEdit, onDelete, onHistory, onApprove }: M
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
+            {metric.has_pending_version && (
+              <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-500 border border-amber-500/30">
+                ⚡ v{metric.pending_version_number || (metric.version || 1) + 1} chờ duyệt
+              </span>
+            )}
             <StatusPill status={metric.status} />
           </div>
         </div>

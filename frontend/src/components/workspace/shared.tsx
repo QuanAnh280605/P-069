@@ -2,7 +2,7 @@ import type { MetricStatus } from '@/lib/api';
 import { Database, HardDrive, Server } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type ViewId = 'ai-studio' | 'catalog' | 'explorer' | 'export';
+export type ViewId = 'ai-studio' | 'schema' | 'catalog' | 'explorer' | 'export';
 
 export type DbEngine = 'postgresql' | 'mysql' | 'sqlite' | 'sqlserver' | 'dump';
 

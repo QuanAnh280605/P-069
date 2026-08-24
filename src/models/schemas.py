@@ -187,6 +187,7 @@ class MetricUpdate(BaseModel):
     """Replace a metric definition and create a new pending version."""
 
     definition: MetricDefinition
+    change_reason: str = Field(default="", description="Lý do thay đổi (audit log)")
 
 
 class MetricResponse(BaseModel):
@@ -207,10 +208,17 @@ class MetricVersionResponse(BaseModel):
     id: int
     metric_id: int
     version: int
+    name: str = ""
     definition: MetricDefinition | None = None
     formula: str = ""
+    status: str = "superseded"
+    parent_version: int | None = None
     changed_by: int | None = None
+    changed_by_name: str = ""
     change_reason: str = ""
+    approved_by: int | None = None
+    approved_by_name: str = ""
+    approved_at: datetime | None = None
     created_at: datetime
 
 
@@ -221,6 +229,25 @@ class MetricWithHistoryResponse(MetricResponse):
     status: str
     approved_by: int | None = None
     history: list[MetricVersionResponse] = Field(default_factory=list)
+    pending_version: MetricVersionResponse | None = Field(
+        default=None,
+        description="Bản sửa đang chờ duyệt (copy-on-write) — definition đang publish không bị ghi đè",
+    )
+
+
+class MetricUpdateResponse(MetricResponse):
+    """Result of editing a metric.
+
+    A published metric is never overwritten: the live definition is returned
+    unchanged and the edit is surfaced in ``pending_version`` so the caller can
+    tell the reviewer their change is queued instead of applied.
+    """
+
+    version: int = 0
+    pending_version: MetricVersionResponse | None = Field(
+        default=None,
+        description="Bản sửa copy-on-write đang chờ duyệt; null nghĩa là bản sửa đã áp dụng trực tiếp",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -613,6 +640,8 @@ class SemanticGenerateV2Response(BaseModel):
 
     db_id: int
     status: str = "draft"
+    pending_tables: int = 0
+    pending_columns: int = 0
     tables: list[dict[str, Any]] = Field(default_factory=list)
     relationships: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -638,6 +667,8 @@ class MetricListItem(BaseModel):
     status: str
     approved_by: int | None = None
     created_at: datetime
+    has_pending_version: bool = False
+    pending_version_number: int | None = None
 
 
 class MetricVersionItem(BaseModel):
@@ -647,8 +678,14 @@ class MetricVersionItem(BaseModel):
 
     version: int
     definition: MetricDefinition | None = None
+    status: str = "superseded"
+    parent_version: int | None = None
     changed_by: int | None = None
+    changed_by_name: str = ""
     change_reason: str = ""
+    approved_by: int | None = None
+    approved_by_name: str = ""
+    approved_at: datetime | None = None
     created_at: datetime
 
 
@@ -659,6 +696,7 @@ class MetricHistoryResponse(BaseModel):
 
     metric_id: int
     metric_name: str
+    live_version: int = 0
     versions: list[MetricVersionItem]
 
 

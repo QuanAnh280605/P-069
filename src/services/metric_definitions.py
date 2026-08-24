@@ -14,6 +14,7 @@ from src.models.db import (
     SemanticTableModel,
 )
 from src.models.metric_definition import MetricDefinition, MetricStatus
+from src.models.review_mixin import REVIEW_STATUS_PENDING
 from src.models.schema_metadata import RawSchemaMetadata
 
 _NUMERIC_TYPES = (
@@ -101,6 +102,7 @@ async def _bootstrap_semantic_tables_if_empty(db: AsyncSession, db_id: int) -> N
             table_name=t_name,
             business_name=t_name.replace("_", " ").title(),
             description="",
+            review_status=REVIEW_STATUS_PENDING,
             physical_schema=table_meta.schema_name.raw_name,
             primary_key_column=pk_col_name,
             created_by=user_id,
@@ -116,6 +118,7 @@ async def _bootstrap_semantic_tables_if_empty(db: AsyncSession, db_id: int) -> N
                 data_type=col_meta.data_type,
                 business_name=c_name.replace("_", " ").title(),
                 description="",
+                review_status=REVIEW_STATUS_PENDING,
                 is_primary_key=col_meta.primary_key,
                 is_nullable=col_meta.nullable,
                 is_time_dimension=is_time,

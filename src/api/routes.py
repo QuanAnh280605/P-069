@@ -5,7 +5,7 @@ from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,10 +17,10 @@ from src.models.db import (
     ImportedSchemaModel,
     LiveTargetDbModel,
     OrganizationMemberModel,
-    SemanticColumnModel,
     SemanticDatabaseModel,
     SemanticMetricModel,
     SemanticTableModel,
+    MetricVersionModel,
     UserModel,
 )
 from src.models.metric_definition import MetricDefinition
@@ -50,7 +50,9 @@ from src.models.schemas import (
     MetricListItem,
     MetricResponse,
     MetricUpdate,
+    MetricUpdateResponse,
     MetricVersionItem,
+    MetricVersionResponse,
     SemanticApproveV2Response,
     SemanticCatalogColumn,
     SemanticCatalogResponse,
@@ -97,6 +99,7 @@ from src.services.metric_dedupe import load_existing_for_dedupe
 from src.services.metric_rollback import (
     rollback_metric as rollback_metric_record,
 )
+from src.services.metric_versioning import latest_open_version
 from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
 from src.services.organization_service import (
     ROLE_PERMISSIONS,
@@ -107,6 +110,11 @@ from src.services.organization_service import (
 from src.services.query_compiler import SemanticQueryCompiler
 from src.services.query_execution import execute_compiled_query
 from src.services.schema_ingestion import parse_sql_dump_preview
+from src.services.schema_review_service import (
+    SchemaRowNotFoundError,
+    update_column_review,
+    update_table_review,
+)
 from src.services.semantic_compile_error import SemanticCompileError
 from src.services.semantic_service import (
     MetricRequiresReviewError,
@@ -251,6 +259,13 @@ def _parse_int_id(raw_id: str | int) -> int | None:
         return int(raw_id)
     except (ValueError, TypeError):
         return None
+
+
+def _actor_name(actor: UserModel | None) -> str:
+    """Render a display name for a version actor, falling back to their email."""
+    if actor is None:
+        return ""
+    return (getattr(actor, "full_name", "") or "").strip() or getattr(actor, "email", "") or ""
 
 
 def _validate_preview_content_type(request: Request) -> None:
@@ -486,6 +501,8 @@ async def generate_semantic_layer(
     return SemanticGenerateV2Response(
         db_id=db_id,
         status=result.get("status", "draft"),
+        pending_tables=result.get("pending_tables", 0),
+        pending_columns=result.get("pending_columns", 0),
         tables=result.get("tables", []),
         relationships=result.get("relationships", []),
     )
@@ -618,25 +635,19 @@ async def update_table(
     user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Update business_name & description for a table."""
+    """Apply a reviewer's inline edit to a table, keeping it pending until approval."""
     int_id = _parse_int_id(db_id)
     if int_id is not None:
         await _require_resource_permission(db, user.id, int_id, org_id, "can_manage_schema")
     if int_id is None:
         return {"message": "Table updated successfully"}
 
-    stmt = select(SemanticTableModel).where(
-        SemanticTableModel.db_id == int_id,
-        SemanticTableModel.table_name == table_name,
-    )
-    tbl = (await db.execute(stmt)).scalar_one_or_none()
-    if not tbl:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Table not found")
-
-    tbl.business_name = body.business_name.strip()
-    tbl.description = body.description.strip()
+    try:
+        table = await update_table_review(db, int_id, table_name, body.business_name, body.description, user.id)
+    except SchemaRowNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Table not found") from exc
     await db.commit()
-    return {"message": "Table updated successfully"}
+    return {"message": "Table updated successfully", "review_status": table.review_status}
 
 
 @router.put("/semantic/{db_id}/column/{table_name}/{column_name}", status_code=status.HTTP_200_OK)
@@ -649,30 +660,22 @@ async def update_column(
     user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Update business_name & description for a column."""
+    """Apply a reviewer's inline edit to a column, keeping it pending until approval."""
     int_id = _parse_int_id(db_id)
     if int_id is not None:
         await _require_resource_permission(db, user.id, int_id, org_id, "can_manage_schema")
     if int_id is None:
         return {"message": "Column updated successfully"}
 
-    stmt = (
-        select(SemanticColumnModel)
-        .join(SemanticTableModel)
-        .where(
-            SemanticTableModel.db_id == int_id,
-            SemanticTableModel.table_name == table_name,
-            SemanticColumnModel.column_name == column_name,
+    try:
+        column = await update_column_review(
+            db, int_id, table_name, column_name, body.business_name, body.description, user.id
         )
-    )
-    col = (await db.execute(stmt)).scalar_one_or_none()
-    if not col:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
-
-    col.business_name = body.business_name.strip()
-    col.description = body.description.strip()
+    except SchemaRowNotFoundError as exc:
+        detail = "Table not found" if "Table" in str(exc) else "Column not found"
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail) from exc
     await db.commit()
-    return {"message": "Column updated successfully"}
+    return {"message": "Column updated successfully", "review_status": column.review_status}
 
 
 # ---------------------------------------------------------------------------
@@ -895,6 +898,20 @@ async def list_metrics(
     result = await db.execute(stmt)
     metrics = result.scalars().all()
 
+    # Query open pending versions across metrics for this database
+    v_stmt = (
+        select(MetricVersionModel.metric_id, func.max(MetricVersionModel.version))
+        .where(
+            MetricVersionModel.metric_id.in_([m.id for m in metrics]) if metrics else False,
+            MetricVersionModel.status.in_({"pending_approval", "needs_review"}),
+        )
+        .group_by(MetricVersionModel.metric_id)
+    )
+    v_map: dict[int, int] = {}
+    if metrics:
+        v_rows = (await db.execute(v_stmt)).all()
+        v_map = {row[0]: row[1] for row in v_rows}
+
     return [
         MetricListItem(
             metric_id=m.id,
@@ -905,6 +922,8 @@ async def list_metrics(
             status=m.status or "needs_review",
             approved_by=m.approved_by,
             created_at=m.created_at,
+            has_pending_version=m.id in v_map,
+            pending_version_number=v_map.get(m.id),
         )
         for m in metrics
     ]
@@ -1074,7 +1093,13 @@ async def get_metric_history(
             version=v.version,
             definition=v.definition,
             changed_by=v.changed_by,
+            changed_by_name=_actor_name(v.changer),
             change_reason=v.change_reason or "",
+            status=v.status,
+            parent_version=v.parent_version,
+            approved_by=v.approved_by,
+            approved_by_name=_actor_name(v.approver),
+            approved_at=v.approved_at,
             created_at=v.created_at,
         )
         for v in sorted(metric.versions, key=lambda x: x.version)
@@ -1083,6 +1108,7 @@ async def get_metric_history(
     return MetricHistoryResponse(
         metric_id=metric.id,
         metric_name=metric.name,
+        live_version=metric.version,
         versions=versions,
     )
 
@@ -1135,7 +1161,23 @@ async def get_metric_filter_columns(
     )
 
 
-@router.put("/semantic/{db_id}/metric/{metric_id}", response_model=MetricResponse)
+async def _metric_update_response(db: AsyncSession, metric: SemanticMetricModel) -> MetricUpdateResponse:
+    """Return the live metric plus the copy-on-write draft, if the edit was queued."""
+    draft = await latest_open_version(db, metric.id)
+    return MetricUpdateResponse(
+        metric_id=metric.id,
+        definition=metric.definition,
+        source=metric.source,
+        status=metric.status,
+        name=metric.name,
+        version=metric.version,
+        pending_version=(
+            MetricVersionResponse.model_validate(draft, from_attributes=True) if draft is not None else None
+        ),
+    )
+
+
+@router.put("/semantic/{db_id}/metric/{metric_id}", response_model=MetricUpdateResponse)
 async def update_metric(
     db_id: str,
     metric_id: int,
@@ -1143,8 +1185,8 @@ async def update_metric(
     org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
-) -> MetricResponse:
-    """Replace a metric definition and reset it to pending approval."""
+) -> MetricUpdateResponse:
+    """Replace a metric definition, or park it as a draft when already published."""
     try:
         numeric_db_id = int(db_id)
         resource = await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_manage_metrics")
@@ -1157,7 +1199,10 @@ async def update_metric(
         metric = await update_metric_record(
             db,
             metric_id,
-            {"definition": body.definition.model_dump(mode="json")},
+            {
+                "definition": body.definition.model_dump(mode="json"),
+                "change_reason": body.change_reason,
+            },
             current_user.id,
             require_ownership=resource.org_id is None,
         )
@@ -1165,12 +1210,7 @@ async def update_metric(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await db.commit()
     await db.refresh(metric)
-    return MetricResponse(
-        metric_id=metric.id,
-        definition=metric.definition,
-        source=metric.source,
-        status=metric.status,
-    )
+    return await _metric_update_response(db, metric)
 
 
 @router.post("/semantic/{db_id}/metric/{metric_id}/rollback/{target_version}", response_model=MetricResponse)

@@ -17,6 +17,14 @@ export interface SemanticTable {
 export type MetricFunction = 'SUM' | 'COUNT' | 'COUNT_DISTINCT' | 'AVG' | 'MIN' | 'MAX';
 export type MetricStatus = 'pending_approval' | 'approved' | 'needs_review' | 'unverified';
 export type MetricConfidence = 'low' | 'medium' | 'high';
+/** Lifecycle of one append-only row in `metric_versions`. */
+export type MetricVersionStatus =
+  | 'pending_approval'
+  | 'needs_review'
+  | 'approved'
+  | 'superseded'
+  | 'rejected';
+
 export type FilterOperator =
   'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'not_in' | 'is_null' | 'is_not_null';
 
@@ -57,6 +65,8 @@ export interface MetricRecord {
   created_by?: number | null;
   created_at: string;
   updated_at?: string;
+  has_pending_version?: boolean;
+  pending_version_number?: number | null;
 }
 
 export interface SemanticLayerData {
@@ -102,14 +112,21 @@ export interface MetricSuggestion {
 export interface MetricVersion {
   version: number;
   definition: MetricDefinition | null;
+  status?: MetricVersionStatus;
+  parent_version?: number | null;
   changed_by?: number | null;
+  changed_by_name?: string;
   change_reason: string;
+  approved_by?: number | null;
+  approved_by_name?: string;
+  approved_at?: string | null;
   created_at: string;
 }
 
 export interface MetricHistory {
   metric_id: number;
   metric_name: string;
+  live_version?: number;
   versions: MetricVersion[];
 }
 
@@ -786,21 +803,30 @@ export async function createMetricApi(
   return metricResponseToRecord(data);
 }
 
+/** A metric edit, plus the copy-on-write draft when the metric was already published. */
+export interface MetricUpdateResult {
+  metric: MetricRecord;
+  /** Present when the edit was queued for approval instead of applied. */
+  pendingVersion: MetricVersion | null;
+}
+
 export async function updateMetricApi(
   dbId: string,
   metricId: number,
   definition: MetricDefinition,
-): Promise<MetricRecord> {
+  change_reason?: string,
+): Promise<MetricUpdateResult> {
   const data = await semanticRequest<{
     metric_id: number;
     definition: MetricDefinition;
     source: 'ai' | 'manual';
     status?: MetricStatus;
+    pending_version?: MetricVersion | null;
   }>(`/api/v1/semantic/${dbId}/metric/${metricId}`, {
     method: 'PUT',
-    body: JSON.stringify({ definition }),
+    body: JSON.stringify({ definition, change_reason }),
   });
-  return metricResponseToRecord(data);
+  return { metric: metricResponseToRecord(data), pendingVersion: data.pending_version ?? null };
 }
 
 export async function deleteMetricApi(dbId: string, metricId: number): Promise<void> {
@@ -863,6 +889,124 @@ export async function approveSingleMetricApi(
     status?: MetricStatus;
   }>(`/api/v1/semantic/${dbId}/metric/${metricId}/approve`, { method: 'POST' });
   return metricResponseToRecord(data);
+}
+
+/** One column in the HITL schema-review queue. */
+export interface SchemaReviewColumn {
+  column_name: string;
+  business_name: string;
+  description: string;
+  data_type: string;
+  ai_business_name?: string | null;
+  ai_description?: string | null;
+  review_status: 'pending_review' | 'approved';
+  is_primary_key: boolean;
+  is_time_dimension: boolean;
+  reviewed_by?: number | null;
+  reviewed_at?: string | null;
+}
+
+/** One table in the HITL schema-review queue, with its columns. */
+export interface SchemaReviewTable {
+  table_id: number;
+  table_name: string;
+  business_name: string;
+  description: string;
+  physical_schema?: string | null;
+  ai_business_name?: string | null;
+  ai_description?: string | null;
+  review_status: 'pending_review' | 'approved';
+  reviewed_by?: number | null;
+  reviewed_at?: string | null;
+  columns: SchemaReviewColumn[];
+}
+
+export interface SchemaReview {
+  db_id: number;
+  status: 'pending_review' | 'approved';
+  pending_tables: number;
+  pending_columns: number;
+  tables: SchemaReviewTable[];
+}
+
+export interface SchemaApproveResult {
+  db_id: number;
+  approved_tables: number;
+  approved_columns: number;
+  pending_tables: number;
+  pending_columns: number;
+  status: 'pending_review' | 'approved';
+}
+
+/** Fetch the review queue of AI-proposed business names awaiting BA/DA approval. */
+export async function getSchemaReviewApi(dbId: string): Promise<SchemaReview> {
+  return semanticRequest<SchemaReview>(`/api/v1/semantic/${dbId}/schema/review`);
+}
+
+/** Save a reviewer's inline edit of a table; the row stays pending until approved. */
+export async function updateTableReviewApi(
+  dbId: string,
+  tableName: string,
+  businessName: string,
+  description: string,
+): Promise<{ message: string; review_status: string }> {
+  return semanticRequest(`/api/v1/semantic/${dbId}/table/${encodeURIComponent(tableName)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ business_name: businessName, description }),
+  });
+}
+
+/** Save a reviewer's inline edit of a column; the row stays pending until approved. */
+export async function updateColumnReviewApi(
+  dbId: string,
+  tableName: string,
+  columnName: string,
+  businessName: string,
+  description: string,
+): Promise<{ message: string; review_status: string }> {
+  const path = `/api/v1/semantic/${dbId}/column/${encodeURIComponent(tableName)}/${encodeURIComponent(columnName)}`;
+  return semanticRequest(path, {
+    method: 'PUT',
+    body: JSON.stringify({ business_name: businessName, description }),
+  });
+}
+
+/** Approve the review queue (or only `tableNames`) into the Metadata Store. */
+export async function approveSchemaReviewApi(
+  dbId: string,
+  tableNames?: string[],
+): Promise<SchemaApproveResult> {
+  return semanticRequest<SchemaApproveResult>(`/api/v1/semantic/${dbId}/schema/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ table_names: tableNames ?? null }),
+  });
+}
+
+/** Read the copy-on-write draft awaiting approval, or null when there is none. */
+export async function getPendingMetricVersionApi(
+  dbId: string,
+  metricId: number,
+): Promise<MetricVersion | null> {
+  try {
+    return await semanticRequest<MetricVersion>(
+      `/api/v1/semantic/${dbId}/metric/${metricId}/pending-version`,
+    );
+  } catch (caught) {
+    if (caught instanceof SemanticApiError && caught.status === 404) return null;
+    throw caught;
+  }
+}
+
+/** Reject the pending draft; the published definition keeps serving Flow 2. */
+export async function rejectMetricVersionApi(
+  dbId: string,
+  metricId: number,
+  reason: string,
+): Promise<MetricVersion> {
+  return semanticRequest<MetricVersion>(`/api/v1/semantic/${dbId}/metric/${metricId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export async function getSemanticCatalogApi(dbId: string): Promise<SemanticCatalog> {

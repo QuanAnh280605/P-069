@@ -1156,7 +1156,7 @@ async def test_rollback_missing_snapshot_returns_422(client, async_session):
 
 @pytest.mark.asyncio
 async def test_rollback_restores_v2_deletes_v3_and_approves(client, async_session):
-    """v3→v2 deletes v3 and leaves the current row as approved v2 content."""
+    """v3→v2 republishes the v2 content as a new approved v4 while keeping v1-v3."""
     actor, org_id, db_id, metric_id = await _seed_metric_with_versions(async_session, "data_lead")
     before = await _fetch_rollback_versions(async_session, metric_id)
     assert [v.version for v in before] == [1, 2, 3]
@@ -1172,7 +1172,7 @@ async def test_rollback_restores_v2_deletes_v3_and_approves(client, async_sessio
     assert body["status"] == "approved"
 
     metric = await async_session.get(SemanticMetricModel, metric_id)
-    assert metric.version == 2
+    assert metric.version == 4
     assert metric.status == "approved"
     assert metric.aggregation_type == "AVG"
     assert metric.definition["metric"]["formula"]["function"] == "AVG"
@@ -1180,7 +1180,9 @@ async def test_rollback_restores_v2_deletes_v3_and_approves(client, async_sessio
     assert metric.definition["metric"]["status"] == "approved"
 
     remaining = await _fetch_rollback_versions(async_session, metric_id)
-    assert [v.version for v in remaining] == [1, 2]
+    assert [v.version for v in remaining] == [1, 2, 3, 4]
+    assert remaining[3].parent_version == 2
+    assert remaining[3].status == "approved"
 
 
 @pytest.mark.asyncio

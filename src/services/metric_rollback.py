@@ -1,16 +1,27 @@
-"""Transactional destructive rollback of metrics to prior approved versions."""
+"""Non-destructive revert of a metric to an earlier approved version.
+
+Reverting never deletes history: the target snapshot is replayed as a brand new
+version on top of the current one, so the audit trail keeps every intermediate
+edit and the revert itself is attributable.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.db import MetricVersionModel, SemanticMetricModel
 from src.models.metric_definition import MetricDefinition
 from src.services.metric_definition_resolver import MetricDefinitionResolver
 from src.services.metric_definitions import validate_metric_definition, with_metric_status
+from src.services.metric_versioning import (
+    VERSION_STATUS_APPROVED,
+    next_version_number,
+    record_version,
+    supersede_open_versions,
+)
 from src.services.query_compiler import SemanticQueryCompiler
 
 
@@ -21,13 +32,13 @@ async def rollback_metric(
     actor_id: int,
     require_ownership: bool = False,
 ) -> SemanticMetricModel:
-    """Destructively rewind a metric to an earlier version inside the caller's transaction.
+    """Revert a metric to *target_version* by appending it as a new approved version.
 
     Loads the exact target snapshot, resolves and validates it against current
-    semantic metadata, restores the metric row as ``approved`` for *actor_id*,
-    verifies deterministic compilation, then deletes only this metric's versions
-    newer than the target. Flushes only; the route owns the commit so any failure
-    rolls the whole operation back.
+    semantic metadata, appends it as version N+1 owned by *actor_id*, republishes
+    the metric row from that snapshot, and verifies deterministic compilation.
+    Existing versions are preserved; open drafts are superseded. Flushes only —
+    the route owns the commit so any failure rolls the whole operation back.
 
     Raises ValueError when the metric or target snapshot is missing/invalid,
     ownership is required but absent, or resolution/validation/compilation fails.
@@ -37,9 +48,8 @@ async def rollback_metric(
     _assert_rollback_access(metric, actor_id, require_ownership)
     _validate_rollback_target(metric, target, target_version)
     payload = await _resolve_target_snapshot(db, metric, target)
-    await _restore_metric_row(db, metric, payload, target_version, actor_id)
+    await _append_revert_version(db, metric, payload, target_version, actor_id)
     await SemanticQueryCompiler(db).compile(metric.db_id, metric_ids=[metric.id], dimension_ids=[])
-    await _delete_versions_after(db, metric.id, target_version)
     return metric
 
 
@@ -97,32 +107,53 @@ async def _resolve_target_snapshot(
     if definition.diagnostics:
         raise ValueError(f"Version {target.version} cannot be restored: grain diagnostics present")
     definition = with_metric_status(definition, "approved")
-    await validate_metric_definition(db, metric.db_id, definition)
-    return definition.model_dump(mode="json")
+    table = await validate_metric_definition(db, metric.db_id, definition)
+    payload = definition.model_dump(mode="json")
+    payload["_base_entity_id"] = table.id
+    return payload
 
 
-async def _restore_metric_row(
+async def _append_revert_version(
     db: AsyncSession,
     metric: SemanticMetricModel,
     payload: dict[str, Any],
     target_version: int,
     actor_id: int,
+) -> MetricVersionModel:
+    """Append the reverted snapshot as a new approved version and republish it."""
+    base_entity_id = payload.pop("_base_entity_id")
+    await supersede_open_versions(db, metric.id)
+    new_version = await next_version_number(db, metric.id)
+    record = await record_version(
+        db,
+        metric.id,
+        payload,
+        payload["metric"]["name"],
+        VERSION_STATUS_APPROVED,
+        actor_id,
+        change_reason=f"Hoàn nguyên về version {target_version}",
+        parent_version=target_version,
+        version=new_version,
+    )
+    _republish(metric, payload, base_entity_id, new_version, actor_id)
+    await db.flush()
+    return record
+
+
+def _republish(
+    metric: SemanticMetricModel,
+    payload: dict[str, Any],
+    base_entity_id: int,
+    version: int,
+    actor_id: int,
 ) -> None:
-    """Explicitly restore approved target fields; identity fields stay untouched."""
+    """Point the live metric row at the reverted definition."""
+    metric.name = payload["metric"]["name"]
+    metric.description = payload["metric"].get("excluded_notes", "")
     metric.definition = payload
+    metric.base_entity_id = base_entity_id
     metric.formula = payload["metric"]["formula"]["expression"]
     metric.aggregation_type = payload["metric"]["formula"]["function"]
-    metric.version = target_version
+    metric.version = version
     metric.status = "approved"
     metric.approved_by = actor_id
-    await db.flush()
-
-
-async def _delete_versions_after(db: AsyncSession, metric_id: int, target_version: int) -> None:
-    """Delete only this metric's version records newer than the rollback target."""
-    stmt = delete(MetricVersionModel).where(
-        MetricVersionModel.metric_id == metric_id,
-        MetricVersionModel.version > target_version,
-    )
-    await db.execute(stmt)
-    await db.flush()
