@@ -26,7 +26,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -60,6 +60,7 @@ import {
   RecommendedDimensionItem,
   SemanticApiError,
   SemanticCatalog,
+  SemanticQueryFilter,
   SemanticQueryPreview,
   SemanticQueryRequest,
   SemanticQueryResult,
@@ -76,12 +77,27 @@ import {
 import { SectionLabel, StatusPill, type WorkspaceDatabase } from '@/components/workspace/shared';
 import { ViewHeader } from '@/components/workspace/ViewHeader';
 
+/**
+ * Stateful selection pushed from the Metrics Dashboard drill-down.
+ * `requestKey` is monotonically increasing so the Explorer applies each
+ * drill-down exactly once and never replays a stale selection on ordinary
+ * navigation back to the Explorer tab.
+ */
+export interface ExplorerInitialSelection {
+  metricId: number;
+  dimensionColId?: number | null;
+  timeGrain?: TimeGrain | null;
+  dateFilters: SemanticQueryFilter[];
+  requestKey: number;
+}
+
 interface Props {
   dbId?: number | null;
   metrics: MetricRecord[];
   catalog: SemanticCatalog | null;
   theme: 'light' | 'dark';
   database?: WorkspaceDatabase | null;
+  initialSelection?: ExplorerInitialSelection | null;
 }
 
 const TIME_GRAIN_OPTIONS: { label: string; value: TimeGrain; enLabel: string }[] = [
@@ -236,7 +252,14 @@ function formatShortNumber(num: number): string {
   return num.toLocaleString();
 }
 
-export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: Props) {
+export function MetricExplorerView({
+  dbId,
+  metrics,
+  catalog,
+  theme,
+  database,
+  initialSelection,
+}: Props) {
   const [metricIds, setMetricIds] = useState<number[]>([]);
   const [dimensions, setDimensions] = useState<DimensionSelection[]>([]);
   const [limit, setLimit] = useState(100);
@@ -250,6 +273,9 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
   const [copiedSql, setCopiedSql] = useState(false);
   const [recommendedDims, setRecommendedDims] = useState<RecommendedDimensionItem[]>([]);
   const [loadingDims, setLoadingDims] = useState(false);
+  const [filters, setFilters] = useState<SemanticQueryFilter[]>([]);
+  const [dashboardFilterActive, setDashboardFilterActive] = useState(false);
+  const appliedSelectionKey = useRef<number | null>(null);
 
   const approved = useMemo(
     () => metrics.filter((item) => item.status === 'approved' && item.definition),
@@ -392,6 +418,63 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
       }));
   }, [metricIds, recommendedDims, dimSearch, catalog, baseTable]);
 
+  useEffect(() => {
+    if (!initialSelection) return;
+    if (appliedSelectionKey.current === initialSelection.requestKey) return;
+    if (!catalog) return;
+    appliedSelectionKey.current = initialSelection.requestKey;
+
+    setMetricIds([initialSelection.metricId]);
+
+    const nextDimensions: DimensionSelection[] = [];
+
+    let timeColId: number | null = null;
+    if (initialSelection.timeGrain) {
+      const metric = approved.find((m) => m.metric_id === initialSelection.metricId);
+      const baseTable = metric?.definition?.metric.base_entity
+        ? catalog.tables.find(
+            (t) =>
+              t.table_name === metric.definition?.metric.base_entity ||
+              t.table_id === metric.definition?.metric.base_entity_id,
+          )
+        : undefined;
+      const timeCol = baseTable
+        ? baseTable.columns.find((c) => isTimeDimension(c))
+        : allColumns.find((c) => isTimeDimension(c));
+      timeColId = timeCol ? timeCol.column_id : null;
+    }
+
+    if (initialSelection.dimensionColId) {
+      const dimCol = allColumns.find((c) => c.column_id === initialSelection.dimensionColId);
+      const isTimeDim = dimCol ? isTimeDimension(dimCol) : false;
+      if (isTimeDim && initialSelection.timeGrain && initialSelection.dimensionColId === timeColId) {
+        nextDimensions.push({
+          column_id: initialSelection.dimensionColId,
+          time_grain: initialSelection.timeGrain,
+        });
+      } else {
+        nextDimensions.push({ column_id: initialSelection.dimensionColId, time_grain: undefined });
+      }
+    }
+
+    if (initialSelection.timeGrain && timeColId !== null) {
+      const alreadyAdded = nextDimensions.some((d) => d.column_id === timeColId);
+      if (!alreadyAdded) {
+        nextDimensions.push({ column_id: timeColId, time_grain: initialSelection.timeGrain });
+      }
+    }
+
+    setDimensions(nextDimensions);
+
+    if (initialSelection.dateFilters.length > 0) {
+      setFilters(initialSelection.dateFilters);
+      setDashboardFilterActive(true);
+    } else {
+      setFilters([]);
+      setDashboardFilterActive(false);
+    }
+  }, [initialSelection, catalog, approved, allColumns]);
+
   if (!catalog) {
     return (
       <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-12 text-center text-muted-foreground">
@@ -428,7 +511,7 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
   const request = (): SemanticQueryRequest => ({
     metric_ids: metricIds,
     dimensions,
-    filters: [],
+    filters,
     limit,
   });
 
@@ -525,6 +608,11 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
     setError('');
   };
 
+  const handleRemoveDashboardFilter = () => {
+    setFilters([]);
+    setDashboardFilterActive(false);
+  };
+
   const runCompile = async () => {
     if (!metricIds.length || !dbId) return;
     setLoading(true);
@@ -606,6 +694,21 @@ export function MetricExplorerView({ dbId, metrics, catalog, theme, database }: 
                 </button>
               )}
             </div>
+            {dashboardFilterActive && (
+              <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/10 px-2 py-1">
+                <span className="text-[10px] font-semibold text-primary uppercase tracking-wider">
+                  Bộ lọc từ Dashboard
+                </span>
+                <button
+                  type="button"
+                  onClick={handleRemoveDashboardFilter}
+                  aria-label="Xóa bộ lọc từ Dashboard"
+                  className="rounded-full p-0.5 text-primary hover:bg-primary/20 cursor-pointer"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
             <div className="mt-1.5 space-y-1">
               <p className="font-medium text-foreground leading-relaxed">
                 {metricIds.length > 0 ? (

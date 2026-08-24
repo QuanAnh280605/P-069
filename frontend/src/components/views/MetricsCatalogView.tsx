@@ -8,7 +8,6 @@ import {
   Search,
   Sigma,
   Sparkles,
-  Send,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -110,6 +109,7 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
         (item) =>
           item.status === 'pending_approval' ||
           item.status === 'needs_review' ||
+          Boolean(item.has_pending_version) ||
           (canManage && item.status === 'unverified'),
       ),
     [canManage, filtered],
@@ -129,6 +129,7 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
     (item) =>
       item.status === 'pending_approval' ||
       item.status === 'needs_review' ||
+      Boolean(item.has_pending_version) ||
       (canManage && item.status === 'unverified'),
   ).length;
 
@@ -164,12 +165,6 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
         database={props.database}
         actions={
           <div className="flex items-center gap-2">
-            {isMemberSubmitter && props.onSubmitMetric && (
-              <Button size="sm" className="gap-1.5 text-xs" onClick={props.onSubmitMetric}>
-                <Send className="h-3.5 w-3.5" />
-                Gửi metric
-              </Button>
-            )}
             {props.onOpenStudio && (
               <Button
                 size="sm"
@@ -477,6 +472,7 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
           history={history}
           dbId={props.dbId}
           canManage={canManage}
+          canApprove={canApprove}
           onClose={() => setHistory(null)}
           onMetricsChanged={props.onMetricsChanged}
         />

@@ -261,7 +261,7 @@ async def test_ensure_semantic_database_different_sources(async_session: AsyncSe
 
 @pytest.mark.asyncio
 async def test_enrich_saves_tables_with_status_draft(async_session: AsyncSession):
-    """enrich_and_save_canonical_schema saves all tables with status='draft' (HITL compliance)."""
+    """enrich_and_save_canonical_schema parks every enriched table in pending_review (HITL gate)."""
     raw_schema = _make_raw_schema()
     sem_db_id = await ensure_semantic_database(
         db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
@@ -276,15 +276,20 @@ async def test_enrich_saves_tables_with_status_draft(async_session: AsyncSession
         enrichment=_hitl_enrichment(),
     )
 
-    assert result["status"] == "draft"
+    assert result["status"] == "pending_review"
+    assert result["pending_tables"] == 2
+    assert result["pending_columns"] > 0
     assert len(result["tables"]) == 2
 
-    # Verify DB records have status='draft'
+    # AI proposals are stored but not yet officially approved
     db_result = await async_session.execute(select(SemanticTableModel).where(SemanticTableModel.db_id == sem_db_id))
     tables = db_result.scalars().all()
     for table in tables:
         assert table.business_name != ""  # enriched
         assert table.description != ""
+        assert table.ai_business_name == table.business_name
+        assert table.review_status == "pending_review"
+        assert table.reviewed_by is None
 
 
 @pytest.mark.asyncio
@@ -770,7 +775,7 @@ async def test_hitl_enrichment_skips_llm(async_session: AsyncSession):
         )
         mock_llm.assert_not_called()
 
-    assert result["status"] == "draft"
+    assert result["status"] == "pending_review"
     assert len(result["tables"]) == 2
 
     db_result = await async_session.execute(select(SemanticTableModel).where(SemanticTableModel.db_id == sem_db_id))
@@ -830,7 +835,7 @@ async def test_two_pass_pipeline_called_when_no_enrichment(async_session: AsyncS
         mock_cluster.assert_called_once()
         mock_pass2.assert_called_once()
 
-    assert result["status"] == "draft"
+    assert result["status"] == "pending_review"
     assert len(result["tables"]) == 2
 
 
@@ -1033,7 +1038,7 @@ async def test_approve_metric_raises_typed_review_error(async_session: AsyncSess
 
 
 # ---------------------------------------------------------------------------
-# rollback_metric — transactional destructive rewind
+# rollback_metric — non-destructive revert as a new version
 # ---------------------------------------------------------------------------
 
 
@@ -1062,8 +1067,8 @@ async def _fetch_versions(db: AsyncSession, metric_id: int) -> list[MetricVersio
 
 
 @pytest.mark.asyncio
-async def test_rollback_metric_restores_target_and_deletes_newer_versions(async_session: AsyncSession):
-    """rollback to v2 restores v2 content as approved v2 and deletes only versions >2 of this metric."""
+async def test_rollback_metric_appends_revert_version(async_session: AsyncSession):
+    """rollback to v2 republishes the v2 payload as a new v4 and keeps all history."""
     sem_db_id = await ensure_semantic_database(
         db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
     )
@@ -1077,7 +1082,7 @@ async def test_rollback_metric_restores_target_and_deletes_newer_versions(async_
 
     rolled = await rollback_metric(db=async_session, metric_id=metric.id, target_version=2, actor_id=7)
 
-    assert rolled.version == 2
+    assert rolled.version == 4
     assert rolled.status == "approved"
     assert rolled.approved_by == 7
     assert rolled.formula == "total"
@@ -1087,16 +1092,22 @@ async def test_rollback_metric_restores_target_and_deletes_newer_versions(async_
     assert rolled.definition["metric"]["formula"]["function"] == "SUM"
     assert rolled.definition["metric"]["status"] == "approved"
     # Identity fields are preserved, not rewound.
-    assert rolled.name == "Revenue V3"
     assert rolled.source == "manual"
     assert rolled.created_by == 1
 
     remaining = await _fetch_versions(async_session, metric.id)
-    assert [v.version for v in remaining] == [1, 2]
+    assert [v.version for v in remaining] == [1, 2, 3, 4]
     assert remaining[0].id == history_before[0].id
     assert remaining[0].definition == v1_snapshot
     assert remaining[1].id == history_before[1].id
     assert remaining[1].definition == v2_snapshot
+    revert = remaining[3]
+    assert revert.status == "approved"
+    assert revert.parent_version == 2
+    assert revert.changed_by == 7
+    assert revert.approved_by == 7
+    assert "2" in revert.change_reason
+    assert revert.definition["metric"]["formula"]["expression"] == "total"
 
 
 @pytest.mark.asyncio

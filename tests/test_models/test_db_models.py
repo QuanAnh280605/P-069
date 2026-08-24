@@ -1,5 +1,7 @@
 """Unit tests for Metadata Store ORM models and encryption utilities."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 import pytest_asyncio
 from cryptography.fernet import Fernet
@@ -10,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from src.models.db import (
     Base,
     CanonicalRelationshipModel,
+    DashboardLayoutModel,
     MetricVersionModel,
     SemanticColumnModel,
     SemanticDatabaseModel,
@@ -650,3 +653,156 @@ async def test_semantic_metric_versions_relationship(seed_user_and_db):
     )
     fetched = result.scalar_one()
     assert len(fetched.versions) == 2
+
+
+# --- Tests for DashboardLayoutModel ---
+
+
+@pytest.mark.asyncio
+async def test_dashboard_layout_creation(seed_user_and_db):
+    """Test creating a DashboardLayoutModel with explicit fields."""
+    async_db_session, user, db_rec = seed_user_and_db
+
+    layout = DashboardLayoutModel(
+        db_id=db_rec.id,
+        layout_json={"widgets": [{"id": "w1", "metric_id": 1}]},
+        updated_by=user.id,
+    )
+    async_db_session.add(layout)
+    await async_db_session.commit()
+
+    result = await async_db_session.execute(select(DashboardLayoutModel).where(DashboardLayoutModel.id == layout.id))
+    fetched = result.scalar_one()
+    assert fetched.db_id == db_rec.id
+    assert fetched.layout_json == {"widgets": [{"id": "w1", "metric_id": 1}]}
+    assert fetched.updated_by == user.id
+
+
+@pytest.mark.asyncio
+async def test_dashboard_layout_version_defaults_to_one(async_db_session: AsyncSession):
+    """Test DashboardLayoutModel.version defaults to 1 when omitted."""
+    db_rec = SemanticDatabaseModel(display_name="DB", db_type="sqlite", conn_url_enc="enc")
+    async_db_session.add(db_rec)
+    await async_db_session.flush()
+
+    layout = DashboardLayoutModel(db_id=db_rec.id, layout_json={"widgets": []})
+    async_db_session.add(layout)
+    await async_db_session.commit()
+
+    result = await async_db_session.execute(select(DashboardLayoutModel).where(DashboardLayoutModel.id == layout.id))
+    fetched = result.scalar_one()
+    assert fetched.version == 1
+
+
+@pytest.mark.asyncio
+async def test_dashboard_layout_updated_by_is_nullable(async_db_session: AsyncSession):
+    """Test DashboardLayoutModel.updated_by may be NULL."""
+    db_rec = SemanticDatabaseModel(display_name="DB", db_type="sqlite", conn_url_enc="enc")
+    async_db_session.add(db_rec)
+    await async_db_session.flush()
+
+    layout = DashboardLayoutModel(db_id=db_rec.id, layout_json={"widgets": []})
+    async_db_session.add(layout)
+    await async_db_session.commit()
+
+    result = await async_db_session.execute(select(DashboardLayoutModel).where(DashboardLayoutModel.id == layout.id))
+    fetched = result.scalar_one()
+    assert fetched.updated_by is None
+
+
+@pytest.mark.asyncio
+async def test_dashboard_layout_timestamps_default_to_utc_now(async_db_session: AsyncSession):
+    """Test created_at/updated_at are populated with current UTC time by default."""
+    before = datetime.now(UTC) - timedelta(seconds=1)
+    db_rec = SemanticDatabaseModel(display_name="DB", db_type="sqlite", conn_url_enc="enc")
+    async_db_session.add(db_rec)
+    await async_db_session.flush()
+
+    layout = DashboardLayoutModel(db_id=db_rec.id, layout_json={"widgets": []})
+    async_db_session.add(layout)
+    await async_db_session.commit()
+
+    after = datetime.now(UTC) + timedelta(seconds=1)
+    result = await async_db_session.execute(select(DashboardLayoutModel).where(DashboardLayoutModel.id == layout.id))
+    fetched = result.scalar_one()
+    assert before <= fetched.created_at <= after
+    assert before <= fetched.updated_at <= after
+    assert fetched.created_at.utcoffset() == timedelta(0)
+    assert fetched.updated_at.utcoffset() == timedelta(0)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_layout_unique_per_database(async_db_session: AsyncSession):
+    """Test only one dashboard layout can exist per semantic database (uq_dashboard_layouts_db_id)."""
+    db_rec = SemanticDatabaseModel(display_name="DB", db_type="sqlite", conn_url_enc="enc")
+    async_db_session.add(db_rec)
+    await async_db_session.flush()
+
+    async_db_session.add(DashboardLayoutModel(db_id=db_rec.id, layout_json={"widgets": []}))
+    await async_db_session.commit()
+
+    async_db_session.add(DashboardLayoutModel(db_id=db_rec.id, layout_json={"widgets": []}))
+    with pytest.raises(Exception, match="UNIQUE constraint failed"):
+        await async_db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_layout_database_relationship(seed_user_and_db):
+    """Test one-to-one relationship between SemanticDatabaseModel and its singleton layout."""
+    async_db_session, _, db_rec = seed_user_and_db
+
+    layout = DashboardLayoutModel(db_id=db_rec.id, layout_json={"widgets": []})
+    async_db_session.add(layout)
+    await async_db_session.commit()
+
+    result = await async_db_session.execute(
+        select(SemanticDatabaseModel)
+        .where(SemanticDatabaseModel.id == db_rec.id)
+        .options(selectinload(SemanticDatabaseModel.dashboard_layout))
+    )
+    fetched_db = result.scalar_one()
+    assert fetched_db.dashboard_layout is not None
+    assert fetched_db.dashboard_layout.layout_json == {"widgets": []}
+
+    result = await async_db_session.execute(
+        select(DashboardLayoutModel)
+        .where(DashboardLayoutModel.id == layout.id)
+        .options(selectinload(DashboardLayoutModel.database))
+    )
+    fetched_layout = result.scalar_one()
+    assert fetched_layout.database.display_name == "Test DB"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_layout_updater_relationship(seed_user_and_db):
+    """Test DashboardLayoutModel.updater relationship to UserModel."""
+    async_db_session, user, db_rec = seed_user_and_db
+
+    layout = DashboardLayoutModel(db_id=db_rec.id, layout_json={"widgets": []}, updated_by=user.id)
+    async_db_session.add(layout)
+    await async_db_session.commit()
+
+    result = await async_db_session.execute(
+        select(DashboardLayoutModel)
+        .where(DashboardLayoutModel.id == layout.id)
+        .options(selectinload(DashboardLayoutModel.updater))
+    )
+    fetched = result.scalar_one()
+    assert fetched.updater is not None
+    assert fetched.updater.username == "creator"
+
+
+@pytest.mark.asyncio
+async def test_deleting_semantic_database_cascades_dashboard_layout(seed_user_and_db):
+    """Test deleting the owning database removes its dashboard layout via ORM cascade."""
+    async_db_session, _, db_rec = seed_user_and_db
+
+    layout = DashboardLayoutModel(db_id=db_rec.id, layout_json={"widgets": []})
+    async_db_session.add(layout)
+    await async_db_session.commit()
+
+    await async_db_session.delete(db_rec)
+    await async_db_session.commit()
+
+    result = await async_db_session.execute(select(DashboardLayoutModel))
+    assert result.scalars().all() == []

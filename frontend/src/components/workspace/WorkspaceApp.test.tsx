@@ -104,7 +104,7 @@ describe('WorkspaceApp route composition', () => {
     },
   ];
 
-  const allViews: ViewId[] = ['ai-studio', 'catalog', 'explorer', 'export'];
+  const allViews: ViewId[] = ['ai-studio', 'catalog', 'explorer', 'dashboard', 'export'];
 
   function buildProps(overrides: Partial<Parameters<typeof WorkspaceApp>[0]> = {}) {
     return {
@@ -211,9 +211,12 @@ describe('WorkspaceApp route composition', () => {
     expect(onSelectView).toHaveBeenLastCalledWith('explorer');
 
     fireEvent.click(buttons[3]);
+    expect(onSelectView).toHaveBeenLastCalledWith('dashboard');
+
+    fireEvent.click(buttons[4]);
     expect(onSelectView).toHaveBeenLastCalledWith('export');
 
-    expect(onSelectView).toHaveBeenCalledTimes(4);
+    expect(onSelectView).toHaveBeenCalledTimes(5);
   });
 
   it('renders only the provided children content for the active view', () => {

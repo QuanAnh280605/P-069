@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from src.api.auth import auth_router
+from src.api.dashboard_routes import router as dashboard_router
 from src.api.organization_routes import router as organization_router
+from src.api.review_routes import review_router
 from src.api.routes import router
 from src.config import get_settings
 from src.models.db import Base
@@ -55,7 +57,9 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(organization_router, prefix="/api/v1")
+app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1")
+app.include_router(review_router, prefix="/api/v1")
 
 
 @app.get("/health")

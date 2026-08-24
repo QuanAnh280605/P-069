@@ -7,8 +7,10 @@ import {
   Building2,
   ChevronDown,
   ChevronLeft,
+  ClipboardCheck,
   Compass,
   History,
+  LayoutDashboard,
   LogOut,
   Moon,
   PanelLeftClose,
@@ -34,6 +36,8 @@ interface WorkspaceSidebarProps {
   view: ViewId;
   theme: 'light' | 'dark';
   pendingCount: number;
+  /** Table + column rows still awaiting BA/DA approval in the Metadata Store. */
+  pendingSchemaCount?: number;
   collapsed: boolean;
   userName?: string;
   chatSessions?: ChatSessionItem[];
@@ -63,8 +67,10 @@ interface WorkspaceSidebarProps {
 
 const navItems: { id: ViewId; label: string; icon: typeof Bot }[] = [
   { id: 'ai-studio', label: 'AI Studio', icon: Bot },
+  { id: 'schema', label: 'Schema Review', icon: ClipboardCheck },
   { id: 'catalog', label: 'Metrics Catalog', icon: BookMarked },
   { id: 'explorer', label: 'Metric Explorer', icon: Compass },
+  { id: 'dashboard', label: 'Metrics Dashboard', icon: LayoutDashboard },
   { id: 'export', label: 'Export Playground', icon: Upload },
 ];
 
@@ -74,6 +80,7 @@ export function WorkspaceSidebar({
   view,
   theme,
   pendingCount,
+  pendingSchemaCount = 0,
   collapsed,
   userName,
   chatSessions = [],
@@ -106,7 +113,11 @@ export function WorkspaceSidebar({
     permissions.can_manage_members || permissions.can_manage_invitations,
   );
   const canManageSchema = Boolean(permissions.can_manage_schema);
-  const visibleNavItems = navItems.filter((item) => item.id !== 'ai-studio' || canChat);
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.id === 'ai-studio') return canChat;
+    if (item.id === 'schema') return canManageSchema;
+    return true;
+  });
   const getNavLabel = (id: ViewId, label: string) =>
     id === 'ai-studio' && chatMode === 'data_assistant' ? 'Data Assistant' : label;
 
@@ -314,14 +325,15 @@ export function WorkspaceSidebar({
             >
               <Icon className="h-4 w-4 shrink-0" />
               <span className="flex-1 text-sm">{getNavLabel(item.id, item.label)}</span>
-              {item.id === 'catalog' && pendingCount > 0 && (
+              {((item.id === 'catalog' && pendingCount > 0) ||
+                (item.id === 'schema' && pendingSchemaCount > 0)) && (
                 <span
                   className={cn(
                     'rounded-full px-1.5 py-0.5 font-mono text-[10px]',
                     active ? 'bg-sidebar-primary-foreground/20' : 'bg-sidebar-accent text-sidebar-foreground',
                   )}
                 >
-                  {pendingCount}
+                  {item.id === 'schema' ? pendingSchemaCount : pendingCount}
                 </span>
               )}
             </button>

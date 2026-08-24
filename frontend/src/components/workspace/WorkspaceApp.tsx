@@ -11,6 +11,7 @@ interface WorkspaceAppProps {
   view: ViewId;
   theme: 'light' | 'dark';
   pendingCount: number;
+  pendingSchemaCount?: number;
   collapsed: boolean;
   userName?: string;
   chatSessions?: ChatSessionItem[];
@@ -45,6 +46,7 @@ export function WorkspaceApp({
   view,
   theme,
   pendingCount,
+  pendingSchemaCount,
   collapsed,
   userName,
   chatSessions,
@@ -87,6 +89,7 @@ export function WorkspaceApp({
         view={view}
         theme={theme}
         pendingCount={pendingCount}
+        pendingSchemaCount={pendingSchemaCount}
         collapsed={collapsed}
         userName={userName}
         chatSessions={chatSessions}

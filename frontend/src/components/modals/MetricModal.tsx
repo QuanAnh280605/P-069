@@ -35,7 +35,7 @@ export interface MetricVersion {
 interface MetricModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (definition: MetricDefinition) => Promise<void> | void;
+  onSave: (definition: MetricDefinition, changeReason?: string) => Promise<void> | void;
   tables: SemanticTable[];
   initialDefinition?: MetricDefinition | null;
   initialName?: string;
@@ -68,6 +68,7 @@ export function MetricModal(props: MetricModalProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<TabKey>('definition');
+  const [changeReason, setChangeReason] = useState('');
 
   useEffect(() => {
     const base = props.tables[0]?.table_name || '';
@@ -79,6 +80,7 @@ export function MetricModal(props: MetricModalProps) {
       },
     });
     setError('');
+    setChangeReason('');
     setActiveTab('definition');
   }, [props.initialDefinition, props.initialName, props.isOpen, props.tables]);
 
@@ -93,6 +95,11 @@ export function MetricModal(props: MetricModalProps) {
     setDefinition((current) => ({ metric: { ...current.metric, ...patch } }));
   };
 
+  // Editing a published metric never overwrites it: the backend stores a
+  // copy-on-write draft and demands a reason for the audit trail.
+  const requiresChangeReason =
+    !props.submissionMode && (props.status || definition.metric.status) === 'approved';
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (props.canSave === false) {
@@ -101,10 +108,13 @@ export function MetricModal(props: MetricModalProps) {
     }
     const message = validateDefinition(definition);
     if (message) return setError(message);
+    if (requiresChangeReason && !changeReason.trim()) {
+      return setError('Chỉ số đã publish: vui lòng nhập lý do thay đổi để lưu vào lịch sử phiên bản.');
+    }
     setSaving(true);
     setError('');
     try {
-      await props.onSave(withPendingStatus(definition));
+      await props.onSave(withPendingStatus(definition), changeReason);
       props.onClose();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Không thể lưu metric');
@@ -256,6 +266,25 @@ export function MetricModal(props: MetricModalProps) {
                   columns={columns.map((c) => c.column_name)}
                   onChange={(filters) => setMetric({ filters })}
                 />
+
+                {requiresChangeReason && (
+                  <div>
+                    <Label className="mb-1.5 block text-xs font-medium">
+                      Lý do thay đổi <span className="text-destructive">*</span>
+                    </Label>
+                    <textarea
+                      rows={2}
+                      value={changeReason}
+                      onChange={(e) => setChangeReason(e.target.value)}
+                      className="w-full rounded-md border border-border bg-transparent p-2 text-xs outline-none focus:ring-1 focus:ring-ring"
+                      placeholder="VD: Cập nhật công thức theo policy mới..."
+                    />
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Chỉ số đang publish sẽ giữ nguyên. Bản sửa được lưu thành phiên bản mới chờ
+                      phê duyệt.
+                    </p>
+                  </div>
+                )}
 
                 {error && (
                   <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">

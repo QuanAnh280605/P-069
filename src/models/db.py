@@ -15,9 +15,10 @@ Includes tables:
   - metric_versions
   - chat_sessions
   - chat_messages
+  - dashboard_layouts
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -33,18 +34,35 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.models.db_base import Base, utc_now
+from src.models.db_chat import ChatMessageModel, ChatSessionModel
+from src.models.review_mixin import REVIEW_STATUS_CHECK, ReviewStateMixin
 
-class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy ORM models."""
-
-    pass
-
-
-def utc_now() -> datetime:
-    """Return current UTC time."""
-    return datetime.now(UTC)
+__all__ = [
+    "Base",
+    "CanonicalRelationshipModel",
+    "ChatMessageModel",
+    "ChatSessionModel",
+    "DashboardLayoutModel",
+    "ImportedSchemaModel",
+    "LiveTargetDbModel",
+    "MetricRequestModel",
+    "MetricVersionModel",
+    "NotificationModel",
+    "OrganizationAuditLogModel",
+    "OrganizationInvitationModel",
+    "OrganizationMemberModel",
+    "OrganizationModel",
+    "SemanticColumnModel",
+    "SemanticDatabaseModel",
+    "SemanticMetricModel",
+    "SemanticTableModel",
+    "UserModel",
+    "UserSessionModel",
+    "utc_now",
+]
 
 
 class OrganizationModel(Base):
@@ -184,7 +202,9 @@ class UserModel(Base):
     created_metrics: Mapped[list["SemanticMetricModel"]] = relationship(
         "SemanticMetricModel", back_populates="creator", foreign_keys="SemanticMetricModel.created_by"
     )
-    created_tables: Mapped[list["SemanticTableModel"]] = relationship("SemanticTableModel", back_populates="creator")
+    created_tables: Mapped[list["SemanticTableModel"]] = relationship(
+        "SemanticTableModel", back_populates="creator", foreign_keys="SemanticTableModel.created_by"
+    )
     approved_metrics: Mapped[list["SemanticMetricModel"]] = relationship(
         "SemanticMetricModel", back_populates="approver", foreign_keys="SemanticMetricModel.approved_by"
     )
@@ -299,13 +319,20 @@ class SemanticDatabaseModel(Base):
     metric_requests: Mapped[list["MetricRequestModel"]] = relationship(
         "MetricRequestModel", back_populates="database", cascade="all, delete-orphan"
     )
+    dashboard_layout: Mapped["DashboardLayoutModel | None"] = relationship(
+        "DashboardLayoutModel", back_populates="database", cascade="all, delete-orphan", uselist=False
+    )
 
 
-class SemanticTableModel(Base):
+class SemanticTableModel(ReviewStateMixin, Base):
     """Metadata Store representation of an enriched database table."""
 
     __tablename__ = "semantic_tables"
-    __table_args__ = (UniqueConstraint("db_id", "table_name", name="uq_semantic_tables_db_table"),)
+    __table_args__ = (
+        UniqueConstraint("db_id", "table_name", name="uq_semantic_tables_db_table"),
+        CheckConstraint(REVIEW_STATUS_CHECK, name="ck_semantic_tables_review_status"),
+        Index("idx_semantic_tables_db_review", "db_id", "review_status"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     db_id: Mapped[int] = mapped_column(Integer, ForeignKey("semantic_databases.id", ondelete="CASCADE"), nullable=False)
@@ -322,17 +349,25 @@ class SemanticTableModel(Base):
     )
 
     database: Mapped["SemanticDatabaseModel"] = relationship("SemanticDatabaseModel", back_populates="tables")
-    creator: Mapped["UserModel | None"] = relationship("UserModel", back_populates="created_tables")
+    creator: Mapped["UserModel | None"] = relationship(
+        "UserModel", back_populates="created_tables", foreign_keys=[created_by]
+    )
+    reviewer: Mapped["UserModel | None"] = relationship("UserModel", foreign_keys="SemanticTableModel.reviewed_by")
+    editor: Mapped["UserModel | None"] = relationship("UserModel", foreign_keys="SemanticTableModel.updated_by")
     columns: Mapped[list["SemanticColumnModel"]] = relationship(
         "SemanticColumnModel", back_populates="table", cascade="all, delete-orphan"
     )
 
 
-class SemanticColumnModel(Base):
+class SemanticColumnModel(ReviewStateMixin, Base):
     """Metadata Store representation of an enriched database column."""
 
     __tablename__ = "semantic_columns"
-    __table_args__ = (UniqueConstraint("table_id", "column_name", name="uq_semantic_columns_table_col"),)
+    __table_args__ = (
+        UniqueConstraint("table_id", "column_name", name="uq_semantic_columns_table_col"),
+        CheckConstraint(REVIEW_STATUS_CHECK, name="ck_semantic_columns_review_status"),
+        Index("idx_semantic_columns_table_review", "table_id", "review_status"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     table_id: Mapped[int] = mapped_column(Integer, ForeignKey("semantic_tables.id", ondelete="CASCADE"), nullable=False)
@@ -353,6 +388,8 @@ class SemanticColumnModel(Base):
     )
 
     table: Mapped["SemanticTableModel"] = relationship("SemanticTableModel", back_populates="columns")
+    reviewer: Mapped["UserModel | None"] = relationship("UserModel", foreign_keys="SemanticColumnModel.reviewed_by")
+    editor: Mapped["UserModel | None"] = relationship("UserModel", foreign_keys="SemanticColumnModel.updated_by")
 
 
 class SemanticMetricModel(Base):
@@ -437,72 +474,62 @@ class CanonicalRelationshipModel(Base):
 
 
 class MetricVersionModel(Base):
-    """Version history for a semantic metric formula."""
+    """Immutable version history for a semantic metric definition.
+
+    Rows are append-only: an edit to a published metric creates a new
+    ``pending_approval`` row while the live ``semantic_metrics`` row keeps
+    serving the last approved definition until the draft is promoted.
+    """
 
     __tablename__ = "metric_versions"
-    __table_args__ = (Index("idx_metric_versions_metric_version", "metric_id", "version"),)
+    __table_args__ = (
+        Index("idx_metric_versions_metric_version", "metric_id", "version"),
+        UniqueConstraint("metric_id", "version", name="uq_metric_versions_metric_version"),
+        CheckConstraint(
+            "status IN ('pending_approval', 'needs_review', 'approved', 'superseded', 'rejected')",
+            name="ck_metric_versions_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     metric_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("semantic_metrics.id", ondelete="CASCADE"), nullable=False
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False, default="")
     formula: Mapped[str] = mapped_column(Text, nullable=False)
     definition: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="approved")
+    parent_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     changed_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     change_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    approved_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     metric: Mapped["SemanticMetricModel"] = relationship("SemanticMetricModel", back_populates="versions")
-    changer: Mapped["UserModel | None"] = relationship("UserModel")
+    changer: Mapped["UserModel | None"] = relationship("UserModel", foreign_keys=[changed_by])
+    approver: Mapped["UserModel | None"] = relationship("UserModel", foreign_keys=[approved_by])
 
 
-class ChatSessionModel(Base):
-    """A persisted conversation owned by one user and semantic database."""
+class DashboardLayoutModel(Base):
+    """Singleton visual dashboard layout owned by one Semantic Database workspace."""
 
-    __tablename__ = "chat_sessions"
-    __table_args__ = (Index("idx_chat_sessions_user_db", "user_id", "db_id", "updated_at"),)
+    __tablename__ = "dashboard_layouts"
+    __table_args__ = (UniqueConstraint("db_id", name="uq_dashboard_layouts_db_id"),)
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     db_id: Mapped[int] = mapped_column(Integer, ForeignKey("semantic_databases.id", ondelete="CASCADE"), nullable=False)
-    title: Mapped[str] = mapped_column(String(255), nullable=False, default="Cuộc trò chuyện mới")
+    layout_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    updated_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-
-    user: Mapped["UserModel"] = relationship("UserModel", back_populates="chat_sessions")
-    database: Mapped["SemanticDatabaseModel"] = relationship("SemanticDatabaseModel", back_populates="chat_sessions")
-    messages: Mapped[list["ChatMessageModel"]] = relationship(
-        "ChatMessageModel",
-        back_populates="session",
-        cascade="all, delete-orphan",
-        order_by="ChatMessageModel.sequence_no",
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
 
-
-class ChatMessageModel(Base):
-    """One user, assistant, or system message in a chat session."""
-
-    __tablename__ = "chat_messages"
-    __table_args__ = (
-        Index("idx_chat_messages_session_created", "session_id", "created_at"),
-        UniqueConstraint("session_id", "client_message_id", name="uq_chat_messages_session_client_id"),
-        UniqueConstraint("session_id", "sequence_no", name="uq_chat_messages_session_sequence"),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    session_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False
-    )
-    client_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
-    sender: Mapped[str] = mapped_column(String(20), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    intent: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    metadata_json: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-
-    session: Mapped["ChatSessionModel"] = relationship("ChatSessionModel", back_populates="messages")
+    database: Mapped["SemanticDatabaseModel"] = relationship("SemanticDatabaseModel", back_populates="dashboard_layout")
+    updater: Mapped["UserModel | None"] = relationship("UserModel")
 
 
 class MetricRequestModel(Base):
