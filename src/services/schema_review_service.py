@@ -167,11 +167,15 @@ async def approve_schema(
     incrementally. Returns the number of rows promoted plus what remains pending.
     """
     tables = await load_review_tables(db, db_id)
-    selected = [item for item in tables if table_names is None or item.table_name in table_names]
     if table_names is not None:
-        missing = set(table_names) - {item.table_name for item in selected}
+        target_names = {t.lower() for t in table_names}
+        selected = [item for item in tables if item.table_name.lower() in target_names]
+        found_names = {item.table_name.lower() for item in selected}
+        missing = target_names - found_names
         if missing:
             raise SchemaRowNotFoundError(f"Tables not found in database {db_id}: {sorted(missing)}")
+    else:
+        selected = tables
 
     approved_tables = sum(1 for table in selected if _approve_row(table, actor_id))
     approved_columns = 0
