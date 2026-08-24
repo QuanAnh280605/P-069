@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import text
@@ -20,6 +21,21 @@ class QueryResult:
     columns: list[str]
     rows: list[list[Any]]
     row_count: int
+
+
+def _json_safe_value(value: Any) -> Any:
+    """Convert non-JSON serializable database objects (Decimal, datetime, date, UUID) to primitives."""
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return int(value) if value % 1 == 0 else float(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8", errors="replace")
+    if hasattr(value, "__str__") and not isinstance(value, (str, int, float, bool, list, dict)):
+        return str(value)
+    return value
 
 
 async def execute_compiled_query(
@@ -39,7 +55,7 @@ async def execute_compiled_query(
                     await _set_read_only(connection, dialect, timeout_seconds)
                     params = _normalize_parameters(compiled.parameters)
                     result = await connection.execute(text(compiled.sql), params)
-                    rows = [list(row) for row in result.fetchall()]
+                    rows = [[_json_safe_value(cell) for cell in row] for row in result.fetchall()]
                     await transaction.rollback()
                     return QueryResult(list(result.keys()), rows, len(rows))
                 except Exception:

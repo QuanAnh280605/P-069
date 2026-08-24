@@ -9,6 +9,7 @@ from httpx import AsyncClient
 
 from src.api.auth import create_access_token
 from src.models.db import UserModel
+from src.services.metric_context import MetricContextResult
 
 
 @pytest.fixture
@@ -31,13 +32,23 @@ def chat_session_mocks():
         patch("src.api.routes.get_recent_chat_history", new_callable=AsyncMock) as mock_history,
         patch("src.api.routes.save_chat_message", new_callable=AsyncMock) as mock_save,
         patch("src.api.routes.get_chat_session_with_messages", new_callable=AsyncMock) as mock_refresh,
+        patch("src.api.routes.build_metric_context", new_callable=AsyncMock) as mock_context,
+        patch("src.agents.nodes.orchestrator_node.orchestrator_node", new_callable=AsyncMock) as mock_orch,
     ):
         mock_can.return_value = True
         mock_resolve.return_value = session
         mock_replay.return_value = None
         mock_history.return_value = []
-        mock_save.side_effect = [SimpleNamespace(id="msg-u"), SimpleNamespace(id="msg-a")]
+        mock_save.side_effect = lambda *args, **kwargs: SimpleNamespace(
+            id="msg-id",
+            content=kwargs.get("content", ""),
+            sender=kwargs.get("sender", "user"),
+            intent=kwargs.get("intent"),
+            metadata_json=kwargs.get("metadata_json"),
+        )
         mock_refresh.return_value = refreshed
+        mock_context.return_value = MetricContextResult(schema={}, diagnostic={"status": "ready"})
+        mock_orch.return_value = {"intent": "metric_query"}
         yield SimpleNamespace(resolve=mock_resolve, save=mock_save)
 
 

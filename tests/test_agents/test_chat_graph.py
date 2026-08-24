@@ -1,17 +1,23 @@
-"""Tests for server-side capability routing in the conversational graph."""
+"""Tests for direct conversational graph routing."""
 
 from src.agents.chat_graph import _route_by_intent
 
 
-def test_metric_query_without_authoring_permission_uses_data_assistant() -> None:
-    """Users without metric submission permission must never reach metric generation through chat."""
-    state = {"intent": "metric_query", "can_generate_metrics": False}
-
-    assert _route_by_intent(state) == "data_assistant"
+def test_metric_query_reaches_metric_generator_for_member() -> None:
+    """Metric requests never fall through to data guidance."""
+    assert _route_by_intent({"intent": "metric_query", "can_generate_metrics": False}) == "metric_query"
 
 
-def test_metric_query_with_authoring_permission_reaches_metric_generator() -> None:
-    """Users with metric submission permission reach the on-demand metric generator."""
-    state = {"intent": "metric_query", "can_generate_metrics": True}
+def test_metric_query_reaches_metric_generator_for_data_lead() -> None:
+    """Data Leads use the same metric-generation route."""
+    assert _route_by_intent({"intent": "metric_query", "can_generate_metrics": True}) == "metric_query"
 
-    assert _route_by_intent(state) == "metric_query"
+
+def test_data_question_reaches_data_assistant() -> None:
+    """Schema questions remain on the data-assistant route."""
+    assert _route_by_intent({"intent": "data_question"}) == "data_question"
+
+
+def test_semantic_query_reaches_semantic_parse() -> None:
+    """Live query questions route to the semantic parser node."""
+    assert _route_by_intent({"intent": "semantic_query"}) == "semantic_query"

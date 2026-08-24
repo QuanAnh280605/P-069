@@ -78,13 +78,38 @@ class AgentState(TypedDict, total=False):
 
     # Chat Orchestrator — Router output
     intent: str
-    """Intent: 'chitchat', 'data_question', 'metric_query', or 'out_of_scope'."""
+    """Intent: 'chitchat', 'data_question', 'metric_query', 'semantic_query', or 'out_of_scope'."""
 
     can_generate_metrics: bool
     """Server-derived capability controlling metric-authoring routing."""
 
     approved_metrics: list[dict[str, Any]]
     """Approved metric context available to the read-only data assistant."""
+
+    metric_decision: dict[str, Any]
+    """Validated metric availability and schema-support decision for one chat turn."""
+
+    suggestion_action: str
+    """Server-derived action for metric suggestions: save or submit for review."""
+
+    context_diagnostic: dict[str, Any]
+    """Safe Metric AI context status for the current chat turn."""
+
+    # Semantic Query / Parse Node — State
+    parser_catalog: dict[str, Any]
+    """Bounded catalog of approved metrics, safe dimensions, and safe filter columns."""
+
+    interpretation: dict[str, Any]
+    """Validated SemanticQueryInterpretation from semantic_parse_node."""
+
+    clarification: dict[str, Any] | None
+    """Clarification questions/options when intent is ambiguous or requires user selection."""
+
+    clarification_selection: dict[str, str] | None
+    """User-selected clarification option referencing assistant_message_id and option_id."""
+
+    semantic_query_result: dict[str, Any] | None
+    """Result snapshot of the executed semantic query."""
 
     # Chitchat Agent — Output
     chat_response: str

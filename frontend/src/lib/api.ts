@@ -388,7 +388,7 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   'http://localhost:8000';
-const API_BASE = API_BASE_URL;
+export const API_BASE = API_BASE_URL;
 
 export type WorkspaceRole = 'admin' | 'data_lead' | 'member';
 
@@ -432,7 +432,7 @@ function getWorkspaceHeader(): Record<string, string> {
   return id ? { 'X-Organization-ID': id } : {};
 }
 
-function getAuthHeader(): Record<string, string> {
+export function getAuthHeader(): Record<string, string> {
   const token =
     getStoredToken() ||
     (typeof window !== 'undefined'
@@ -615,12 +615,53 @@ export async function generateCustomMetricsApi(
   };
 }
 
+export interface ChatClarificationOption {
+  id: string;
+  label: string;
+  description?: string | null;
+  spec: {
+    metric_ids: number[];
+    dimensions?: { column_id: number; time_grain?: string | null }[];
+    filters?: { column_id: number; operator: string; value?: unknown }[];
+    limit?: number;
+  };
+}
+
+export interface ChatClarificationSelection {
+  assistant_message_id: string;
+  option_id: string;
+}
+
+export interface ChatClarificationPayload {
+  prompt: string;
+  options: ChatClarificationOption[];
+}
+
+export interface ChatSemanticQueryResult {
+  spec: {
+    metric_ids: number[];
+    dimensions?: { column_id: number; time_grain?: string | null }[];
+    filters?: { column_id: number; operator: string; value?: unknown }[];
+    limit?: number;
+  };
+  columns: string[];
+  rows: (string | number | boolean | null)[][];
+  row_count: number;
+  explanation: string;
+  sql?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
 export interface ChatOrchestratorResponse {
-  intent: 'chitchat' | 'data_question' | 'metric_query' | 'out_of_scope';
+  intent: 'chitchat' | 'data_question' | 'metric_query' | 'semantic_query' | 'out_of_scope';
   chat_response?: string | null;
   suggestions?: MetricSuggestion[] | null;
   duplicates?: DuplicateMetricNotice[];
   dedupe_performed?: boolean;
+  diagnostics?: { status: string; message?: string; tables?: string[]; relationship_count?: number } | null;
+  suggestion_action?: 'save_metric' | 'submit_metric_request' | null;
+  semantic_query_result?: ChatSemanticQueryResult | null;
+  clarification?: ChatClarificationPayload | null;
   session_id: string;
   user_message_id: string;
   assistant_message_id: string;
@@ -650,6 +691,9 @@ export interface ChatMessageItem {
     suggestions?: MetricSuggestion[];
     duplicates?: DuplicateMetricNotice[];
     dedupe_performed?: boolean;
+    suggestion_action?: 'save_metric' | 'submit_metric_request' | null;
+    semantic_query_result?: ChatSemanticQueryResult | null;
+    clarification?: ChatClarificationPayload | null;
     error?: string | null;
   } | null;
   created_at: string;
@@ -719,6 +763,7 @@ export async function sendChatOrchestratorApi(
   message: string,
   sessionId?: string | null,
   clientMessageId?: string,
+  clarificationSelection?: ChatClarificationSelection | null,
 ): Promise<ChatOrchestratorResponse> {
   return chatRequest<ChatOrchestratorResponse>(`${API_BASE}/api/v1/semantic/${dbId}/chat`, {
     method: 'POST',
@@ -726,8 +771,73 @@ export async function sendChatOrchestratorApi(
       message,
       session_id: sessionId || null,
       client_message_id: clientMessageId,
+      clarification_selection: clarificationSelection || null,
     }),
   });
+}
+
+export interface MetricRequest {
+  id: number;
+  db_id: number;
+  requester_id: number;
+  assistant_message_id: string;
+  suggestion_index: number;
+  definition: MetricDefinition;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewed_by?: number | null;
+  review_note?: string | null;
+  metric_id?: number | null;
+  reviewed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppNotification {
+  id: number;
+  type: string;
+  title: string;
+  body: string;
+  metric_request_id?: number | null;
+  read_at?: string | null;
+  created_at: string;
+}
+
+export async function submitMetricRequestApi(
+  dbId: string, assistantMessageId: string, suggestionIndex: number,
+): Promise<MetricRequest> {
+  return chatRequest<MetricRequest>(`${API_BASE}/api/v1/semantic/${dbId}/metric-requests`, {
+    method: 'POST', body: JSON.stringify({ assistant_message_id: assistantMessageId, suggestion_index: suggestionIndex }),
+  });
+}
+
+export async function listMetricRequestsApi(dbId: string): Promise<MetricRequest[]> {
+  return chatRequest<MetricRequest[]>(`${API_BASE}/api/v1/semantic/${dbId}/metric-requests`);
+}
+
+export async function approveMetricRequestApi(
+  dbId: string, requestId: number, definition?: MetricDefinition, reviewNote?: string,
+): Promise<MetricRequest> {
+  return chatRequest<MetricRequest>(`${API_BASE}/api/v1/semantic/${dbId}/metric-requests/${requestId}/approve`, {
+    method: 'POST', body: JSON.stringify({ definition: definition || null, review_note: reviewNote || null }),
+  });
+}
+
+export async function rejectMetricRequestApi(dbId: string, requestId: number, reviewNote?: string): Promise<MetricRequest> {
+  return chatRequest<MetricRequest>(`${API_BASE}/api/v1/semantic/${dbId}/metric-requests/${requestId}/reject`, {
+    method: 'POST', body: JSON.stringify({ review_note: reviewNote || null }),
+  });
+}
+
+export async function listNotificationsApi(): Promise<{ items: AppNotification[]; unread_count: number }> {
+  return chatRequest(`${API_BASE}/api/v1/notifications`);
+}
+
+export async function markNotificationsReadApi(): Promise<void> {
+  await chatRequest<void>(`${API_BASE}/api/v1/notifications/read`, { method: 'POST' });
+}
+
+export async function markNotificationReadApi(notificationId: number): Promise<void> {
+  await chatRequest<void>(`${API_BASE}/api/v1/notifications/${notificationId}/read`, { method: 'POST' });
 }
 
 /* Legacy SQL metric adapter removed in favor of canonical definitions.

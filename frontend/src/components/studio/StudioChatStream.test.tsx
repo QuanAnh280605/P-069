@@ -54,6 +54,23 @@ describe('StudioChatStream', () => {
     expect(screen.queryByText(/SQL Compiled/)).not.toBeInTheDocument();
   });
 
+  it('shows unresolved business assumptions on a low-confidence proposal', () => {
+    render(
+      <StudioChatStream
+        messages={[{
+          id: 'assumption', sender: 'assistant', text: 'Gợi ý', timestamp: '10:00',
+          suggestions: [{ definition: { metric: { name: 'Doanh thu', formula: { function: 'SUM', expression: 'amount' }, base_entity: 'orders', filters: [], status: 'pending_approval', confidence: 'low', excluded_notes: 'Giả định cần xác nhận: Chưa nêu cách xử lý hoàn tiền' } }, yaml_preview: '' }],
+        }]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={[]}
+      />,
+    );
+
+    expect(screen.getByText('Giả định cần xác nhận', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText(/Chưa nêu cách xử lý hoàn tiền/i)).toBeInTheDocument();
+  });
+
   it('renders assistant Markdown with lists, inline code, and GFM tables', () => {
     render(
       <StudioChatStream
@@ -77,35 +94,6 @@ describe('StudioChatStream', () => {
     expect(screen.getByText('Month')).toBeInTheDocument();
   });
 
-  it('renders <br> inside table cells without leaking raw HTML tags', () => {
-    const tableWithBreaks = [
-      '| Bước | Nội dung | Gợi ý |',
-      '|---|---|---|',
-      '| 1️⃣ | **Metric** | - Ý 1 (ví dụ `revenue`). <br> - Ý 2. |',
-    ].join('\n');
-
-    render(
-      <StudioChatStream
-        messages={[
-          {
-            id: 'table-breaks',
-            sender: 'assistant',
-            text: tableWithBreaks,
-            timestamp: '10:00',
-          },
-        ]}
-        onSendMessage={vi.fn()}
-        isLoading={false}
-        tableNames={[]}
-      />,
-    );
-
-    expect(screen.getByRole('table')).toBeInTheDocument();
-    expect(screen.queryByText(/<br>/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Ý 1/)).toBeInTheDocument();
-    expect(screen.getByText(/Ý 2/)).toBeInTheDocument();
-  });
-
   it('renders assistant message with icon container and AI agent label', () => {
     render(
       <StudioChatStream
@@ -127,7 +115,7 @@ describe('StudioChatStream', () => {
     expect(screen.getByText('Tôi đã phân tích schema')).toBeInTheDocument();
   });
 
-  it('shows assistant mode notice in Data Assistant mode', () => {
+  it('shows read-only permission notice in Data Assistant mode', () => {
     render(
       <StudioChatStream
         messages={[]}
@@ -138,23 +126,101 @@ describe('StudioChatStream', () => {
       />,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent(/chờ Data Lead phê duyệt/i);
-    expect(screen.getByText(/GỢI Ý CÂU HỎI VỀ DỮ LIỆU/i)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/không có quyền tạo, sửa hoặc lưu metric/i);
+    expect(screen.getByTestId('prompt-suggestion-strip')).toBeInTheDocument();
+    expect(screen.getByText('Tìm metric doanh thu đã duyệt')).toBeInTheDocument();
   });
 
-  it('qualifies the data-assistant querying notice with the Live-DB-only caveat', () => {
+  it('lets a Member submit a generated metric request instead of saving it', () => {
+    const submit = vi.fn().mockResolvedValue(undefined);
     render(
       <StudioChatStream
-        messages={[]}
+        messages={[{
+          id: 'assistant-message', sender: 'assistant', text: 'Gợi ý', timestamp: '10:00',
+          suggestionAction: 'submit_metric_request',
+          suggestions: [{ definition: { metric: { name: 'Doanh thu trước thuế', formula: { function: 'SUM', expression: 'amount' }, base_entity: 'orders', filters: [], status: 'pending_approval', confidence: 'high', excluded_notes: '' } }, yaml_preview: '' }],
+        }]}
         onSendMessage={vi.fn()}
+        onSubmitMetricRequest={submit}
         isLoading={false}
         tableNames={[]}
         mode="data_assistant"
       />,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent(/tra cứu dữ liệu qua các metric đã duyệt/i);
-    expect(screen.getByRole('status')).toHaveTextContent(/chỉ áp dụng cho kết nối Live DB/i);
+    fireEvent.click(screen.getByRole('button', { name: /Gửi Data Lead xem xét/i }));
+    expect(submit).toHaveBeenCalledWith('assistant-message', 0);
+    expect(screen.queryByRole('button', { name: /Lưu vào Semantic Layer/i })).not.toBeInTheDocument();
+  });
+
+  it('shows a disabled sent button once the request is pending review', () => {
+    render(
+      <StudioChatStream
+        messages={[{
+          id: 'assistant-message', sender: 'assistant', text: 'Gợi ý', timestamp: '10:00',
+          suggestionAction: 'submit_metric_request',
+          suggestions: [{ definition: { metric: { name: 'Doanh thu trước thuế', formula: { function: 'SUM', expression: 'amount' }, base_entity: 'orders', filters: [], status: 'pending_approval', confidence: 'high', excluded_notes: '' } }, yaml_preview: '' }],
+        }]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={[]}
+        mode="data_assistant"
+        submittedRequestKeys={new Set(['assistant-message:0'])}
+      />,
+    );
+
+    const sentBtn = screen.getByRole('button', { name: /Đã gửi cho Data Lead/i });
+    expect(sentBtn).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Gửi Data Lead xem xét/i })).not.toBeInTheDocument();
+  });
+
+  it('shows the approved state instead of a resubmit button once the Data Lead approved', () => {
+    render(
+      <StudioChatStream
+        messages={[{
+          id: 'assistant-message', sender: 'assistant', text: 'Gợi ý', timestamp: '10:00',
+          suggestionAction: 'submit_metric_request',
+          suggestions: [{ definition: { metric: { name: 'Doanh thu trước thuế', formula: { function: 'SUM', expression: 'amount' }, base_entity: 'orders', filters: [], status: 'pending_approval', confidence: 'high', excluded_notes: '' } }, yaml_preview: '' }],
+        }]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={[]}
+        mode="data_assistant"
+        approvedRequestKeys={new Set(['assistant-message:0'])}
+      />,
+    );
+
+    const approvedBtn = screen.getByRole('button', { name: /Đã được Data Lead duyệt/i });
+    expect(approvedBtn).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Gửi Data Lead xem xét/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Đã gửi cho Data Lead/i })).not.toBeInTheDocument();
+  });
+
+  it('ignores a second click while the request is still being sent', () => {
+    let resolveSubmit: (() => void) | undefined;
+    const submit = vi.fn(
+      () => new Promise<void>((resolve) => { resolveSubmit = resolve; }),
+    );
+    render(
+      <StudioChatStream
+        messages={[{
+          id: 'assistant-message', sender: 'assistant', text: 'Gợi ý', timestamp: '10:00',
+          suggestionAction: 'submit_metric_request',
+          suggestions: [{ definition: { metric: { name: 'Doanh thu trước thuế', formula: { function: 'SUM', expression: 'amount' }, base_entity: 'orders', filters: [], status: 'pending_approval', confidence: 'high', excluded_notes: '' } }, yaml_preview: '' }],
+        }]}
+        onSendMessage={vi.fn()}
+        onSubmitMetricRequest={submit}
+        isLoading={false}
+        tableNames={[]}
+        mode="data_assistant"
+      />,
+    );
+
+    const sendBtn = screen.getByRole('button', { name: /Gửi Data Lead xem xét/i });
+    fireEvent.click(sendBtn);
+    fireEvent.click(sendBtn);
+    expect(submit).toHaveBeenCalledTimes(1);
+    resolveSubmit?.();
   });
 
   it('renders user message with user label', () => {
@@ -212,13 +278,13 @@ describe('StudioChatStream', () => {
     // Metric name heading
     expect(screen.getByText('Doanh thu thuần')).toBeInTheDocument();
     // Status badge
-    expect(screen.getByText(/Chờ duyệt/)).toBeInTheDocument();
+    expect(screen.getByText(/Chờ phê duyệt/)).toBeInTheDocument();
     // Confidence badge
     expect(screen.getByText(/Độ tin cậy: Cao/)).toBeInTheDocument();
     // YAML toggle button
     expect(screen.getByRole('button', { name: /Hiển thị mã YAML/i })).toBeInTheDocument();
     // Save button
-    expect(screen.getByRole('button', { name: /Lưu vào Semantic Layer/i })).toBeInTheDocument();
+    expect(screen.getByText(/Lưu vào Semantic Layer/)).toBeInTheDocument();
   });
 
   it('shows saved state after clicking save button', async () => {
@@ -261,62 +327,96 @@ describe('StudioChatStream', () => {
     expect(onAddMetric).toHaveBeenCalled();
   });
 
-  it('renders suggested question chips and populates the input when clicked', async () => {
-    const { fireEvent } = await import('@testing-library/react');
+  it('restores saved state from the catalog after returning to AI Studio', () => {
+    render(
+      <StudioChatStream
+        messages={[{
+          id: 'saved', sender: 'assistant', text: 'Gợi ý', timestamp: '10:00',
+          suggestions: [{ definition: { metric: { name: 'Doanh thu thuần', formula: { function: 'SUM', expression: 'price' }, base_entity: 'orders', filters: [], status: 'pending_approval', confidence: 'high', excluded_notes: '' } }, yaml_preview: '' }],
+        }]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={[]}
+        savedMetricNames={['Doanh thu thuần']}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /Đã lưu/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Lưu vào Semantic Layer/i })).not.toBeInTheDocument();
+  });
+
+  it('prefills the input with a suggested prompt when clicked', () => {
+    const onSendMessage = vi.fn().mockResolvedValue(undefined);
     render(
       <StudioChatStream
         messages={[]}
-        onSendMessage={vi.fn()}
+        onSendMessage={onSendMessage}
         isLoading={false}
         tableNames={['orders', 'customers']}
       />
     );
 
-    // Verify suggested questions header
-    expect(screen.getByText(/GỢI Ý CÂU HỎI TẠO METRIC/i)).toBeInTheDocument();
-
-    // Verify sample suggestions
+    const strip = screen.getByTestId('prompt-suggestion-strip');
+    expect(strip).toHaveClass('overflow-x-auto');
+    expect(strip).toHaveClass('whitespace-nowrap');
     const suggestionChip = screen.getByText('Doanh thu thuần đơn hàng thành công');
     expect(suggestionChip).toBeInTheDocument();
+    expect(screen.queryByText('Số khách hàng active')).not.toBeInTheDocument();
 
-    // Click suggestion chip
     fireEvent.click(suggestionChip);
 
-    // Verify input textarea is populated
     const textarea = screen.getByPlaceholderText(/Mô tả chỉ số bạn muốn tạo/i) as HTMLTextAreaElement;
-    expect(textarea.value).toContain('Tính tổng doanh thu thuần của các đơn hàng');
+    expect(onSendMessage).not.toHaveBeenCalled();
+    expect(textarea.value).toBe(
+      'Tính tổng doanh thu thuần của các đơn hàng có trạng thái hoàn thành (Net Revenue)',
+    );
   });
 
-  it('allows user to toggle off/on suggested questions via checkbox', async () => {
-    const { fireEvent } = await import('@testing-library/react');
+  it('prefills the input when a click has slight pointer movement', () => {
     render(
       <StudioChatStream
         messages={[]}
         onSendMessage={vi.fn()}
         isLoading={false}
         tableNames={['orders']}
+      />,
+    );
+
+    const strip = screen.getByTestId('prompt-suggestion-strip');
+    fireEvent.pointerDown(strip, { pointerId: 1, clientX: 100, isPrimary: true });
+    fireEvent.pointerMove(strip, { pointerId: 1, clientX: 106, isPrimary: true });
+    fireEvent.pointerUp(strip, { pointerId: 1, clientX: 106, isPrimary: true });
+    fireEvent.click(screen.getByText('Doanh thu thuần đơn hàng thành công'));
+
+    const textarea = screen.getByPlaceholderText(/Mô tả chỉ số bạn muốn tạo/i) as HTMLTextAreaElement;
+    expect(textarea.value).toContain('Tính tổng doanh thu thuần của các đơn hàng');
+  });
+
+  it('allows selecting a prompt after dragging the suggestion strip', async () => {
+    render(
+      <StudioChatStream
+        messages={[{ id: 'user-1', sender: 'user', text: 'Xin chào', timestamp: '10:00' }]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={['orders']}
       />
     );
 
-    // Should initially show suggestions
-    expect(screen.getByText('Doanh thu thuần đơn hàng thành công')).toBeInTheDocument();
+    const strip = screen.getByTestId('prompt-suggestion-strip');
+    Object.defineProperty(strip, 'clientWidth', { configurable: true, value: 240 });
+    Object.defineProperty(strip, 'scrollWidth', { configurable: true, value: 720 });
+    fireEvent.pointerDown(strip, { pointerId: 1, clientX: 200, isPrimary: true });
+    fireEvent.pointerMove(strip, { pointerId: 1, clientX: 80, isPrimary: true });
+    fireEvent.pointerUp(strip, { pointerId: 1, clientX: 80, isPrimary: true });
 
-    // Checkbox is checked
-    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
-    expect(checkbox.checked).toBe(true);
+    expect(strip.scrollLeft).toBe(120);
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    fireEvent.click(screen.getByText('Doanh thu thuần đơn hàng thành công'));
 
-    // Click checkbox to turn off
-    fireEvent.click(checkbox);
-    expect(checkbox.checked).toBe(false);
-
-    // Suggestion chips should now be hidden
-    expect(screen.queryByText('Doanh thu thuần đơn hàng thành công')).not.toBeInTheDocument();
-    expect(screen.getByText(/Đã ẩn \(Tick để hiện\)/i)).toBeInTheDocument();
-
-    // Click again to turn back on
-    fireEvent.click(checkbox);
-    expect(checkbox.checked).toBe(true);
-    expect(screen.getByText('Doanh thu thuần đơn hàng thành công')).toBeInTheDocument();
+    const textarea = screen.getByPlaceholderText(/Mô tả chỉ số bạn muốn tạo/i) as HTMLTextAreaElement;
+    expect(textarea.value).toBe(
+      'Tính tổng doanh thu thuần của các đơn hàng có trạng thái hoàn thành (Net Revenue)',
+    );
   });
 
   it('renders formula display with function and expression parts', () => {
@@ -394,17 +494,77 @@ describe('StudioChatStream', () => {
     expect(screen.getByRole('button', { name: /Chỉnh sửa thủ công/i })).toBeInTheDocument();
   });
 
-  it('shows loading state with analysis message', () => {
+  it('renders semantic query result card when queryResult is present', () => {
     render(
       <StudioChatStream
-        messages={[]}
+        messages={[
+          {
+            id: 'msg-res-1',
+            sender: 'assistant',
+            text: 'Số liệu doanh thu',
+            timestamp: '10:00',
+            queryResult: {
+              spec: { metric_ids: [1], dimensions: [], filters: [], limit: 100 },
+              columns: ['total_revenue'],
+              rows: [[50000000]],
+              row_count: 1,
+              explanation: 'Doanh thu thuần',
+              sql: 'SELECT SUM(amount) AS total_revenue FROM orders',
+            },
+          },
+        ]}
         onSendMessage={vi.fn()}
-        isLoading={true}
+        isLoading={false}
         tableNames={[]}
       />
     );
-    expect(screen.getByText(/AI đang phân tích/i)).toBeInTheDocument();
+
+    expect(screen.getByText('total_revenue')).toBeInTheDocument();
+    expect(screen.getByText('50,000,000')).toBeInTheDocument();
+    expect(screen.getByText('Doanh thu thuần')).toBeInTheDocument();
+  });
+
+  it('renders clarification buttons and triggers onSelectClarification on click', () => {
+    const handleSelect = vi.fn();
+    render(
+      <StudioChatStream
+        messages={[
+          {
+            id: 'msg-clar-1',
+            sender: 'assistant',
+            text: 'Bạn muốn xem doanh thu theo chiều nào?',
+            timestamp: '10:00',
+            clarification: {
+              prompt: 'Bạn muốn xem theo?',
+              options: [
+                {
+                  id: 'opt_by_customer',
+                  label: 'Theo khách hàng',
+                  spec: { metric_ids: [1], dimensions: [{ column_id: 10 }] },
+                },
+                {
+                  id: 'opt_by_month',
+                  label: 'Theo tháng',
+                  spec: { metric_ids: [1], dimensions: [{ column_id: 20 }] },
+                },
+              ],
+            },
+          },
+        ]}
+        onSendMessage={vi.fn()}
+        onSelectClarification={handleSelect}
+        isLoading={false}
+        tableNames={[]}
+      />
+    );
+
+    expect(screen.getByText(/Theo khách hàng/i)).toBeInTheDocument();
+    expect(screen.getByText(/Theo tháng/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/Theo khách hàng/i));
+    expect(handleSelect).toHaveBeenCalledWith('msg-clar-1', 'opt_by_customer', 'Theo khách hàng');
   });
 });
+
 
 

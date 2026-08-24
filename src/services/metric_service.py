@@ -45,6 +45,19 @@ class MetricRequiresReviewError(ValueError):
     """Raised when a metric cannot be approved until its definition diagnostics are resolved."""
 
 
+class DuplicateMetricError(ValueError):
+    """Raised when a metric name already exists within one semantic database."""
+
+
+async def _ensure_unique_metric_name(db: AsyncSession, db_id: int, name: str) -> None:
+    """Reject a duplicate metric name before creating a second catalog record."""
+    stmt = select(SemanticMetricModel.name).where(SemanticMetricModel.db_id == db_id)
+    existing_names = (await db.execute(stmt)).scalars().all()
+    normalized = name.strip().casefold()
+    if any(existing.strip().casefold() == normalized for existing in existing_names):
+        raise DuplicateMetricError(f'Metric "{name}" already exists in this Semantic Layer')
+
+
 def _legacy_formula_parts(metric_data: dict[str, Any]) -> tuple[str, str]:
     """Derive (function, expression) from a legacy flat metric payload."""
     agg_type = metric_data.get("aggregation_type", "COUNT")
@@ -115,6 +128,7 @@ async def create_metric(
 ) -> SemanticMetricModel:
     """Create a metric and its initial version with a server-controlled status."""
     definition, status = await _resolve_definition(db, connection_id, metric_data["definition"])
+    await _ensure_unique_metric_name(db, connection_id, definition.metric.name)
     if status_override:
         status = status_override
         definition = with_metric_status(definition, status)

@@ -861,6 +861,34 @@ async def test_create_metric_creates_version_record(
 
 
 @pytest.mark.asyncio
+async def test_create_metric_rejects_duplicate_name(
+    client: AsyncClient, async_session: AsyncSession, auth_headers: dict
+):
+    """A stale AI Studio card cannot create a duplicate catalog metric."""
+    sem_db = SemanticDatabaseModel(
+        id=231,
+        created_by=1,
+        display_name="Duplicate Metric DB",
+        db_type="postgresql",
+        conn_url_enc="dummy",
+        status="saved",
+    )
+    table = SemanticTableModel(id=231, db_id=231, table_name="orders", business_name="Đơn hàng")
+    column = SemanticColumnModel(
+        id=231, table_id=231, column_name="total_amount", data_type="NUMERIC", business_name="Tổng"
+    )
+    async_session.add_all([sem_db, table, column])
+    await async_session.commit()
+    payload = {"definition": _make_route_def("Net Revenue", "SUM", "total_amount", "orders"), "source": "ai"}
+
+    first = await client.post("/api/v1/semantic/231/metric", json=payload, headers=auth_headers)
+    second = await client.post("/api/v1/semantic/231/metric", json=payload, headers=auth_headers)
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_create_metric_db_not_found(client: AsyncClient, auth_headers: dict):
     """POST /semantic/{db_id}/metric returns 404 for non-existent semantic database."""
     payload = {

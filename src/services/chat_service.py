@@ -139,6 +139,15 @@ async def get_chat_message_by_client_id(
     return await _find_client_message(db, session_id, client_message_id)
 
 
+async def get_chat_message(db: AsyncSession, session_id: str, message_id: str) -> ChatMessageModel | None:
+    """Find a message by its primary id within an owned session."""
+    stmt = select(ChatMessageModel).where(
+        ChatMessageModel.session_id == session_id,
+        ChatMessageModel.id == message_id,
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
 async def update_chat_session_title(
     db: AsyncSession, session_id: str, user_id: int, title: str
 ) -> ChatSessionModel | None:
