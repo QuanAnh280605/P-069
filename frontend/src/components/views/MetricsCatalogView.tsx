@@ -158,6 +158,7 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
       <ViewHeader
+        eyebrow="Catalog"
         title="Metrics Catalog"
         description="Human-in-the-loop review of every business metric before it enters the semantic layer."
         database={props.database}

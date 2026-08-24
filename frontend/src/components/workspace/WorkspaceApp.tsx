@@ -1,6 +1,6 @@
 'use client';
 
-import type { ChatSessionItem } from '@/lib/api';
+import type { AppNotification, ChatSessionItem } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { ViewId, WorkspaceDatabase } from '@/components/workspace/shared';
 import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
@@ -18,6 +18,11 @@ interface WorkspaceAppProps {
   loadingChatSessions?: boolean;
   canChat?: boolean;
   chatMode?: 'data_assistant' | 'metric_studio';
+  notifications?: AppNotification[];
+  unreadNotifications?: number;
+  onOpenCatalog?: () => void;
+  onMarkAllNotificationsRead?: () => Promise<void> | void;
+  onMarkNotificationRead?: (item: AppNotification) => Promise<void> | void;
   onSelectView: (view: ViewId) => void;
   onToggleCollapse: () => void;
   onToggleTheme: () => void;
@@ -47,6 +52,11 @@ export function WorkspaceApp({
   loadingChatSessions,
   canChat,
   chatMode,
+  notifications,
+  unreadNotifications,
+  onOpenCatalog,
+  onMarkAllNotificationsRead,
+  onMarkNotificationRead,
   onSelectView,
   onToggleCollapse,
   onToggleTheme,
@@ -84,6 +94,11 @@ export function WorkspaceApp({
         loadingChatSessions={loadingChatSessions}
         canChat={canChat}
         chatMode={chatMode}
+        notifications={notifications}
+        unreadNotifications={unreadNotifications}
+        onOpenCatalog={onOpenCatalog}
+        onMarkAllNotificationsRead={onMarkAllNotificationsRead}
+        onMarkNotificationRead={onMarkNotificationRead}
         onSelectView={onSelectView}
         onToggleCollapse={onToggleCollapse}
         onToggleTheme={onToggleTheme}

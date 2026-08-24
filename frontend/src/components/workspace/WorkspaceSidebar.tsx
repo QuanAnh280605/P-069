@@ -20,11 +20,12 @@ import {
   Users,
 } from 'lucide-react';
 
-import type { ChatSessionItem } from '@/lib/api';
+import type { AppNotification, ChatSessionItem } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/context/WorkspaceContext';
 
 import { ChatHistorySection } from './ChatHistorySection';
+import { NotificationCenter } from './NotificationCenter';
 import { EngineIcon, engineLabels, SectionLabel, type ViewId, type WorkspaceDatabase } from './shared';
 
 interface WorkspaceSidebarProps {
@@ -40,6 +41,11 @@ interface WorkspaceSidebarProps {
   loadingChatSessions?: boolean;
   canChat?: boolean;
   chatMode?: 'data_assistant' | 'metric_studio';
+  notifications?: AppNotification[];
+  unreadNotifications?: number;
+  onOpenCatalog?: () => void;
+  onMarkAllNotificationsRead?: () => Promise<void> | void;
+  onMarkNotificationRead?: (item: AppNotification) => Promise<void> | void;
   onSelectView: (view: ViewId) => void;
   onToggleCollapse: () => void;
   onToggleTheme: () => void;
@@ -75,6 +81,11 @@ export function WorkspaceSidebar({
   loadingChatSessions = false,
   canChat = false,
   chatMode = 'metric_studio',
+  notifications = [],
+  unreadNotifications = 0,
+  onOpenCatalog,
+  onMarkAllNotificationsRead,
+  onMarkNotificationRead,
   onSelectView,
   onToggleCollapse,
   onToggleTheme,
@@ -105,11 +116,19 @@ export function WorkspaceSidebar({
         <button
           type="button"
           onClick={onToggleCollapse}
-          className="rounded-md p-2 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          className="rounded-md p-2 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground cursor-pointer"
           aria-label="Expand sidebar"
         >
           <ChevronLeft className="h-4 w-4 rotate-180" />
         </button>
+        <NotificationCenter
+          items={notifications}
+          unreadCount={unreadNotifications}
+          onOpenCatalog={onOpenCatalog}
+          onMarkAllRead={onMarkAllNotificationsRead}
+          onMarkRead={onMarkNotificationRead}
+          align="left"
+        />
         {canManageWorkspace && onOpenWorkspaceManagement && (
           <button
             type="button"
@@ -185,7 +204,7 @@ export function WorkspaceSidebar({
         <button
           type="button"
           onClick={onToggleCollapse}
-          className="rounded-md p-1.5 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          className="rounded-md p-1.5 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground cursor-pointer"
           aria-label="Collapse sidebar"
         >
           <PanelLeftClose className="h-4 w-4" />
@@ -194,7 +213,7 @@ export function WorkspaceSidebar({
 
       {/* Workspace Switcher & RBAC */}
       <div className="relative px-3 pb-2">
-        <div className="flex items-center gap-2 rounded-lg border border-sidebar-border bg-sidebar-accent/50 p-2">
+        <div className="flex items-center gap-1.5 rounded-lg border border-sidebar-border bg-sidebar-accent/50 p-2">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
             <Building2 className="h-3.5 w-3.5" />
           </div>
@@ -223,6 +242,14 @@ export function WorkspaceSidebar({
               <Users className="h-3.5 w-3.5" />
             </button>
           )}
+          <NotificationCenter
+            items={notifications}
+            unreadCount={unreadNotifications}
+            onOpenCatalog={onOpenCatalog}
+            onMarkAllRead={onMarkAllNotificationsRead}
+            onMarkRead={onMarkNotificationRead}
+            align="right"
+          />
         </div>
 
         {wsDropdownOpen && (

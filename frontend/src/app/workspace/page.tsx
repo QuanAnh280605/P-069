@@ -537,14 +537,12 @@ export default function WorkspacePage() {
       onNewChatSession={canChat ? newChat : undefined}
       onDeleteChatSession={canChat ? removeSession : undefined}
       onRenameChatSession={canChat ? handleRenameSession : undefined}
+      notifications={notifications}
+      unreadNotifications={unreadNotifications}
+      onOpenCatalog={openCatalog}
+      onMarkAllNotificationsRead={markAllNotificationsRead}
+      onMarkNotificationRead={markNotificationRead}
     >
-      <NotificationCenter
-        items={notifications}
-        unreadCount={unreadNotifications}
-        onOpenCatalog={openCatalog}
-        onMarkAllRead={markAllNotificationsRead}
-        onMarkRead={markNotificationRead}
-      />
       {toast && (
         <div className="fixed right-6 top-6 z-60 rounded-xl bg-card border border-border px-4 py-2.5 text-xs font-semibold text-foreground shadow-2xl animate-in fade-in slide-in-from-top-2">
           <CheckCircle2 className="mr-2 inline h-4 w-4 text-emerald-500" />

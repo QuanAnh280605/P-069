@@ -91,48 +91,57 @@ function NotificationRow({
 }
 
 export function NotificationCenter({
-  items,
-  unreadCount,
+  items = [],
+  unreadCount = 0,
   onOpenCatalog,
   onMarkAllRead,
   onMarkRead,
+  className,
+  align = 'left',
 }: {
-  items: AppNotification[];
-  unreadCount: number;
-  onOpenCatalog: () => void;
-  onMarkAllRead: () => Promise<void> | void;
-  onMarkRead: (item: AppNotification) => Promise<void> | void;
+  items?: AppNotification[];
+  unreadCount?: number;
+  onOpenCatalog?: () => void;
+  onMarkAllRead?: () => Promise<void> | void;
+  onMarkRead?: (item: AppNotification) => Promise<void> | void;
+  className?: string;
+  align?: 'left' | 'right';
 }) {
   const [open, setOpen] = useState(false);
 
   const openItem = (item: AppNotification) => {
     if (!isMetricRequestNotification(item)) return;
-    void onMarkRead(item);
+    void onMarkRead?.(item);
     setOpen(false);
-    onOpenCatalog();
+    onOpenCatalog?.();
   };
 
   return (
-    <div className="fixed right-6 top-16 z-60">
+    <div className={cn('relative inline-flex', className)}>
       <Button
         size="icon"
-        variant="outline"
-        className="relative cursor-pointer"
+        variant="ghost"
+        className="relative h-8 w-8 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground cursor-pointer"
         onClick={() => setOpen((current) => !current)}
         aria-label="Thông báo"
       >
         <Bell className="h-4 w-4" />
         {unreadCount > 0 && (
-          <span className="absolute -right-1 -top-1 rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
             {unreadCount}
           </span>
         )}
       </Button>
       {open && (
-        <div className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-2rem))] animate-in fade-in slide-in-from-top-2 rounded-lg border border-border bg-card p-2 shadow-xl">
-          <div className="flex items-center justify-between px-1 pb-1">
-            <p className="text-sm font-semibold text-foreground">Thông báo</p>
-            {unreadCount > 0 && (
+        <div
+          className={cn(
+            'absolute top-full mt-2 w-[min(22rem,calc(100vw-2rem))] animate-in fade-in slide-in-from-top-2 rounded-xl border border-border bg-card p-3 shadow-2xl z-60',
+            align === 'left' ? 'left-0' : 'right-0',
+          )}
+        >
+          <div className="flex items-center justify-between px-1 pb-2 border-b border-border/60">
+            <p className="text-xs font-semibold text-foreground">Thông báo</p>
+            {unreadCount > 0 && onMarkAllRead && (
               <button
                 type="button"
                 onClick={() => void onMarkAllRead()}
@@ -142,11 +151,11 @@ export function NotificationCenter({
               </button>
             )}
           </div>
-          <div className="max-h-[26rem] overflow-y-auto">
+          <div className="max-h-[26rem] overflow-y-auto pt-1">
             {items.length ? (
               items.map((item) => <NotificationRow key={item.id} item={item} onOpen={openItem} />)
             ) : (
-              <div className="flex flex-col items-center gap-2 border-t border-border px-4 py-8 text-center">
+              <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
                 <span className="flex h-9 w-9 items-center justify-center rounded-full bg-secondary">
                   <Bell className="h-4 w-4 text-muted-foreground" />
                 </span>
