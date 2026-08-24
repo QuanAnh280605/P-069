@@ -79,7 +79,9 @@ def _parse_intent(raw: str) -> str:
         return "data_question"
     if "out_of_scope" in raw or "unrelated" in raw:
         return "out_of_scope"
-    return "chitchat"
+    if "chitchat" in raw:
+        return "chitchat"
+    return "data_question"
 
 
 def _format_history(history: list[dict[str, str]]) -> str:

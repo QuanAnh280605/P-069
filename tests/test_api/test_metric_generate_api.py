@@ -9,13 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.auth import create_access_token
 from src.models.db import SemanticColumnModel, SemanticDatabaseModel, SemanticMetricModel, SemanticTableModel, UserModel
 from src.models.metric_definition import MetricDefinition
-from src.models.schemas import MetricSuggestionItem
+from src.models.schemas import DuplicateMetricNotice, MetricSuggestionItem
 from src.services.metric_context import MetricContextResult
 
 
 @pytest.fixture
 def auth_headers() -> dict[str, str]:
-    user = UserModel(id=1, email="test@company.com", username="tester", hashed_password="hash", role="analyst")
+    user = UserModel(id=1, email="test@company.com", username="tester", hashed_password="hash")
     return {"Authorization": f"Bearer {create_access_token(user)}"}
 
 
@@ -77,7 +77,7 @@ async def test_generate_returns_yaml_without_persisting(
         schema={"order_items": {"columns": []}}, diagnostic={"status": "ready"}
     )
     definition = _definition()
-    mock_generate.return_value = [MetricSuggestionItem(definition=definition, yaml_preview=definition.to_yaml())]
+    mock_generate.return_value = ([MetricSuggestionItem(definition=definition, yaml_preview=definition.to_yaml())], [])
     response = await client.post(
         "/api/v1/semantic/10/metrics/generate", json={"prompt": "Tính doanh thu"}, headers=auth_headers
     )

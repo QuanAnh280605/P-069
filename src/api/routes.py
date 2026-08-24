@@ -3,7 +3,7 @@
 import logging
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -112,6 +112,7 @@ from src.services.metric_request_service import (
     mark_notifications_read,
     reject_metric_request,
 )
+from src.services.metric_rollback import rollback_metric
 from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
 from src.services.notification_stream import notification_event_stream
 from src.services.organization_service import (
@@ -553,7 +554,7 @@ async def approve_semantic_layer(
 
     metrics_stmt = select(SemanticMetricModel).where(
         SemanticMetricModel.db_id == db_id,
-        SemanticMetricModel.status == "pending_approval",
+        SemanticMetricModel.status.in_(["pending_approval", "unverified"]),
     )
     metrics_result = await db.execute(metrics_stmt)
     draft_metrics = metrics_result.scalars().all()
@@ -562,11 +563,20 @@ async def approve_semantic_layer(
         raise HTTPException(status_code=404, detail="No draft metrics found to approve")
 
     approved_count = 0
+    errors: list[str] = []
     for metric in draft_metrics:
         if sem_db.org_id is None and metric.created_by not in {None, current_user.id}:
             continue
-        await approve_metric(db=db, metric_id=metric.id, user_id=current_user.id)
-        approved_count += 1
+        try:
+            await approve_metric(db=db, metric_id=metric.id, user_id=current_user.id)
+            approved_count += 1
+        except ValueError as exc:
+            errors.append(str(exc))
+
+    if approved_count == 0:
+        if errors:
+            raise HTTPException(status_code=422, detail="; ".join(errors))
+        raise HTTPException(status_code=404, detail="No draft metrics found to approve")
 
     sem_db.status = "saved"
     await db.commit()
@@ -972,11 +982,13 @@ async def list_metrics(
     stmt = select(SemanticMetricModel).where(SemanticMetricModel.db_id == db_id).order_by(SemanticMetricModel.id)
     if semantic_db.org_id is not None:
         _, membership = await resolve_membership(db, current_user.id, org_id)
-        can_view_pending = bool(
-            membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_view_pending_metrics", False)
-        )
-        if not can_view_pending:
+        if membership and membership.role == "admin":
             stmt = stmt.where(SemanticMetricModel.status == "approved")
+        elif membership and membership.role == "member":
+            stmt = stmt.where(
+                (SemanticMetricModel.status == "approved")
+                | ((SemanticMetricModel.status == "unverified") & (SemanticMetricModel.created_by == current_user.id))
+            )
     result = await db.execute(stmt)
     metrics = result.scalars().all()
 
@@ -1125,7 +1137,13 @@ async def get_metric_history(
         can_view_pending = bool(
             membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_view_pending_metrics", False)
         )
-        if not can_view_pending:
+        is_owner = (
+            membership
+            and membership.role == "member"
+            and metric.status == "unverified"
+            and metric.created_by == current_user.id
+        )
+        if not can_view_pending and not is_owner:
             raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
 
     versions = [
@@ -1150,16 +1168,21 @@ async def get_metric_history(
 async def get_metric_recommended_dimensions(
     db_id: int,
     metric_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     db: AsyncSession = Depends(get_db_session),
-    _user: UserModel = Depends(get_current_user),
+    current_user: UserModel = Depends(get_current_user),
 ) -> MetricDimensionsResponse:
     """Recommend high-signal dimensions for a specific metric across Tier A, B, C, and D."""
+    await _require_resource_permission(db, current_user.id, db_id, org_id, "can_query")
     stmt_metric = select(SemanticMetricModel).where(
         SemanticMetricModel.id == metric_id,
         SemanticMetricModel.db_id == db_id,
     )
     metric = (await db.execute(stmt_metric)).scalar_one_or_none()
     if not metric:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metric {metric_id} not found")
+
+    if metric.status == "unverified" and metric.created_by != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metric {metric_id} not found")
 
     base_table_name = ""
@@ -1180,16 +1203,21 @@ async def get_metric_recommended_dimensions(
 async def get_metric_filter_columns(
     db_id: int,
     metric_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     db: AsyncSession = Depends(get_db_session),
-    _user: UserModel = Depends(get_current_user),
+    current_user: UserModel = Depends(get_current_user),
 ) -> MetricFilterColumnsResponse:
     """Retrieve safe and relevant filter columns for a specific metric."""
+    await _require_resource_permission(db, current_user.id, db_id, org_id, "can_query")
     stmt_metric = select(SemanticMetricModel).where(
         SemanticMetricModel.id == metric_id,
         SemanticMetricModel.db_id == db_id,
     )
     metric = (await db.execute(stmt_metric)).scalar_one_or_none()
     if not metric:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metric {metric_id} not found")
+
+    if metric.status == "unverified" and metric.created_by != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metric {metric_id} not found")
 
     base_table_name = ""
@@ -1216,17 +1244,28 @@ async def update_metric(
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricResponse:
     """Replace a metric definition and reset it to pending approval."""
+    numeric_db_id = _parse_int_id(db_id)
+    if numeric_db_id is None:
+        raise HTTPException(status_code=404, detail="Database not found")
+    sem_db = await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_manage_metrics")
+
+    stmt = select(SemanticMetricModel).where(
+        SemanticMetricModel.id == metric_id,
+        SemanticMetricModel.db_id == numeric_db_id,
+    )
+    existing_metric = (await db.execute(stmt)).scalar_one_or_none()
+    if not existing_metric:
+        raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
+
+    require_ownership = sem_db.org_id is None
     try:
-        numeric_db_id = int(db_id)
-        await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_create_metrics")
         metric = await update_metric_record(
             db,
             metric_id,
             {"definition": body.definition.model_dump(mode="json")},
             current_user.id,
+            require_ownership=require_ownership,
         )
-        if metric.db_id != numeric_db_id:
-            raise ValueError("Metric does not belong to database")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await db.commit()
@@ -1235,6 +1274,7 @@ async def update_metric(
         metric_id=metric.id,
         definition=metric.definition,
         source=metric.source,
+        status=metric.status,
     )
 
 
@@ -1247,16 +1287,64 @@ async def delete_metric(
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Xóa một Business Metric khỏi Semantic Layer."""
-    await _require_resource_permission(db, current_user.id, int(db_id), org_id, "can_create_metrics")
+    numeric_db_id = _parse_int_id(db_id)
+    if numeric_db_id is None:
+        raise HTTPException(status_code=404, detail="Database not found")
+    await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_manage_metrics")
     stmt = select(SemanticMetricModel).where(
         SemanticMetricModel.id == metric_id,
-        SemanticMetricModel.db_id == int(db_id),
+        SemanticMetricModel.db_id == numeric_db_id,
     )
     res = await db.execute(stmt)
     metric = res.scalar_one_or_none()
     if metric:
         await db.delete(metric)
         await db.commit()
+
+
+@router.post("/semantic/{db_id}/metric/{metric_id}/rollback/{target_version}", response_model=MetricResponse)
+async def rollback_metric_endpoint(
+    db_id: str,
+    metric_id: int,
+    target_version: int = Path(..., ge=1),
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> MetricResponse:
+    """Destructively roll back a metric to a prior version."""
+    numeric_db_id = _parse_int_id(db_id)
+    if numeric_db_id is None:
+        raise HTTPException(status_code=404, detail="Database not found")
+
+    sem_db = await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_approve_metrics")
+
+    stmt = select(SemanticMetricModel).where(
+        SemanticMetricModel.id == metric_id,
+        SemanticMetricModel.db_id == numeric_db_id,
+    )
+    metric = (await db.execute(stmt)).scalar_one_or_none()
+    if not metric:
+        raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found in database {db_id}")
+
+    require_ownership = sem_db.org_id is None
+    try:
+        rolled_back = await rollback_metric(
+            db=db,
+            metric_id=metric_id,
+            target_version=target_version,
+            actor_id=current_user.id,
+            require_ownership=require_ownership,
+        )
+        await db.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return MetricResponse(
+        metric_id=rolled_back.id,
+        definition=rolled_back.definition,
+        source=rolled_back.source or "manual",
+        status=rolled_back.status,
+    )
 
 
 # ---------------------------------------------------------------------------

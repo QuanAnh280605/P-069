@@ -10,7 +10,7 @@ from src.models.db import NotificationModel, UserModel
 
 @pytest.fixture
 def auth_headers() -> dict[str, str]:
-    user = UserModel(id=1, email="test@company.com", username="tester", hashed_password="hash", role="analyst")
+    user = UserModel(id=1, email="test@company.com", username="tester", hashed_password="hash")
     return {"Authorization": f"Bearer {create_access_token(user)}"}
 
 

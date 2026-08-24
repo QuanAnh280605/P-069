@@ -82,7 +82,7 @@ async def test_generation_returns_one_definition_for_one_request() -> None:
     schema = {"order_items": {"columns": [{"column_name": "quantity"}, {"column_name": "unit_price"}]}}
 
     with patch("src.services.metrics.get_llm", return_value=llm):
-        suggestions = await generate_metrics_from_prompt("Tính doanh thu", schema_dict=schema)
+        suggestions, duplicates = await generate_metrics_from_prompt("Tính doanh thu", schema_dict=schema)
 
     assert len(suggestions) == 1
 

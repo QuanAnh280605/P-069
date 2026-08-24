@@ -15,7 +15,6 @@ def _user() -> UserModel:
         username="tester",
         full_name="Tester",
         hashed_password="hash",
-        role="analyst",
         status="active",
     )
 
