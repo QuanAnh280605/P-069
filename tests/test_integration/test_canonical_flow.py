@@ -1109,7 +1109,7 @@ async def test_enrich_and_save_creates_canonical_schema(async_session: AsyncSess
         enrichment=_hitl_enrichment_multi_table(),
     )
 
-    assert result["status"] == "draft"
+    assert result["status"] == "pending_review"
     assert len(result["tables"]) == 3
     assert len(result["relationships"]) == 2  # order_line→orders, order_line→products
 

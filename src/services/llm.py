@@ -31,7 +31,7 @@ _PROVIDER_ALIASES = {"google": "gemini", "claude": "anthropic"}
 _DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
     "gemini": "gemini-1.5-flash",
-    "groq": "llama-3.3-70b-versatile",
+    "groq": "openai/gpt-oss-120b",
     "mimo": "mimo-v2.5",
     "anthropic": "claude-sonnet-5",
 }

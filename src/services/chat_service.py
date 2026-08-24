@@ -28,7 +28,7 @@ class ChatAuthorizationError(Exception):
 
 
 async def get_chat_database(
-    db: AsyncSession, user_id: int, db_id: int, require_live: bool = True, org_id: int | None = None
+    db: AsyncSession, user_id: int, db_id: int, require_live: bool = False, org_id: int | None = None
 ) -> SemanticDatabaseModel:
     """Return an owned semantic database and optionally require a live source."""
     stmt = (
