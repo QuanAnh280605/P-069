@@ -92,3 +92,5 @@ Hỗ trợ 2 luồng chính:
 | Function > 30 lines | Tách ra |
 | Code trong 1 file > 500 lines | Tách module |
 | Commit `.env` | Secret leak |
+| Commit SQL dump / data dump chứa dữ liệu thật | PII & secret leak — đã `.gitignore` (`scratch/`, `*.dump.sql`) |
+| Commit feature/code trực tiếp lên nhánh `production` | Production chỉ nhận code qua merge từ `main` (release PR); commit tay gây diverge & conflict hàng loạt |
