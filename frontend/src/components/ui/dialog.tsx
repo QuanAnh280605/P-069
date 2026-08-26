@@ -101,10 +101,10 @@ function DialogContent({
             type="button"
             data-slot="dialog-close"
             onClick={() => onOpenChange(false)}
-            className="absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-hidden cursor-pointer"
+            className="absolute top-4 right-4 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-border/80 bg-background/90 text-muted-foreground transition-all hover:bg-secondary hover:text-foreground hover:scale-105 cursor-pointer shadow-xs"
             aria-label="Close"
           >
-            <X className="h-4 w-4 text-muted-foreground" />
+            <X className="h-4 w-4" />
           </button>
         )}
       </div>

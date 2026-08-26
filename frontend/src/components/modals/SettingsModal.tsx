@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Key, Moon, ShieldCheck, Sparkles, Sun } from 'lucide-react';
+import { History, Key, Moon, RefreshCw, ShieldCheck, Sparkles, Sun, Zap } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -23,6 +23,7 @@ interface SettingsModalProps {
   onClose: () => void;
   databaseCount?: number;
   metricCount?: number;
+  onOpenSyncLogs?: () => void;
 }
 
 const workspaceRoleLabels = {
@@ -36,6 +37,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   databaseCount = 1,
   metricCount = 0,
+  onOpenSyncLogs,
 }) => {
   const { user, token } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -101,6 +103,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onCheckedChange={toggleTheme}
               aria-label="Toggle dark mode"
             />
+          </div>
+
+          {/* Auto-Sync & Self-Healing Card */}
+          <div className="rounded-lg border border-border bg-card p-3 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-amber-500" />
+                <Label className="text-sm font-medium">Tự động đồng bộ & Tự vá schema</Label>
+              </div>
+              <span className="flex items-center gap-1 font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Daily 02:00 AM
+              </span>
+            </div>
+            <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+              Phát hiện thay đổi schema (đổi tên/thêm/xóa cột) & tự động viết lại AST metric formula.
+            </p>
+            {onOpenSyncLogs && (
+              <div className="mt-2.5 pt-2 border-t border-border/50 flex justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    onClose();
+                    onOpenSyncLogs();
+                  }}
+                  className="h-7 gap-1.5 font-mono text-[11px]"
+                >
+                  <History className="h-3.5 w-3.5" />
+                  Xem lịch sử đồng bộ (Audit Logs)
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Guardrails Card */}

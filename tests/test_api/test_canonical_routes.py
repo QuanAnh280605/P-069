@@ -1261,7 +1261,9 @@ async def test_rollback_personal_db_requires_creator_ownership(client, async_ses
 
 
 @pytest.mark.asyncio
-async def test_soft_delete_restore_and_history_lifecycle(client: AsyncClient, async_session: AsyncSession, auth_headers: dict):
+async def test_soft_delete_restore_and_history_lifecycle(
+    client: AsyncClient, async_session: AsyncSession, auth_headers: dict
+):
     """Deleting soft-deletes a metric, preserves history access, blocks updates, and allows restore."""
     sem_db = _seed_semantic_db(async_session, db_id=260)
     metric = SemanticMetricModel(
@@ -1348,4 +1350,3 @@ async def test_metric_routes_non_numeric_db_id_returns_422(client: AsyncClient, 
 
     res_res = await client.post("/api/v1/semantic/not-a-number/metric/1/restore", headers=auth_headers)
     assert res_res.status_code == 422
-

@@ -15,6 +15,7 @@ import {
   Moon,
   PanelLeftClose,
   Plus,
+  RefreshCw,
   Settings,
   Sun,
   Trash2,
@@ -38,6 +39,7 @@ interface WorkspaceSidebarProps {
   pendingCount: number;
   /** Table + column rows still awaiting BA/DA approval in the Metadata Store. */
   pendingSchemaCount?: number;
+  pendingDriftCount?: number;
   collapsed: boolean;
   userName?: string;
   chatSessions?: ChatSessionItem[];
@@ -58,6 +60,7 @@ interface WorkspaceSidebarProps {
   onConnectDatabase?: () => void;
   onOpenSettings: () => void;
   onOpenWorkspaceManagement?: () => void;
+  onOpenSyncLogs?: () => void;
   onLogout?: () => void;
   onSelectChatSession?: (sessionId: string) => void;
   onNewChatSession?: () => void;
@@ -81,6 +84,7 @@ export function WorkspaceSidebar({
   theme,
   pendingCount,
   pendingSchemaCount = 0,
+  pendingDriftCount = 0,
   collapsed,
   userName,
   chatSessions = [],
@@ -101,6 +105,7 @@ export function WorkspaceSidebar({
   onConnectDatabase,
   onOpenSettings,
   onOpenWorkspaceManagement,
+  onOpenSyncLogs,
   onLogout,
   onSelectChatSession,
   onNewChatSession,
@@ -172,6 +177,22 @@ export function WorkspaceSidebar({
               </button>
             );
           })}
+          {canManageSchema && onOpenSyncLogs && (
+            <button
+              type="button"
+              onClick={onOpenSyncLogs}
+              className="relative rounded-md p-2 text-amber-400/80 transition-colors hover:bg-sidebar-accent hover:text-amber-300 cursor-pointer"
+              aria-label="Sync Logs"
+              title={pendingDriftCount > 0 ? `Sync Logs (${pendingDriftCount} thay đổi)` : 'Sync Logs'}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {pendingDriftCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-mono font-bold text-amber-950 shadow animate-pulse">
+                  {pendingDriftCount}
+                </span>
+              )}
+            </button>
+          )}
           {canChat && (
             <button
               type="button"
@@ -339,6 +360,31 @@ export function WorkspaceSidebar({
             </button>
           );
         })}
+        {canManageSchema && onOpenSyncLogs && (
+          <button
+            type="button"
+            onClick={onOpenSyncLogs}
+            className={cn(
+              'group flex items-center gap-3 rounded-md px-3 py-2 text-left transition-colors cursor-pointer',
+              pendingDriftCount > 0
+                ? 'bg-amber-500/10 text-amber-300 hover:bg-amber-500/15'
+                : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+            )}
+          >
+            <History
+              className={cn(
+                'h-4 w-4 shrink-0',
+                pendingDriftCount > 0 ? 'text-amber-400 animate-pulse' : 'text-amber-400',
+              )}
+            />
+            <span className="flex-1 text-sm font-medium">Sync Logs</span>
+            {pendingDriftCount > 0 && (
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 font-mono text-[10px] font-bold text-amber-950 shadow-sm animate-pulse">
+                {pendingDriftCount}
+              </span>
+            )}
+          </button>
+        )}
       </nav>
 
       {/* Chat History */}

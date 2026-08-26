@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.db import LiveTargetDbModel, SemanticDatabaseModel
+from src.models.db import LiveTargetDbModel, SemanticDatabaseModel, utc_now
 from src.models.schema_metadata import (
     ColumnMetadata,
     ForeignKeyMetadata,
@@ -31,6 +31,7 @@ from src.models.schema_metadata import (
 )
 from src.models.schemas import LiveDbResponse, LiveDbSummaryResponse
 from src.services.database import encrypt_conn_url, get_db_session
+from src.services.schema_fingerprint import compute_schema_fingerprint
 from src.services.semantic_service import enrich_and_save_canonical_schema, ensure_semantic_database
 
 logger = logging.getLogger(__name__)
@@ -336,6 +337,11 @@ async def create_live_target_db(
             org_id=org_id,
         )
         model.semantic_db_id = semantic_db_id
+        sem_db = await db.get(SemanticDatabaseModel, semantic_db_id)
+        if sem_db:
+            sem_db.schema_fingerprint = compute_schema_fingerprint(raw_schema)
+            sem_db.last_synced_at = utc_now()
+            sem_db.sync_status = "synced"
         await db.commit()
         await db.refresh(model)
 
@@ -360,6 +366,38 @@ async def create_live_target_db(
     return _model_to_response(model, raw_schema)
 
 
+async def _ensure_linked_semantic_db(
+    db: AsyncSession,
+    record: LiveTargetDbModel,
+    user_id: int,
+    org_id: int | None,
+    raw_schema: RawSchemaMetadata,
+) -> None:
+    """Ensure a live database model has an associated SemanticDatabaseModel and fingerprint."""
+    if record.semantic_db_id is not None:
+        return
+    try:
+        semantic_db_id = await ensure_semantic_database(
+            db=db,
+            source_type="live_target_db",
+            source_id=record.id,
+            user_id=user_id,
+            display_name=record.display_name,
+            dialect=record.dialect,
+            org_id=org_id,
+        )
+        record.semantic_db_id = semantic_db_id
+        sem_db = await db.get(SemanticDatabaseModel, semantic_db_id)
+        if sem_db:
+            sem_db.schema_fingerprint = compute_schema_fingerprint(raw_schema)
+            sem_db.last_synced_at = utc_now()
+            sem_db.sync_status = "synced"
+        await db.commit()
+        await db.refresh(record)
+    except Exception:
+        logger.warning("Auto-healing missing semantic_db_id for live DB %d failed", record.id)
+
+
 async def list_live_target_dbs(
     db: AsyncSession, user_id: int, org_id: int | None = None
 ) -> list[LiveDbSummaryResponse]:
@@ -376,7 +414,13 @@ async def list_live_target_dbs(
         )
     result = await db.execute(stmt)
     records = result.scalars().all()
-    return [_model_to_summary(record) for record in records]
+    summaries = []
+    for record in records:
+        raw_schema = _safe_raw_schema(record.schema_metadata, record.dialect)
+        if record.semantic_db_id is None:
+            await _ensure_linked_semantic_db(db, record, user_id, org_id, raw_schema)
+        summaries.append(_model_to_summary(record))
+    return summaries
 
 
 def _safe_raw_schema(schema_metadata: Any, model_dialect: str) -> RawSchemaMetadata:
@@ -462,6 +506,8 @@ async def get_live_target_db(
     if not record:
         return None
     raw_schema = _safe_raw_schema(record.schema_metadata, record.dialect)
+    if record.semantic_db_id is None:
+        await _ensure_linked_semantic_db(db, record, user_id, org_id, raw_schema)
     return _model_to_response(record, raw_schema)
 
 

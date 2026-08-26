@@ -51,6 +51,7 @@ async def pending_review_counts(db: AsyncSession, db_id: int) -> dict[str, int]:
         .where(
             SemanticTableModel.db_id == db_id,
             SemanticTableModel.review_status == REVIEW_STATUS_PENDING,
+            ~SemanticTableModel.business_name.startswith("[Deprecated]"),
         )
     )
     column_stmt = (
@@ -60,19 +61,24 @@ async def pending_review_counts(db: AsyncSession, db_id: int) -> dict[str, int]:
         .where(
             SemanticTableModel.db_id == db_id,
             SemanticColumnModel.review_status == REVIEW_STATUS_PENDING,
+            ~SemanticTableModel.business_name.startswith("[Deprecated]"),
+            ~SemanticColumnModel.business_name.startswith("[Deprecated]"),
         )
     )
     return {
-        "pending_tables": (await db.execute(table_stmt)).scalar_one(),
-        "pending_columns": (await db.execute(column_stmt)).scalar_one(),
+        "pending_tables": int((await db.execute(table_stmt)).scalar_one() or 0),
+        "pending_columns": int((await db.execute(column_stmt)).scalar_one() or 0),
     }
 
 
 async def load_review_tables(db: AsyncSession, db_id: int) -> list[SemanticTableModel]:
-    """Load every semantic table of *db_id* with its columns eagerly loaded."""
+    """Load every active semantic table of *db_id* with its columns eagerly loaded."""
     stmt = (
         select(SemanticTableModel)
-        .where(SemanticTableModel.db_id == db_id)
+        .where(
+            SemanticTableModel.db_id == db_id,
+            ~SemanticTableModel.business_name.startswith("[Deprecated]"),
+        )
         .options(selectinload(SemanticTableModel.columns))
         .order_by(SemanticTableModel.table_name)
     )

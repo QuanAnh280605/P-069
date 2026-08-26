@@ -10,10 +10,12 @@ from src.api.dashboard_routes import router as dashboard_router
 from src.api.organization_routes import router as organization_router
 from src.api.review_routes import review_router
 from src.api.routes import router
+from src.api.sync_routes import sync_router
 from src.config import get_settings
 from src.models.db import Base
 from src.services.database import get_async_engine
 from src.services.rate_limiter import RateLimitMiddleware
+from src.services.schema_cron_service import start_schema_cron_scheduler, stop_schema_cron_scheduler
 
 # Configure application-wide logging
 logging.basicConfig(
@@ -32,7 +34,10 @@ async def lifespan(app: FastAPI):
     if settings.app_env in {"development", "test"}:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+    if settings.app_env != "test":
+        start_schema_cron_scheduler()
     yield
+    stop_schema_cron_scheduler()
     logger.info("Shutting down %s...", settings.app_name)
 
 
@@ -60,6 +65,7 @@ app.include_router(organization_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1")
 app.include_router(review_router, prefix="/api/v1")
+app.include_router(sync_router, prefix="/api/v1")
 
 
 @app.get("/health")

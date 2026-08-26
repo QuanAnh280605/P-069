@@ -11,6 +11,7 @@ import { MetricsCatalogView } from '@/components/views/MetricsCatalogView';
 import type { ExplorerInitialSelection } from '@/components/views/MetricExplorerView';
 import { NotificationCenter } from '@/components/workspace/NotificationCenter';
 import { WorkspaceApp } from '@/components/workspace/WorkspaceApp';
+import { SchemaDriftBanner } from '@/components/workspace/SchemaDriftBanner';
 import type { ViewId, WorkspaceDatabase } from '@/components/workspace/shared';
 import { streamNotifications } from '@/lib/notificationStream';
 import { useAuth } from '@/context/AuthContext';
@@ -31,6 +32,8 @@ import {
   getLiveTargetDb,
   getSemanticCatalogApi,
   getSchemaReviewApi,
+  getSyncStatusApi,
+  triggerSyncApi,
   ImportedSchemaRecord,
   ImportedSchemaSummary,
   listChatSessionsApi,
@@ -48,6 +51,7 @@ import {
   METRIC_WRITE_PERMISSION_MESSAGE,
   isPermissionDenied,
   restoreMetricApi,
+  SchemaSyncStatus,
   SemanticCatalog,
   SemanticLayerData,
   updateChatSessionTitleApi,
@@ -132,6 +136,11 @@ const MetricModal = dynamic(
   { ssr: false },
 );
 
+const SyncAuditLogsModal = dynamic(
+  () => import('@/components/modals/SyncAuditLogsModal').then((m) => m.SyncAuditLogsModal),
+  { ssr: false },
+);
+
 type WorkspaceTab = 'studio' | 'schema' | 'metrics' | 'explorer' | 'dashboard' | 'export';
 
 function layerToDatabase(layer: SemanticLayerData): WorkspaceDatabase {
@@ -207,6 +216,11 @@ export default function WorkspacePage() {
   const [explorerInitialSelection, setExplorerInitialSelection] =
     useState<ExplorerInitialSelection | null>(null);
   const explorerSelectionKey = useRef(0);
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SchemaSyncStatus | null>(null);
+  const [hasHealedLogs, setHasHealedLogs] = useState(false);
+  const [lastReadLogId, setLastReadLogId] = useState<number | null>(null);
+  const lastNotifiedLogIdRef = useRef<number | null>(null);
 
   // Chat sessions state lifted to page level
   const [sessions, setSessions] = useState<ChatSessionItem[]>([]);
@@ -218,7 +232,7 @@ export default function WorkspacePage() {
     [layers, selectedId],
   );
   const activeLayerId = activeLayer?.id;
-  const semanticDbId = activeLayer?.semantic_db_id;
+  const semanticDbId = activeLayer?.semantic_db_id || (activeLayer ? Number(activeLayer.id) : undefined);
   const canUseDataAssistant = Boolean(permissions.can_use_data_assistant);
   const canUseMetricStudio = Boolean(permissions.can_use_metric_studio);
   const canManageSchema = Boolean(permissions.can_manage_schema);
@@ -238,6 +252,132 @@ export default function WorkspacePage() {
     setToast(message);
     window.setTimeout(() => setToast(''), 3000);
   }, []);
+
+  const autoSyncingRef = useRef(false);
+
+  const checkSync = useCallback(async () => {
+    if (!semanticDbId) return;
+    try {
+      const res = await getSyncStatusApi(semanticDbId);
+
+      // Instant 100% Automatic Self-Healing: Trigger immediately if drift detected!
+      if (!res.in_sync && !autoSyncingRef.current) {
+        autoSyncingRef.current = true;
+        try {
+          const syncResult = await triggerSyncApi(semanticDbId);
+          const dbId = String(semanticDbId);
+
+          const [updatedStatus, metrics, review] = await Promise.all([
+            getSyncStatusApi(semanticDbId),
+            listMetricsApi(dbId, true),
+            getSchemaReviewApi(dbId).catch(() => ({ pending_tables: 0, pending_columns: 0 })),
+          ]);
+
+          setSyncStatus(updatedStatus);
+          setHasHealedLogs(
+            updatedStatus.sync_status === 'healed' || updatedStatus.latest_log?.status === 'healed',
+          );
+          setLayers((current) =>
+            current.map((item) =>
+              item.id === activeLayerId || item.semantic_db_id === semanticDbId
+                ? { ...item, metrics }
+                : item,
+            ),
+          );
+          setPendingSchema({ tables: review.pending_tables, columns: review.pending_columns });
+
+          const summary = syncResult.log.changes_summary;
+          const parts: string[] = [];
+          const addedTables = summary?.added_tables || [];
+          const droppedTables = summary?.dropped_tables || [];
+          const renamedTables = summary?.renamed_tables || [];
+          const addedColumns = summary?.added_columns || [];
+          const droppedColumns = summary?.dropped_columns || [];
+          const renamedColumns = summary?.renamed_columns || [];
+          const healedMetrics = summary?.healed_metrics || [];
+          const brokenMetrics = summary?.broken_metrics || [];
+
+          if (addedTables.length > 0) parts.push(`Phát hiện ${addedTables.length} bảng mới (+${addedTables.join(', ')})`);
+          if (droppedTables.length > 0) parts.push(`Xóa ${droppedTables.length} bảng (-${droppedTables.join(', ')})`);
+          if (renamedTables.length > 0) parts.push(`${renamedTables.length} bảng đổi tên`);
+          if (addedColumns.length > 0) parts.push(`Thêm ${addedColumns.length} cột mới`);
+          if (droppedColumns.length > 0) parts.push(`Xóa ${droppedColumns.length} cột`);
+          if (renamedColumns.length > 0) parts.push(`${renamedColumns.length} cột đổi tên`);
+          if (healedMetrics.length > 0) parts.push(`${healedMetrics.length} chỉ số tự vá`);
+          if (brokenMetrics.length > 0) parts.push(`${brokenMetrics.length} chỉ số cần rà soát`);
+
+          const summaryText = parts.length > 0 ? parts.join(', ') : 'Cấu trúc đồng bộ thành công';
+          notify(`AI vừa tự động đồng bộ: ${summaryText}!`);
+          lastNotifiedLogIdRef.current = syncResult.log.id;
+        } finally {
+          autoSyncingRef.current = false;
+        }
+        return;
+      }
+
+      setSyncStatus(res);
+      const isHealed = res.sync_status === 'healed' || res.latest_log?.status === 'healed';
+      setHasHealedLogs(isHealed);
+
+      if (
+        isHealed &&
+        res.latest_log?.status === 'healed' &&
+        res.latest_log.id !== lastNotifiedLogIdRef.current
+      ) {
+        if (lastNotifiedLogIdRef.current !== null) {
+          const dbId = String(semanticDbId);
+          const [metrics, review] = await Promise.all([
+            listMetricsApi(dbId, true).catch(() => null),
+            getSchemaReviewApi(dbId).catch(() => null),
+          ]);
+          if (metrics) {
+            setLayers((current) =>
+              current.map((item) =>
+                item.id === activeLayerId || item.semantic_db_id === semanticDbId
+                  ? { ...item, metrics }
+                  : item,
+              ),
+            );
+          }
+          if (review) {
+            setPendingSchema({ tables: review.pending_tables, columns: review.pending_columns });
+          }
+
+          const summary = res.latest_log.changes_summary;
+          const addedTables = summary?.added_tables || [];
+          const droppedTables = summary?.dropped_tables || [];
+          const healedCount = summary?.healed_metrics?.length || 0;
+          const renamedCount = summary?.renamed_columns?.length || 0;
+          const parts: string[] = [];
+          if (addedTables.length > 0) parts.push(`Thêm bảng +${addedTables.join(', ')}`);
+          if (droppedTables.length > 0) parts.push(`Xóa bảng -${droppedTables.join(', ')}`);
+          if (renamedCount > 0) parts.push(`${renamedCount} cột đổi tên`);
+          if (healedCount > 0) parts.push(`${healedCount} chỉ số tự vá`);
+          if (parts.length > 0) {
+            notify(`Đã tự động cập nhật: ${parts.join(', ')}!`);
+          }
+        }
+        lastNotifiedLogIdRef.current = res.latest_log.id;
+      }
+    } catch {
+      // Ignore if not applicable
+    }
+  }, [activeLayerId, notify, semanticDbId]);
+
+  useEffect(() => {
+    if (semanticDbId) {
+      void checkSync();
+      const interval = window.setInterval(() => {
+        void checkSync();
+      }, 3000);
+      const onFocus = () => void checkSync();
+      window.addEventListener('focus', onFocus);
+      return () => {
+        window.clearInterval(interval);
+        window.removeEventListener('focus', onFocus);
+      };
+    }
+  }, [checkSync, semanticDbId]);
 
   useEffect(() => {
     if (!token) return;
@@ -539,6 +679,43 @@ export default function WorkspacePage() {
     }
   };
 
+  const permanentDeleteMetric = async (metricId: number) => {
+    if (!canManageMetrics) return notify(METRIC_WRITE_PERMISSION_MESSAGE);
+    if (!activeLayer?.semantic_db_id) return;
+    try {
+      await deleteMetricApi(String(activeLayer.semantic_db_id), metricId, true);
+      await refreshSemanticData();
+      notify('Đã xóa vĩnh viễn metric khỏi hệ thống.');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Không thể xóa vĩnh viễn metric');
+    }
+  };
+
+  const emptyTrash = async () => {
+    if (!canManageMetrics) return notify(METRIC_WRITE_PERMISSION_MESSAGE);
+    if (!activeLayer?.semantic_db_id) return;
+    const trashItems = activeLayer.metrics.filter((m) => Boolean(m.is_deleted));
+    if (trashItems.length === 0) return;
+    if (
+      !window.confirm(
+        `Bạn có chắc chắn muốn dọn sạch tất cả ${trashItems.length} chỉ số trong thùng rác? Hành động này không thể hoàn tác!`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await Promise.all(
+        trashItems.map((m) =>
+          deleteMetricApi(String(activeLayer.semantic_db_id), m.metric_id, true),
+        ),
+      );
+      await refreshSemanticData();
+      notify(`Đã dọn sạch ${trashItems.length} chỉ số khỏi thùng rác.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Không thể dọn sạch thùng rác');
+    }
+  };
+
   const approve = async () => {
     if (!activeLayer?.semantic_db_id) return;
     const response = await approveMetricsApi(activeLayer.semantic_db_id);
@@ -582,6 +759,29 @@ export default function WorkspacePage() {
     : 0;
   const pendingSchemaCount = pendingSchema.tables + pendingSchema.columns;
 
+  const isLatestLogUnread =
+    syncStatus?.latest_log?.id != null && syncStatus.latest_log.id !== lastReadLogId;
+
+  const healedChangesCount = isLatestLogUnread
+    ? (syncStatus?.latest_log?.changes_summary?.added_tables?.length || 0) +
+      (syncStatus?.latest_log?.changes_summary?.dropped_tables?.length || 0) +
+      (syncStatus?.latest_log?.changes_summary?.renamed_tables?.length || 0) +
+      (syncStatus?.latest_log?.changes_summary?.renamed_columns?.length || 0) +
+      (syncStatus?.latest_log?.changes_summary?.healed_metrics?.length || 0) +
+      (syncStatus?.latest_log?.changes_summary?.broken_metrics?.length || 0)
+    : 0;
+
+  const pendingDriftCount =
+    healedChangesCount > 0
+      ? healedChangesCount
+      : hasHealedLogs && isLatestLogUnread
+        ? 1
+        : syncStatus && !syncStatus.in_sync && canManageSchema
+          ? (syncStatus.drift_preview?.renamed_columns?.length || 0) +
+            (syncStatus.drift_preview?.added_tables?.length || 0) +
+            (syncStatus.drift_preview?.dropped_tables?.length || 0) || 1
+          : 0;
+
   if (isLoading || !token) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background text-xs font-semibold text-muted-foreground">
@@ -598,6 +798,7 @@ export default function WorkspacePage() {
       theme={theme}
       pendingCount={pendingCount}
       pendingSchemaCount={pendingSchemaCount}
+      pendingDriftCount={pendingDriftCount}
       collapsed={sidebarCollapsed}
       userName={user?.name}
       chatSessions={sessions}
@@ -642,6 +843,10 @@ export default function WorkspacePage() {
       onOpenWorkspaceManagement={
         permissions.can_manage_members ? () => setWorkspaceManagementOpen(true) : undefined
       }
+      onOpenSyncLogs={() => {
+        setLastReadLogId(syncStatus?.latest_log?.id ?? 0);
+        setSyncModalOpen(true);
+      }}
       onLogout={logout}
       onSelectChatSession={canChat ? selectSession : undefined}
       onNewChatSession={canChat ? newChat : undefined}
@@ -737,6 +942,8 @@ export default function WorkspacePage() {
               onAddMetric={canManageMetrics ? () => openEditor() : undefined}
               onSubmitMetric={canSubmitMetric ? () => openEditor() : undefined}
               onDeleteMetric={canManageMetrics ? removeMetric : undefined}
+              onPermanentDeleteMetric={canManageMetrics ? permanentDeleteMetric : undefined}
+              onEmptyTrash={canManageMetrics ? emptyTrash : undefined}
               onRestoreMetric={canManageMetrics ? restoreMetric : undefined}
               onEditMetric={canManageMetrics ? (item) => openEditor(item) : undefined}
               onOpenStudio={canUseMetricStudio ? () => setTab('studio') : undefined}
@@ -744,6 +951,8 @@ export default function WorkspacePage() {
               onApproveMetric={canApproveMetrics ? approveSingleMetric : undefined}
               onMetricsChanged={refreshSemanticData}
               refreshKey={catalogRefreshKey}
+              onOpenSyncLogs={() => setSyncModalOpen(true)}
+              hasHealedLogs={hasHealedLogs}
             />
           )}
           {tab === 'explorer' && (
@@ -813,6 +1022,19 @@ export default function WorkspacePage() {
           onClose={() => setSettingsOpen(false)}
           databaseCount={layers.length}
           metricCount={activeLayer?.metrics.length}
+          onOpenSyncLogs={() => setSyncModalOpen(true)}
+        />
+      )}
+      {syncModalOpen && semanticDbId && activeLayer && (
+        <SyncAuditLogsModal
+          isOpen={syncModalOpen}
+          onClose={() => setSyncModalOpen(false)}
+          databaseId={semanticDbId}
+          databaseName={activeLayer.db_name}
+          onSyncComplete={() => {
+            void checkSync();
+            if (token) void loadLayerDetail(activeLayer, token);
+          }}
         />
       )}
       {metricOpen && (

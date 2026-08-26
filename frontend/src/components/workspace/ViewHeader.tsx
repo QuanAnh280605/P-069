@@ -1,7 +1,8 @@
 'use client';
 
 import * as React from 'react';
-
+import { Bell, History, ShieldCheck, Sparkles } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { EngineIcon, engineLabels, type WorkspaceDatabase } from './shared';
 
 export interface ViewHeaderProps {
@@ -10,6 +11,8 @@ export interface ViewHeaderProps {
   description: string;
   actions?: React.ReactNode;
   database?: WorkspaceDatabase | null;
+  onOpenSyncLogs?: () => void;
+  hasHealedLogs?: boolean;
 }
 
 export function ViewHeader({
@@ -18,6 +21,8 @@ export function ViewHeader({
   description,
   actions,
   database,
+  onOpenSyncLogs,
+  hasHealedLogs,
 }: ViewHeaderProps) {
   return (
     <header className="view-header-container relative overflow-hidden border-b border-border px-4 py-5 sm:px-6">
@@ -49,6 +54,23 @@ export function ViewHeader({
                 <span className="min-w-0 truncate">{database.name}</span>
                 <span className="shrink-0 text-muted-foreground">· {engineLabels[database.engine]}</span>
               </span>
+            )}
+            {database && onOpenSyncLogs && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onOpenSyncLogs}
+                title="Lịch sử đồng bộ & tự phục hồi schema"
+                className="ws-reveal h-7 gap-1.5 rounded-full border-border/80 px-2.5 font-mono text-[11px] text-muted-foreground hover:text-foreground [animation-delay:140ms]"
+              >
+                <div className="relative flex items-center justify-center">
+                  <Bell className="h-3.5 w-3.5" />
+                  {hasHealedLogs && (
+                    <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-background" />
+                  )}
+                </div>
+                <span className="hidden sm:inline">Auto-Sync</span>
+              </Button>
             )}
           </div>
           <p className="ws-reveal mt-1.5 max-w-2xl text-pretty text-sm text-muted-foreground [animation-delay:160ms]">

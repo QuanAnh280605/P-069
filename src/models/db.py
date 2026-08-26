@@ -55,6 +55,7 @@ __all__ = [
     "OrganizationInvitationModel",
     "OrganizationMemberModel",
     "OrganizationModel",
+    "SchemaSyncLogModel",
     "SemanticColumnModel",
     "SemanticDatabaseModel",
     "SemanticMetricModel",
@@ -295,6 +296,9 @@ class SemanticDatabaseModel(Base):
     db_type: Mapped[str] = mapped_column(String(50), nullable=False)
     conn_url_enc: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="draft")
+    schema_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sync_status: Mapped[str] = mapped_column(String(50), nullable=False, default="synced")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
@@ -322,6 +326,44 @@ class SemanticDatabaseModel(Base):
     dashboard_layout: Mapped["DashboardLayoutModel | None"] = relationship(
         "DashboardLayoutModel", back_populates="database", cascade="all, delete-orphan", uselist=False
     )
+    sync_logs: Mapped[list["SchemaSyncLogModel"]] = relationship(
+        "SchemaSyncLogModel", back_populates="database", cascade="all, delete-orphan"
+    )
+
+
+class SchemaSyncLogModel(Base):
+    """Audit log tracking automatic and manual schema sync and self-healing operations."""
+
+    __tablename__ = "schema_sync_logs"
+    __table_args__ = (
+        Index("idx_schema_sync_logs_db_created", "semantic_db_id", "created_at"),
+        CheckConstraint(
+            "trigger_type IN ('cron', 'instant_check', 'manual')",
+            name="ck_schema_sync_logs_trigger_type",
+        ),
+        CheckConstraint(
+            "status IN ('success', 'healed', 'no_change', 'failed')",
+            name="ck_schema_sync_logs_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    semantic_db_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("semantic_databases.id", ondelete="CASCADE"), nullable=False
+    )
+    live_db_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("live_target_databases.id", ondelete="SET NULL"), nullable=True
+    )
+    trigger_type: Mapped[str] = mapped_column(String(50), nullable=False, default="instant_check")
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="success")
+    old_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    new_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    changes_summary: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    database: Mapped["SemanticDatabaseModel"] = relationship("SemanticDatabaseModel", back_populates="sync_logs")
+    live_database: Mapped["LiveTargetDbModel | None"] = relationship("LiveTargetDbModel")
 
 
 class SemanticTableModel(ReviewStateMixin, Base):

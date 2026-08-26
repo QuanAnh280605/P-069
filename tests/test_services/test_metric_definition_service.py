@@ -88,7 +88,9 @@ async def test_create_rejects_unknown_column(async_session: AsyncSession) -> Non
 @pytest.mark.asyncio
 async def test_soft_delete_and_restore(async_session: AsyncSession) -> None:
     db_id = await _seed(async_session)
-    metric = await create_metric(async_session, db_id, {"definition": _definition("Doanh thu thuan"), "source": "manual"}, 1)
+    metric = await create_metric(
+        async_session, db_id, {"definition": _definition("Doanh thu thuan"), "source": "manual"}, 1
+    )
     assert metric.is_deleted is False
 
     deleted = await soft_delete_metric(async_session, metric.id, 1)

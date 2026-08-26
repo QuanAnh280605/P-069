@@ -137,12 +137,14 @@ from src.services.organization_service import (
 )
 from src.services.query_compiler import SemanticQueryCompiler
 from src.services.query_execution import execute_compiled_query
+from src.services.schema_fingerprint import fast_introspect_schema_fingerprint
 from src.services.schema_ingestion import parse_sql_dump_preview
 from src.services.schema_review_service import (
     SchemaRowNotFoundError,
     update_column_review,
     update_table_review,
 )
+from src.services.schema_self_healing_service import execute_self_healing
 from src.services.semantic_compile_error import SemanticCompileError
 from src.services.semantic_service import (
     DuplicateMetricError,
@@ -1119,6 +1121,8 @@ async def _visible_metric(
         if membership is None or not _metric_is_visible(metric, membership.role, user_id):
             raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
     return metric
+
+
 async def _catalog_tables(db: AsyncSession, db_id: int) -> list[SemanticCatalogTable]:
     """Load canonical tables and columns for the query builder."""
     stmt = (
@@ -1391,12 +1395,25 @@ async def rollback_metric(
 async def delete_metric(
     db_id: int,
     metric_id: int,
+    permanent: bool = Query(default=False),
     org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
-    """Soft-delete một Business Metric khỏi Semantic Layer."""
+    """Soft-delete hoặc Hard-delete vĩnh viễn một Business Metric khỏi Semantic Layer."""
     resource = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_manage_metrics")
+    if permanent:
+        scoped_stmt = select(SemanticMetricModel).where(
+            SemanticMetricModel.id == metric_id,
+            SemanticMetricModel.db_id == db_id,
+        )
+        metric = (await db.execute(scoped_stmt)).scalar_one_or_none()
+        if not metric:
+            raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found in database {db_id}")
+        await db.delete(metric)
+        await db.commit()
+        return
+
     scoped_stmt = select(SemanticMetricModel.id).where(
         SemanticMetricModel.id == metric_id,
         SemanticMetricModel.db_id == db_id,
@@ -1491,18 +1508,27 @@ async def _query_target(
     db_id: int,
     user_id: int,
     org_id: int | None = None,
+    check_drift: bool = False,
 ) -> tuple[SemanticDatabaseModel, LiveTargetDbModel]:
     semantic_db = await _owned_semantic_database(db, db_id, user_id, org_id)
     if semantic_db is None:
         raise HTTPException(status_code=404, detail="Semantic database not found")
-    stmt = select(SemanticDatabaseModel).where(SemanticDatabaseModel.id == db_id)
-    semantic_db = (await db.execute(stmt)).scalar_one_or_none()
-    if semantic_db is None:
-        raise HTTPException(status_code=404, detail="Semantic database not found")
+
     live_stmt = select(LiveTargetDbModel).where(LiveTargetDbModel.semantic_db_id == db_id)
     live_db = (await db.execute(live_stmt)).scalar_one_or_none()
     if live_db is None:
         raise HTTPException(status_code=400, detail="Query only supported for Live DB connections")
+
+    if check_drift:
+        try:
+            conn_url = decrypt_conn_url(live_db.conn_url_enc)
+            current_fp = fast_introspect_schema_fingerprint(conn_url, live_db.dialect)
+            if semantic_db.schema_fingerprint and current_fp != semantic_db.schema_fingerprint:
+                logger.info("Schema drift detected before query on db_id=%d. Triggering self-healing...", db_id)
+                await execute_self_healing(db, db_id, trigger_type="instant_check")
+        except Exception as exc:
+            logger.warning("Instant drift check skipped for db_id=%d: %s", db_id, exc)
+
     return semantic_db, live_db
 
 
@@ -1531,7 +1557,7 @@ async def compile_semantic_query(
     db: AsyncSession = Depends(get_db_session),
 ) -> SemanticQueryCompileResponse:
     """Compile a semantic query preview without connecting to the target database."""
-    await _query_target(db, db_id, current_user.id, org_id)
+    await _query_target(db, db_id, current_user.id, org_id, check_drift=False)
     compiled = await _compile_request(db, db_id, body)
     return SemanticQueryCompileResponse(
         sql=compiled.sql,
@@ -1557,7 +1583,7 @@ async def execute_semantic_query(
     if parsed_id is None:
         raise HTTPException(status_code=400, detail="Invalid database id")
 
-    _, live_db = await _query_target(db, parsed_id, current_user.id, org_id)
+    _, live_db = await _query_target(db, parsed_id, current_user.id, org_id, check_drift=True)
 
     compiled = await _compile_request(db, parsed_id, body)
 

@@ -180,7 +180,7 @@ class MetricCreate(BaseModel):
     """Create a metric from a canonical definition, never from SQL."""
 
     definition: MetricDefinition
-    source: Literal["ai", "manual"] = "manual"
+    source: Literal["ai", "manual", "auto_sync"] = "manual"
 
 
 class MetricUpdate(BaseModel):
@@ -195,7 +195,7 @@ class MetricResponse(BaseModel):
 
     metric_id: int
     definition: MetricDefinition | None = None
-    source: Literal["ai", "manual"]
+    source: Literal["ai", "manual", "auto_sync"]
     status: MetricStatus = "pending_approval"
     is_deleted: bool = False
     name: str = ""
@@ -989,3 +989,45 @@ class ChatResponse(BaseModel):
     user_message_id: str
     assistant_message_id: str
     session: ChatSessionSummaryResponse | None = None
+
+
+# ---------------------------------------------------------------------------
+# Schema Sync & Self-Healing Schemas
+# ---------------------------------------------------------------------------
+
+
+class SchemaSyncLogResponse(BaseModel):
+    """Audit log item representing a schema sync and self-healing operation."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    semantic_db_id: int
+    live_db_id: int | None = None
+    trigger_type: str
+    status: str
+    old_fingerprint: str | None = None
+    new_fingerprint: str | None = None
+    changes_summary: dict[str, Any] | None = None
+    details: str | None = None
+    created_at: datetime
+
+
+class SchemaSyncStatusResponse(BaseModel):
+    """Current synchronization and drift status of a semantic database."""
+
+    semantic_db_id: int
+    in_sync: bool
+    fingerprint: str | None = None
+    last_synced_at: datetime | None = None
+    sync_status: str = "synced"
+    latest_log: SchemaSyncLogResponse | None = None
+    drift_preview: dict[str, Any] | None = None
+
+
+class SchemaSyncTriggerResponse(BaseModel):
+    """Response returned when triggering an on-demand schema sync."""
+
+    status: str
+    log: SchemaSyncLogResponse
+    message: str
