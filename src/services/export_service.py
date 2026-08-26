@@ -41,10 +41,13 @@ async def _load_tables(db: AsyncSession, db_id: int) -> list[SemanticTableModel]
 
 
 async def _load_metrics(db: AsyncSession, db_id: int) -> list[SemanticMetricModel]:
-    """Fetch all metrics for a given database, eagerly loading versions."""
+    """Fetch all active metrics for a given database, eagerly loading versions."""
     result = await db.execute(
         select(SemanticMetricModel)
-        .where(SemanticMetricModel.db_id == db_id)
+        .where(
+            SemanticMetricModel.db_id == db_id,
+            SemanticMetricModel.is_deleted.is_(False),
+        )
         .options(selectinload(SemanticMetricModel.versions))
     )
     return list(result.scalars().all())
@@ -59,11 +62,14 @@ async def _load_relationships(db: AsyncSession, db_id: int) -> list[CanonicalRel
 
 
 async def _load_metric_versions(db: AsyncSession, db_id: int) -> list[MetricVersionModel]:
-    """Fetch all metric versions for metrics belonging to a given database."""
+    """Fetch all metric versions for active metrics belonging to a given database."""
     result = await db.execute(
         select(MetricVersionModel)
         .join(SemanticMetricModel, MetricVersionModel.metric_id == SemanticMetricModel.id)
-        .where(SemanticMetricModel.db_id == db_id)
+        .where(
+            SemanticMetricModel.db_id == db_id,
+            SemanticMetricModel.is_deleted.is_(False),
+        )
     )
     return list(result.scalars().all())
 

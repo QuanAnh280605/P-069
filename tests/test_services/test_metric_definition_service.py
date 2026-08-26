@@ -4,7 +4,14 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.db import SemanticColumnModel, SemanticDatabaseModel, SemanticTableModel
-from src.services.semantic_service import approve_metric, create_metric, get_metric_with_history, update_metric
+from src.services.semantic_service import (
+    approve_metric,
+    create_metric,
+    get_metric_with_history,
+    restore_metric,
+    soft_delete_metric,
+    update_metric,
+)
 
 
 async def _seed(db: AsyncSession) -> int:
@@ -76,3 +83,16 @@ async def test_create_rejects_unknown_column(async_session: AsyncSession) -> Non
     definition["metric"]["formula"]["expression"] = "missing"
     with pytest.raises(ValueError, match="Unknown expression columns"):
         await create_metric(async_session, db_id, {"definition": definition}, 1)
+
+
+@pytest.mark.asyncio
+async def test_soft_delete_and_restore(async_session: AsyncSession) -> None:
+    db_id = await _seed(async_session)
+    metric = await create_metric(async_session, db_id, {"definition": _definition("Doanh thu thuan"), "source": "manual"}, 1)
+    assert metric.is_deleted is False
+
+    deleted = await soft_delete_metric(async_session, metric.id, 1)
+    assert deleted.is_deleted is True
+
+    restored = await restore_metric(async_session, metric.id, 1)
+    assert restored.is_deleted is False

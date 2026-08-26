@@ -133,6 +133,8 @@ def mark_version_approved(record: MetricVersionModel, actor_id: int) -> None:
     record.status = VERSION_STATUS_APPROVED
     record.approved_by = actor_id
     record.approved_at = utc_now()
+    if record.change_reason and record.change_reason.startswith("[Từ chối]"):
+        record.change_reason = "Đã phê duyệt chính thức"
 
 
 async def reject_version(
@@ -154,7 +156,7 @@ async def reject_version(
     record.approved_by = actor_id
     record.approved_at = utc_now()
     if reason:
-        record.change_reason = f"{record.change_reason}\n[Từ chối] {reason}".strip()
+        record.change_reason = reason.strip()
     await db.flush()
     logger.info("Metric version rejected metric_id=%s version=%s actor=%s", metric_id, version, actor_id)
     return record

@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, RotateCcw, X } from 'lucide-react';
+import { Check, Edit2, RotateCcw, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { MetricRollbackConfirmDialog } from '@/components/metrics/MetricRollbackConfirmDialog';
@@ -28,6 +28,7 @@ interface MetricHistoryDialogProps {
   /** Whether the viewer may approve or reject the copy-on-write draft. */
   canApprove?: boolean;
   onClose: () => void;
+  onEdit?: () => void;
   onMetricsChanged?: () => Promise<void> | void;
 }
 
@@ -61,7 +62,7 @@ function sortVersionsDesc(versions: MetricVersionData[]): MetricVersionData[] {
 }
 
 function resolveRollbackError(error: unknown): string {
-  if (error instanceof SemanticApiError && error.message) return error.message;
+  if (error instanceof Error && error.message) return error.message;
   return 'Không thể khôi phục phiên bản. Vui lòng thử lại.';
 }
 
@@ -71,6 +72,7 @@ export function MetricHistoryDialog({
   canManage,
   canApprove = false,
   onClose,
+  onEdit,
   onMetricsChanged,
 }: MetricHistoryDialogProps) {
   const initial = useMemo(() => sortVersionsDesc(history.versions), [history]);
@@ -109,18 +111,32 @@ export function MetricHistoryDialog({
   const runDecision = async (action: 'approve' | 'reject', reason?: string) => {
     setPending(true);
     setError(null);
+    setNotice(null);
     try {
-      if (action === 'approve') await approveSingleMetricApi(String(dbId), history.metric_id);
-      else await rejectMetricVersionApi(String(dbId), history.metric_id, reason || '');
-      applyRefreshed(await getMetricHistoryApi(String(dbId), history.metric_id));
-      await onMetricsChanged?.();
+      if (action === 'approve') {
+        await approveSingleMetricApi(String(dbId), history.metric_id);
+      } else {
+        await rejectMetricVersionApi(String(dbId), history.metric_id, reason || '');
+      }
+      try {
+        const refreshed = await getMetricHistoryApi(String(dbId), history.metric_id);
+        applyRefreshed(refreshed);
+      } catch (e) {
+        console.warn('Failed to refresh metric history in dialog:', e);
+      }
+      try {
+        await onMetricsChanged?.();
+      } catch (e) {
+        console.warn('Failed to notify metrics changed:', e);
+      }
       setNotice(
         action === 'approve'
-          ? 'Đã phê duyệt bản sửa; định nghĩa mới bắt đầu phục vụ truy vấn.'
+          ? 'Đã phê duyệt chỉ số thành công! Định nghĩa mới bắt đầu phục vụ truy vấn.'
           : 'Đã từ chối bản sửa; định nghĩa đang publish giữ nguyên.',
       );
-    } catch (err) {
-      setError(resolveRollbackError(err));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Thao tác phê duyệt thất bại. Vui lòng thử lại.';
+      setError(msg);
     } finally {
       setPending(false);
     }
@@ -148,10 +164,24 @@ export function MetricHistoryDialog({
   return (
     <Dialog open onOpenChange={handleGuardedClose}>
       <DialogContent showCloseButton={!pending} className="max-h-[85vh] max-w-2xl overflow-y-auto">
-        <DialogHeader>
+        <DialogHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
           <DialogTitle className="text-sm font-semibold">
             Lịch sử · {history.metric_name}
           </DialogTitle>
+          {canManage && onEdit && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1 cursor-pointer"
+              onClick={() => {
+                onClose();
+                onEdit();
+              }}
+            >
+              <Edit2 className="h-3 w-3" />
+              Chỉnh sửa định nghĩa
+            </Button>
+          )}
         </DialogHeader>
 
         <div className="flex flex-wrap items-end gap-3">
@@ -405,16 +435,60 @@ function VersionStatusBadge({ status }: { status?: MetricVersionStatus }) {
 }
 
 function VersionAudit({ version }: { version: MetricVersionData }) {
-  const approvedAt = version.approved_at ? new Date(version.approved_at).toLocaleString() : null;
+  const createdAt = version.created_at
+    ? new Date(version.created_at).toLocaleString('vi-VN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+    : null;
+  const decisionAt = version.approved_at
+    ? new Date(version.approved_at).toLocaleString('vi-VN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+    : null;
+  const creator = version.changed_by_name || (version.changed_by ? `#${version.changed_by}` : 'Hệ thống');
+  const actor = version.approved_by_name || (version.approved_by ? `#${version.approved_by}` : 'Data Lead');
+
+  const isApproved = version.status === 'approved';
+  const isRejected = version.status === 'rejected';
+
   return (
-    <p className="mb-2 text-[11px] text-muted-foreground">
-      Sửa bởi {version.changed_by_name || `#${version.changed_by ?? '—'}`}
-      {version.parent_version ? ` · dựa trên v${version.parent_version}` : ''}
-      {version.approved_by_name || approvedAt
-        ? ` · duyệt bởi ${version.approved_by_name || `#${version.approved_by ?? '—'}`}${approvedAt ? ` lúc ${approvedAt}` : ''
-        }`
-        : ''}
-    </p>
+    <div className="mb-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
+      <span>
+        Tạo/Sửa lúc: <strong className="text-foreground font-medium">{createdAt}</strong> bởi{' '}
+        <strong className="text-foreground font-medium">{creator}</strong>
+      </span>
+      {version.parent_version && (
+        <span className="text-muted-foreground/70">· dựa trên v{version.parent_version}</span>
+      )}
+      {decisionAt && (
+        <span>
+          ·{' '}
+          {isApproved ? (
+            <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+              Đã duyệt bởi <strong>{actor}</strong> lúc <strong>{decisionAt}</strong>
+            </span>
+          ) : isRejected ? (
+            <span className="text-red-600 dark:text-red-400 font-medium">
+              Đã từ chối bởi <strong>{actor}</strong> lúc <strong>{decisionAt}</strong>
+            </span>
+          ) : (
+            <span>
+              Xử lý bởi <strong>{actor}</strong> lúc <strong>{decisionAt}</strong>
+            </span>
+          )}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -428,7 +502,7 @@ function VersionList({ versions, liveVersion }: { versions: MetricVersionData[];
               Version {version.version} · {new Date(version.created_at).toLocaleString()}
             </p>
             <VersionStatusBadge status={version.status} />
-            {version.version === liveVersion && (
+            {version.version === liveVersion && version.status === 'approved' && (
               <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">
                 Đang publish
               </span>
@@ -436,9 +510,22 @@ function VersionList({ versions, liveVersion }: { versions: MetricVersionData[];
           </div>
           <VersionAudit version={version} />
           {version.change_reason && (
-            <div className="mb-3 rounded-md border border-border/70 bg-secondary/50 px-3 py-2 text-xs">
-              <span className="font-medium text-foreground">Ghi chú / Lý do thay đổi: </span>
-              <span className="text-muted-foreground whitespace-pre-wrap">{version.change_reason}</span>
+            <div
+              className={cn(
+                'mb-3 rounded-md border px-3 py-2 text-xs',
+                version.status === 'rejected'
+                  ? 'border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400'
+                  : 'border-border/70 bg-secondary/50',
+              )}
+            >
+              <span className="font-medium">
+                {version.status === 'rejected' ? 'Lý do từ chối: ' : 'Ghi chú: '}
+              </span>
+              <span className="text-muted-foreground whitespace-pre-wrap">
+                {version.status === 'approved' && version.change_reason.startsWith('[Từ chối]')
+                  ? 'Đã phê duyệt chính thức'
+                  : version.change_reason.replace(/^\[Từ chối\]\s*/i, '').trim()}
+              </span>
             </div>
           )}
           {version.definition ? (

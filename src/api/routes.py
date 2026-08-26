@@ -152,6 +152,8 @@ from src.services.semantic_service import (
     delete_semantic_database,
     enrich_and_save_canonical_schema,
     get_metric_with_history,
+    restore_metric,
+    soft_delete_metric,
 )
 from src.services.semantic_service import (
     update_metric as update_metric_record,
@@ -618,18 +620,18 @@ async def approve_semantic_layer(
 
 @router.post("/semantic/{db_id}/metric/{metric_id}/approve", response_model=MetricResponse)
 async def approve_single_metric_endpoint(
-    db_id: str,
+    db_id: int,
     metric_id: int,
     org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricResponse:
     """Approve a single metric by its ID."""
-    numeric_db_id = int(db_id)
-    await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_approve_metrics")
+    await _require_resource_permission(db, current_user.id, db_id, org_id, "can_approve_metrics")
     stmt = select(SemanticMetricModel).where(
         SemanticMetricModel.id == metric_id,
-        SemanticMetricModel.db_id == numeric_db_id,
+        SemanticMetricModel.db_id == db_id,
+        SemanticMetricModel.is_deleted.is_(False),
     )
     metric = (await db.execute(stmt)).scalar_one_or_none()
     if not metric:
@@ -645,6 +647,9 @@ async def approve_single_metric_endpoint(
         metric_id=approved.id,
         definition=approved.definition,
         source=approved.source or "manual",
+        status=approved.status,
+        is_deleted=approved.is_deleted,
+        name=approved.name,
     )
 
 
@@ -849,15 +854,14 @@ async def generate_custom_metrics(
 
 @router.post("/semantic/{db_id}/metric", response_model=MetricResponse, status_code=201)
 async def create_metric_endpoint(
-    db_id: str,
+    db_id: int,
     body: MetricCreate,
     org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricResponse:
     """Tạo Business Metric mới — tự động tạo record trong metric_versions."""
-    numeric_db_id = int(db_id)
-    db_record = await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_submit_metric")
+    db_record = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_submit_metric")
     membership = await get_membership(db, current_user.id, db_record.org_id) if db_record.org_id is not None else None
 
     metric_data: dict[str, Any] = {
@@ -868,7 +872,7 @@ async def create_metric_endpoint(
     try:
         new_metric = await create_metric(
             db=db,
-            connection_id=numeric_db_id,
+            connection_id=db_id,
             metric_data=metric_data,
             user_id=current_user.id,
             status_override="unverified" if membership and membership.role == "member" else None,
@@ -889,6 +893,8 @@ async def create_metric_endpoint(
         definition=new_metric.definition,
         source=new_metric.source or "manual",
         status=new_metric.status,
+        is_deleted=new_metric.is_deleted,
+        name=new_metric.name,
     )
 
 
@@ -985,6 +991,7 @@ def _safe_metric_definition(definition_raw: Any) -> MetricDefinition | None:
 @router.get("/semantic/{db_id}/metrics", response_model=list[MetricListItem])
 async def list_metrics(
     db_id: int,
+    include_deleted: bool = Query(default=False),
     org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
@@ -994,6 +1001,8 @@ async def list_metrics(
     if semantic_db is None:
         raise HTTPException(status_code=404, detail="Semantic database not found")
     stmt = select(SemanticMetricModel).where(SemanticMetricModel.db_id == db_id).order_by(SemanticMetricModel.id)
+    if not include_deleted:
+        stmt = stmt.where(SemanticMetricModel.is_deleted.is_(False))
     if semantic_db.org_id is not None:
         _, membership = await resolve_membership(db, current_user.id, org_id)
         if membership and membership.role == "admin":
@@ -1028,6 +1037,7 @@ async def list_metrics(
             source=m.source or "manual",
             version=m.version or 1,
             status=m.status or "needs_review",
+            is_deleted=m.is_deleted,
             approved_by=m.approved_by,
             created_at=m.created_at,
             has_pending_version=m.id in v_map,
@@ -1078,6 +1088,37 @@ async def _owned_semantic_database(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+def _metric_is_visible(metric: SemanticMetricModel, role: str, user_id: int) -> bool:
+    """Apply approved, Data Lead, or own-unverified metric visibility."""
+    return bool(
+        metric.status == "approved"
+        or role == "data_lead"
+        or (role == "member" and metric.status == "unverified" and metric.created_by == user_id)
+    )
+
+
+async def _visible_metric(
+    db: AsyncSession,
+    db_id: int,
+    metric_id: int,
+    user_id: int,
+    org_id: int | None,
+    allow_deleted: bool = False,
+) -> SemanticMetricModel:
+    """Authorize a metric's database and lifecycle visibility."""
+    semantic_db = await _owned_semantic_database(db, db_id, user_id, org_id)
+    if semantic_db is None:
+        raise HTTPException(status_code=404, detail="Semantic database not found")
+    metric = await db.scalar(
+        select(SemanticMetricModel).where(SemanticMetricModel.id == metric_id, SemanticMetricModel.db_id == db_id)
+    )
+    if metric is None or (metric.is_deleted and not allow_deleted):
+        raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
+    if semantic_db.org_id is not None:
+        membership = await get_membership(db, user_id, semantic_db.org_id)
+        if membership is None or not _metric_is_visible(metric, membership.role, user_id):
+            raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
+    return metric
 async def _catalog_tables(db: AsyncSession, db_id: int) -> list[SemanticCatalogTable]:
     """Load canonical tables and columns for the query builder."""
     stmt = (
@@ -1154,27 +1195,10 @@ async def get_metric_history(
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricHistoryResponse:
     """Lịch sử version của một metric."""
-    semantic_db = await _owned_semantic_database(db, db_id, current_user.id, org_id)
-    if semantic_db is None:
-        raise HTTPException(status_code=404, detail="Semantic database not found")
+    await _visible_metric(db, db_id, metric_id, current_user.id, org_id, allow_deleted=True)
     metric = await get_metric_with_history(db=db, metric_id=metric_id)
     if not metric:
         raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
-    if metric.db_id != db_id:
-        raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found in database {db_id}")
-    if semantic_db.org_id is not None and metric.status != "approved":
-        membership = await get_membership(db, current_user.id, semantic_db.org_id)
-        can_view_pending = bool(
-            membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_view_pending_metrics", False)
-        )
-        is_owner = (
-            membership
-            and membership.role == "member"
-            and metric.status == "unverified"
-            and metric.created_by == current_user.id
-        )
-        if not can_view_pending and not is_owner:
-            raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
 
     versions = [
         MetricVersionItem(
@@ -1289,7 +1313,7 @@ async def _metric_update_response(db: AsyncSession, metric: SemanticMetricModel)
 
 @router.put("/semantic/{db_id}/metric/{metric_id}", response_model=MetricUpdateResponse)
 async def update_metric(
-    db_id: str,
+    db_id: int,
     metric_id: int,
     body: MetricUpdate,
     org_id: int | None = Header(default=None, alias="X-Organization-ID"),
@@ -1298,11 +1322,11 @@ async def update_metric(
 ) -> MetricUpdateResponse:
     """Replace a metric definition, or park it as a draft when already published."""
     try:
-        numeric_db_id = int(db_id)
-        resource = await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_manage_metrics")
+        resource = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_manage_metrics")
         scoped_stmt = select(SemanticMetricModel.id).where(
             SemanticMetricModel.id == metric_id,
-            SemanticMetricModel.db_id == numeric_db_id,
+            SemanticMetricModel.db_id == db_id,
+            SemanticMetricModel.is_deleted.is_(False),
         )
         if (await db.execute(scoped_stmt)).scalar_one_or_none() is None:
             raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
@@ -1325,7 +1349,7 @@ async def update_metric(
 
 @router.post("/semantic/{db_id}/metric/{metric_id}/rollback/{target_version}", response_model=MetricResponse)
 async def rollback_metric(
-    db_id: str,
+    db_id: int,
     metric_id: int,
     target_version: int = Path(..., ge=1),
     org_id: int | None = Header(default=None, alias="X-Organization-ID"),
@@ -1334,11 +1358,11 @@ async def rollback_metric(
 ) -> MetricResponse:
     """Destructively rewind a metric to an earlier version and re-approve it."""
     try:
-        numeric_db_id = int(db_id)
-        resource = await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_manage_metrics")
+        resource = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_manage_metrics")
         scoped_stmt = select(SemanticMetricModel.id).where(
             SemanticMetricModel.id == metric_id,
-            SemanticMetricModel.db_id == numeric_db_id,
+            SemanticMetricModel.db_id == db_id,
+            SemanticMetricModel.is_deleted.is_(False),
         )
         if (await db.execute(scoped_stmt)).scalar_one_or_none() is None:
             raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found")
@@ -1358,31 +1382,69 @@ async def rollback_metric(
         definition=metric.definition,
         source=metric.source,
         status=metric.status,
+        is_deleted=metric.is_deleted,
+        name=metric.name,
     )
 
 
 @router.delete("/semantic/{db_id}/metric/{metric_id}", status_code=204)
 async def delete_metric(
-    db_id: str,
+    db_id: int,
     metric_id: int,
     org_id: int | None = Header(default=None, alias="X-Organization-ID"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
-    """Xóa một Business Metric khỏi Semantic Layer."""
-    numeric_db_id = _parse_int_id(db_id)
-    if numeric_db_id is None:
-        raise HTTPException(status_code=404, detail="Database not found")
-    await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_manage_metrics")
-    stmt = select(SemanticMetricModel).where(
+    """Soft-delete một Business Metric khỏi Semantic Layer."""
+    resource = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_manage_metrics")
+    scoped_stmt = select(SemanticMetricModel.id).where(
         SemanticMetricModel.id == metric_id,
-        SemanticMetricModel.db_id == numeric_db_id,
+        SemanticMetricModel.db_id == db_id,
+        SemanticMetricModel.is_deleted.is_(False),
     )
-    res = await db.execute(stmt)
-    metric = res.scalar_one_or_none()
-    if metric:
-        await db.delete(metric)
-        await db.commit()
+    if (await db.execute(scoped_stmt)).scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found in database {db_id}")
+    await soft_delete_metric(
+        db,
+        metric_id=metric_id,
+        user_id=current_user.id,
+        require_ownership=resource.org_id is None,
+    )
+    await db.commit()
+
+
+@router.post("/semantic/{db_id}/metric/{metric_id}/restore", response_model=MetricResponse)
+async def restore_metric_endpoint(
+    db_id: int,
+    metric_id: int,
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> MetricResponse:
+    """Khôi phục một Business Metric đã bị soft-deleted."""
+    resource = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_manage_metrics")
+    scoped_stmt = select(SemanticMetricModel.id).where(
+        SemanticMetricModel.id == metric_id,
+        SemanticMetricModel.db_id == db_id,
+    )
+    if (await db.execute(scoped_stmt)).scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"Metric {metric_id} not found in database {db_id}")
+    metric = await restore_metric(
+        db,
+        metric_id=metric_id,
+        user_id=current_user.id,
+        require_ownership=resource.org_id is None,
+    )
+    await db.commit()
+    await db.refresh(metric)
+    return MetricResponse(
+        metric_id=metric.id,
+        definition=_safe_metric_definition(metric.definition),
+        source=metric.source or "manual",
+        status=metric.status,
+        is_deleted=metric.is_deleted,
+        name=metric.name,
+    )
 
 
 # ---------------------------------------------------------------------------

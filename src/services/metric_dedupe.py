@@ -410,7 +410,12 @@ async def list_existing_metric_summaries(
 ) -> list[dict[str, Any]] | None:
     """Load saved metric summaries for dedupe; None when unavailable."""
     try:
-        result = await db.execute(select(SemanticMetricModel).where(SemanticMetricModel.db_id == db_id))
+        result = await db.execute(
+            select(SemanticMetricModel).where(
+                SemanticMetricModel.db_id == db_id,
+                SemanticMetricModel.is_deleted.is_(False),
+            )
+        )
         return [_metric_summary(row) for row in result.scalars().all()]
     except Exception:  # noqa: BLE001 — dedupe is advisory, never block generation
         return None

@@ -134,7 +134,11 @@ export function MetricModal(props: MetricModalProps) {
         <DialogHeader>
           <div className="flex flex-wrap items-center gap-3">
             <DialogTitle className="font-display text-2xl">
-              {props.submissionMode ? 'Gửi Business Metric' : 'Định nghĩa Business Metric'}
+              {props.submissionMode
+                ? 'Gửi Business Metric'
+                : props.initialName || props.initialDefinition?.metric?.name
+                  ? 'Định nghĩa Business Metric'
+                  : 'Thêm mới Business Metric'}
             </DialogTitle>
             <StatusPill status={status} />
           </div>
@@ -193,10 +197,14 @@ export function MetricModal(props: MetricModalProps) {
                     <select
                       value={definition.metric.base_entity}
                       onChange={(e) => setMetric({ base_entity: e.target.value, filters: [] })}
-                      className="h-9 w-full rounded-md border border-border bg-transparent px-2.5 text-xs outline-none focus:ring-1 focus:ring-ring"
+                      className="h-9 w-full rounded-md border border-border bg-card text-foreground px-2.5 text-xs outline-none focus:ring-1 focus:ring-ring dark:bg-zinc-900 dark:text-zinc-100 [&>option]:bg-white [&>option]:text-zinc-900 dark:[&>option]:bg-zinc-900 dark:[&>option]:text-zinc-100"
                     >
                       {props.tables.map((t) => (
-                        <option key={t.table_name} value={t.table_name}>
+                        <option
+                          key={t.table_name}
+                          value={t.table_name}
+                          className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
+                        >
                           {t.business_name || t.table_name}
                         </option>
                       ))}
@@ -215,10 +223,14 @@ export function MetricModal(props: MetricModalProps) {
                           },
                         })
                       }
-                      className="h-9 w-full rounded-md border border-border bg-transparent px-2.5 text-xs font-mono outline-none focus:ring-1 focus:ring-ring"
+                      className="h-9 w-full rounded-md border border-border bg-card text-foreground px-2.5 text-xs font-mono outline-none focus:ring-1 focus:ring-ring dark:bg-zinc-900 dark:text-zinc-100 [&>option]:bg-white [&>option]:text-zinc-900 dark:[&>option]:bg-zinc-900 dark:[&>option]:text-zinc-100"
                     >
                       {FUNCTIONS.map((f) => (
-                        <option key={f} value={f}>
+                        <option
+                          key={f}
+                          value={f}
+                          className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
+                        >
                           {f}
                         </option>
                       ))}
@@ -448,10 +460,10 @@ function FilterEditor({
           <select
             value={filter.field}
             onChange={(e) => update(index, { field: e.target.value })}
-            className="h-8 flex-1 rounded border border-border bg-background px-2 text-xs outline-none"
+            className="h-8 flex-1 rounded border border-border bg-card text-foreground px-2 text-xs outline-none dark:bg-zinc-900 dark:text-zinc-100 [&>option]:bg-white [&>option]:text-zinc-900 dark:[&>option]:bg-zinc-900 dark:[&>option]:text-zinc-100"
           >
             {columns.map((c) => (
-              <option key={c} value={c}>
+              <option key={c} value={c} className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
                 {c}
               </option>
             ))}
@@ -464,10 +476,10 @@ function FilterEditor({
                 value: null,
               })
             }
-            className="h-8 w-24 rounded border border-border bg-background px-1 text-xs outline-none"
+            className="h-8 w-24 rounded border border-border bg-card text-foreground px-1 text-xs outline-none dark:bg-zinc-900 dark:text-zinc-100 [&>option]:bg-white [&>option]:text-zinc-900 dark:[&>option]:bg-zinc-900 dark:[&>option]:text-zinc-100"
           >
             {OPERATORS.map((op) => (
-              <option key={op.value} value={op.value}>
+              <option key={op.value} value={op.value} className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
                 {op.label}
               </option>
             ))}

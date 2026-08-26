@@ -419,6 +419,7 @@ class SemanticMetricModel(Base):
     aggregation_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     definition: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     approved_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(

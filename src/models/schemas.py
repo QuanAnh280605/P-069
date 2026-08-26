@@ -197,6 +197,7 @@ class MetricResponse(BaseModel):
     definition: MetricDefinition | None = None
     source: Literal["ai", "manual"]
     status: MetricStatus = "pending_approval"
+    is_deleted: bool = False
     name: str = ""
     description: str = ""
     sql_template: str = ""
@@ -805,6 +806,7 @@ class MetricListItem(BaseModel):
     source: str
     version: int
     status: str
+    is_deleted: bool = False
     approved_by: int | None = None
     created_at: datetime
     has_pending_version: bool = False

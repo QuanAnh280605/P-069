@@ -90,3 +90,23 @@ async def test_create_chat_session_requires_query(client):
 
     assert response.status_code == 400
     assert "query" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_restore_metric_not_found(client):
+    """Restore metric không tồn tại phải trả về 404."""
+    response = await client.post(
+        "/api/v1/semantic/999/metric/999/restore",
+        headers=get_test_headers(),
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_metric_db_not_found(client):
+    """Delete metric khi database không tồn tại phải trả về 404."""
+    response = await client.delete(
+        "/api/v1/semantic/999/metric/999",
+        headers=get_test_headers(),
+    )
+    assert response.status_code == 404

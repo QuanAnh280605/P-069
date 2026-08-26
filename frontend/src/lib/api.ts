@@ -58,9 +58,10 @@ export interface MetricRecord {
   description?: string;
   sql_template?: string;
   definition: MetricDefinition | null;
-  source: 'ai' | 'manual';
+  source: 'ai' | 'manual' | 'auto_sync';
   version?: number;
   status: MetricStatus;
+  is_deleted?: boolean;
   approved_by?: number | null;
   created_by?: number | null;
   created_at: string;
@@ -555,14 +556,16 @@ async function semanticError(response: Response): Promise<string> {
 function metricResponseToRecord(data: {
   metric_id: number;
   definition: MetricDefinition;
-  source: 'ai' | 'manual';
+  source: 'ai' | 'manual' | 'auto_sync';
   status?: MetricStatus;
+  is_deleted?: boolean;
 }): MetricRecord {
   return {
     ...data,
     name: data.definition.metric.name,
     version: 1,
     status: data.status || data.definition.metric.status,
+    is_deleted: data.is_deleted ?? false,
     created_at: new Date().toISOString(),
   };
 }
@@ -950,14 +953,34 @@ export async function updateMetricApi(
   return { metric: metricResponseToRecord(data), pendingVersion: data.pending_version ?? null };
 }
 
-export async function deleteMetricApi(dbId: string, metricId: number): Promise<void> {
-  await semanticRequest<void>(`/api/v1/semantic/${dbId}/metric/${metricId}`, {
+export async function deleteMetricApi(
+  dbId: string,
+  metricId: number,
+  permanent: boolean = false,
+): Promise<void> {
+  const query = permanent ? '?permanent=true' : '';
+  await semanticRequest<void>(`/api/v1/semantic/${dbId}/metric/${metricId}${query}`, {
     method: 'DELETE',
   });
 }
 
-export async function listMetricsApi(dbId: string): Promise<MetricRecord[]> {
-  return semanticRequest<MetricRecord[]>(`/api/v1/semantic/${dbId}/metrics`);
+export async function listMetricsApi(
+  dbId: string,
+  includeDeleted: boolean = false,
+): Promise<MetricRecord[]> {
+  const query = includeDeleted ? '?include_deleted=true' : '';
+  return semanticRequest<MetricRecord[]>(`/api/v1/semantic/${dbId}/metrics${query}`);
+}
+
+export async function restoreMetricApi(dbId: string, metricId: number): Promise<MetricRecord> {
+  const data = await semanticRequest<{
+    metric_id: number;
+    definition: MetricDefinition;
+    source: 'ai' | 'manual';
+    status?: MetricStatus;
+    is_deleted?: boolean;
+  }>(`/api/v1/semantic/${dbId}/metric/${metricId}/restore`, { method: 'POST' });
+  return metricResponseToRecord(data);
 }
 
 export async function getMetricHistoryApi(dbId: string, metricId: number): Promise<MetricHistory> {
@@ -1006,7 +1029,7 @@ export async function approveSingleMetricApi(
   const data = await semanticRequest<{
     metric_id: number;
     definition: MetricDefinition;
-    source: 'ai' | 'manual';
+    source: 'ai' | 'manual' | 'auto_sync';
     status?: MetricStatus;
   }>(`/api/v1/semantic/${dbId}/metric/${metricId}/approve`, { method: 'POST' });
   return metricResponseToRecord(data);
@@ -1564,3 +1587,108 @@ export async function getMetricFilterColumnsApi(
     `/api/v1/semantic/${dbId}/metric/${metricId}/filter-columns`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Schema Sync & Self-Healing Types & APIs
+// ---------------------------------------------------------------------------
+
+export interface SchemaSyncChangesSummary {
+  added_tables?: string[];
+  dropped_tables?: string[];
+  renamed_tables?: Array<{
+    table_id: number;
+    old_name: string;
+    new_name: string;
+  }>;
+  renamed_columns?: Array<{
+    table_name: string;
+    table_id: number;
+    col_id: number;
+    old_name: string;
+    new_name: string;
+    new_type?: string;
+  }>;
+  added_columns?: Array<{
+    table_name: string;
+    name: string;
+    type: string;
+  }>;
+  dropped_columns?: Array<{
+    table_name: string;
+    col_id: number;
+    name: string;
+  }>;
+  type_changes?: Array<{
+    table_name: string;
+    col_id: number;
+    column_name: string;
+    old_type: string;
+    new_type: string;
+  }>;
+  broken_metrics?: Array<{
+    metric_id: number;
+    name: string;
+    table_name: string;
+    column_name: string;
+    reason: string;
+  }>;
+  healed_metrics?: Array<{
+    metric_id: number;
+    name: string;
+    table_name?: string;
+    old_formula: string;
+    new_formula: string;
+    old_sql?: string;
+    new_sql?: string;
+  }>;
+}
+
+export interface SchemaSyncLog {
+  id: number;
+  semantic_db_id: number;
+  live_db_id?: number | null;
+  trigger_type: 'cron' | 'instant_check' | 'manual';
+  status: 'success' | 'healed' | 'no_change' | 'failed';
+  old_fingerprint?: string | null;
+  new_fingerprint?: string | null;
+  changes_summary?: SchemaSyncChangesSummary | null;
+  details?: string | null;
+  created_at: string;
+}
+
+export interface SchemaSyncStatus {
+  semantic_db_id: number;
+  in_sync: boolean;
+  fingerprint?: string | null;
+  last_synced_at?: string | null;
+  sync_status: string;
+  latest_log?: SchemaSyncLog | null;
+  drift_preview?: SchemaSyncChangesSummary | null;
+}
+
+export interface SchemaSyncTriggerResult {
+  status: string;
+  log: SchemaSyncLog;
+  message: string;
+}
+
+export async function getSyncStatusApi(
+  dbId: number | string,
+): Promise<SchemaSyncStatus> {
+  return semanticRequest<SchemaSyncStatus>(`/api/v1/semantic/${dbId}/sync-status`);
+}
+
+export async function triggerSyncApi(
+  dbId: number | string,
+): Promise<SchemaSyncTriggerResult> {
+  return semanticRequest<SchemaSyncTriggerResult>(`/api/v1/semantic/${dbId}/sync`, {
+    method: 'POST',
+  });
+}
+
+export async function listSyncLogsApi(
+  dbId: number | string,
+): Promise<SchemaSyncLog[]> {
+  return semanticRequest<SchemaSyncLog[]>(`/api/v1/semantic/${dbId}/sync-logs`);
+}
+

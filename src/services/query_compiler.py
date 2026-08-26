@@ -134,6 +134,7 @@ class SemanticQueryCompiler:
             select(SemanticMetricModel).where(
                 SemanticMetricModel.db_id == db_id,
                 SemanticMetricModel.id.in_(ids),
+                SemanticMetricModel.is_deleted.is_(False),
             )
         )
         found = {item.id: item for item in result.scalars().all()}

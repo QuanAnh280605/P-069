@@ -382,3 +382,31 @@ async def get_metric_with_history(
         )
     )
     return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def soft_delete_metric(
+    db: AsyncSession,
+    metric_id: int,
+    user_id: int | None = None,
+    require_ownership: bool = False,
+) -> SemanticMetricModel:
+    """Mark a business metric as soft-deleted without purging its history."""
+    metric = await require_metric(db, metric_id, user_id, require_ownership)
+    metric.is_deleted = True
+    await db.flush()
+    logger.info("Metric soft-deleted metric_id=%s actor=%s", metric.id, user_id)
+    return metric
+
+
+async def restore_metric(
+    db: AsyncSession,
+    metric_id: int,
+    user_id: int | None = None,
+    require_ownership: bool = False,
+) -> SemanticMetricModel:
+    """Restore a previously soft-deleted metric back to active status."""
+    metric = await require_metric(db, metric_id, user_id, require_ownership)
+    metric.is_deleted = False
+    await db.flush()
+    logger.info("Metric restored metric_id=%s actor=%s", metric.id, user_id)
+    return metric

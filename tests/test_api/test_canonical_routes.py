@@ -1258,3 +1258,94 @@ async def test_rollback_personal_db_requires_creator_ownership(client, async_ses
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_soft_delete_restore_and_history_lifecycle(client: AsyncClient, async_session: AsyncSession, auth_headers: dict):
+    """Deleting soft-deletes a metric, preserves history access, blocks updates, and allows restore."""
+    sem_db = _seed_semantic_db(async_session, db_id=260)
+    metric = SemanticMetricModel(
+        db_id=sem_db.id,
+        name="Doanh thu soft delete",
+        description="Metric test soft delete",
+        sql_template="",
+        source="manual",
+        formula="total_amount",
+        aggregation_type="SUM",
+        definition=_make_route_def("Doanh thu soft delete", "SUM", "total_amount", "orders"),
+        status="approved",
+        created_by=1,
+        version=1,
+        is_deleted=False,
+    )
+    async_session.add(metric)
+    await async_session.flush()
+    async_session.add(
+        MetricVersionModel(
+            metric_id=metric.id,
+            version=1,
+            formula="total_amount",
+            definition=_make_route_def("Doanh thu soft delete", "SUM", "total_amount", "orders"),
+            changed_by=1,
+            status="approved",
+        )
+    )
+    await async_session.commit()
+
+    # 1. Soft delete
+    del_res = await client.delete(
+        f"/api/v1/semantic/{sem_db.id}/metric/{metric.id}",
+        headers=auth_headers,
+    )
+    assert del_res.status_code == 204
+
+    # 2. Deleting already soft-deleted metric returns 404
+    del_again_res = await client.delete(
+        f"/api/v1/semantic/{sem_db.id}/metric/{metric.id}",
+        headers=auth_headers,
+    )
+    assert del_again_res.status_code == 404
+
+    # 3. Viewing history of soft-deleted metric returns 200
+    hist_res = await client.get(
+        f"/api/v1/semantic/{sem_db.id}/metric/{metric.id}/history",
+        headers=auth_headers,
+    )
+    assert hist_res.status_code == 200
+    assert hist_res.json()["metric_id"] == metric.id
+
+    # 4. Updating a soft-deleted metric returns 404
+    put_res = await client.put(
+        f"/api/v1/semantic/{sem_db.id}/metric/{metric.id}",
+        json={"definition": _make_route_def("Updated name", "SUM", "total_amount", "orders")},
+        headers=auth_headers,
+    )
+    assert put_res.status_code == 404
+
+    # 5. Restore metric
+    restore_res = await client.post(
+        f"/api/v1/semantic/{sem_db.id}/metric/{metric.id}/restore",
+        headers=auth_headers,
+    )
+    assert restore_res.status_code == 200
+    assert restore_res.json()["is_deleted"] is False
+
+    # 6. Verify list metrics returns restored metric
+    list_res = await client.get(
+        f"/api/v1/semantic/{sem_db.id}/metrics",
+        headers=auth_headers,
+    )
+    assert list_res.status_code == 200
+    metric_ids = [m["metric_id"] for m in list_res.json()]
+    assert metric.id in metric_ids
+
+
+@pytest.mark.asyncio
+async def test_metric_routes_non_numeric_db_id_returns_422(client: AsyncClient, auth_headers: dict):
+    """Non-numeric db_id in metric endpoints triggers FastAPI 422 validation rather than 500."""
+    res_del = await client.delete("/api/v1/semantic/not-a-number/metric/1", headers=auth_headers)
+    assert res_del.status_code == 422
+
+    res_res = await client.post("/api/v1/semantic/not-a-number/metric/1/restore", headers=auth_headers)
+    assert res_res.status_code == 422
+

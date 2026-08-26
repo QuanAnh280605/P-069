@@ -37,6 +37,8 @@ from src.services.metric_service import (
     create_metric,
     get_metric_with_history,
     reject_metric_update,
+    restore_metric,
+    soft_delete_metric,
     update_metric,
 )
 from src.services.pass1_global_glossary import execute_pass1
@@ -61,6 +63,8 @@ __all__ = [
     "ensure_semantic_database",
     "get_metric_with_history",
     "reject_metric_update",
+    "restore_metric",
+    "soft_delete_metric",
     "update_metric",
 ]
 

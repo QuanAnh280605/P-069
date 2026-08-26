@@ -149,6 +149,7 @@ async def get_dimensions_for_metric(
     stmt_metric = select(SemanticMetricModel).where(
         SemanticMetricModel.id == metric_id,
         SemanticMetricModel.db_id == db_id,
+        SemanticMetricModel.is_deleted.is_(False),
     )
     metric = (await db.execute(stmt_metric)).scalar_one_or_none()
     if not metric or not metric.base_entity_id:
@@ -265,6 +266,7 @@ async def get_filter_columns_for_metric(
     stmt_metric = select(SemanticMetricModel).where(
         SemanticMetricModel.id == metric_id,
         SemanticMetricModel.db_id == db_id,
+        SemanticMetricModel.is_deleted.is_(False),
     )
     metric = (await db.execute(stmt_metric)).scalar_one_or_none()
     if not metric or not metric.base_entity_id:

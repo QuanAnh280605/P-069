@@ -455,6 +455,66 @@ describe('MetricsCatalogView', () => {
     expect(screen.getByText('Đã duyệt')).toBeInTheDocument();
     expect(screen.getByText('Chờ duyệt')).toBeInTheDocument();
   });
+
+  it('renders "+ Thêm thủ công" button for Data Lead and calls onAddMetric when clicked', () => {
+    const handleAdd = vi.fn();
+    render(
+      <MetricsCatalogView
+        {...dataLeadCapabilities}
+        dbId={3}
+        metrics={mockMetrics}
+        onAddMetric={handleAdd}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onOpenStudio={vi.fn()}
+      />,
+    );
+
+    const addBtn = screen.getByRole('button', { name: /Thêm thủ công/i });
+    expect(addBtn).toBeInTheDocument();
+    fireEvent.click(addBtn);
+    expect(handleAdd).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders Trash tab and allows restoring soft-deleted metrics', () => {
+    const handleRestore = vi.fn();
+    const deletedMetric: MetricRecord = {
+      ...mockMetrics[0],
+      metric_id: 99,
+      name: 'Metric đã xóa',
+      is_deleted: true,
+    };
+
+    render(
+      <MetricsCatalogView
+        {...dataLeadCapabilities}
+        dbId={3}
+        metrics={[...mockMetrics, deletedMetric]}
+        onRestoreMetric={handleRestore}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+      />,
+    );
+
+    // Active tab shouldn't list the deleted metric
+    expect(screen.queryByText('Metric đã xóa')).not.toBeInTheDocument();
+
+    // Check Trash tab button with count
+    const trashTab = screen.getByRole('button', { name: /Thùng rác \(1\)/i });
+    expect(trashTab).toBeInTheDocument();
+    fireEvent.click(trashTab);
+
+    // Now in Trash view, deleted metric card should appear
+    expect(screen.getByText('Metric đã xóa')).toBeInTheDocument();
+    expect(screen.getByText('Đã xóa')).toBeInTheDocument();
+
+    // Click Khôi phục button
+    const restoreBtn = screen.getByRole('button', { name: /Khôi phục/i });
+    expect(restoreBtn).toBeInTheDocument();
+    fireEvent.click(restoreBtn);
+
+    expect(handleRestore).toHaveBeenCalledWith(99);
+  });
 });
 
 describe('MetricsCatalogView history modal', () => {

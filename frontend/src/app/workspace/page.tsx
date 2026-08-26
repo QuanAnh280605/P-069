@@ -47,6 +47,7 @@ import {
   MetricSuggestion,
   METRIC_WRITE_PERMISSION_MESSAGE,
   isPermissionDenied,
+  restoreMetricApi,
   SemanticCatalog,
   SemanticLayerData,
   updateChatSessionTitleApi,
@@ -198,7 +199,7 @@ export default function WorkspacePage() {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0);
   // Latest-ref so the SSE subscription stays stable across tab/layer changes.
-  const refreshSemanticDataRef = useRef<() => Promise<void>>(async () => {});
+  const refreshSemanticDataRef = useRef<() => Promise<void>>(async () => { });
   const [pendingSchema, setPendingSchema] = useState<{ tables: number; columns: number }>({
     tables: 0,
     columns: 0,
@@ -227,9 +228,9 @@ export default function WorkspacePage() {
   const canEditDashboard = Boolean(permissions.can_manage_metrics || role === 'data_lead' || role === 'admin');
   const canChat = Boolean(
     permissions.can_use_chat &&
-      (canUseDataAssistant || canUseMetricStudio) &&
-      semanticDbId &&
-      activeLayer?.source_type === 'live',
+    (canUseDataAssistant || canUseMetricStudio) &&
+    semanticDbId &&
+    activeLayer?.source_type === 'live',
   );
   const studioMode = canUseMetricStudio ? 'metric_studio' : 'data_assistant';
 
@@ -433,7 +434,7 @@ export default function WorkspacePage() {
     if (!activeLayerId || !semanticDbId) return;
     const dbId = String(semanticDbId);
     try {
-      const metrics = await listMetricsApi(dbId);
+      const metrics = await listMetricsApi(dbId, true);
       setLayers((current) =>
         current.map((item) => (item.id === activeLayerId ? { ...item, metrics } : item)),
       );
@@ -457,7 +458,7 @@ export default function WorkspacePage() {
       if (!catalog || catalog.db_id !== Number(semanticDbId)) {
         void getSemanticCatalogApi(dbId)
           .then((nextCatalog) => setCatalog(nextCatalog))
-          .catch(() => {});
+          .catch(() => { });
       }
     }
   }, [tab, semanticDbId, catalog]);
@@ -513,15 +514,29 @@ export default function WorkspacePage() {
 
   const removeMetric = async (metricId: number) => {
     if (!activeLayer?.semantic_db_id) return;
-    await deleteMetricApi(String(activeLayer.semantic_db_id), metricId);
-    setLayers((current) =>
-      current.map((item) =>
-        item.id === activeLayerId
-          ? { ...item, metrics: item.metrics.filter((m) => m.metric_id !== metricId) }
-          : item,
-      ),
-    );
-    notify('Đã xóa metric.');
+    try {
+      await deleteMetricApi(String(activeLayer.semantic_db_id), metricId);
+      await refreshSemanticData();
+      notify('Đã chuyển metric vào Thùng rác.');
+    } catch (error) {
+      if (isPermissionDenied(error)) {
+        notify(METRIC_WRITE_PERMISSION_MESSAGE);
+      } else {
+        notify(error instanceof Error ? error.message : 'Không thể xóa metric');
+      }
+    }
+  };
+
+  const restoreMetric = async (metricId: number) => {
+    if (!canManageMetrics) return notify(METRIC_WRITE_PERMISSION_MESSAGE);
+    if (!activeLayer?.semantic_db_id) return;
+    try {
+      await restoreMetricApi(String(activeLayer.semantic_db_id), metricId);
+      await refreshSemanticData();
+      notify('Đã khôi phục metric thành công.');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Không thể khôi phục metric');
+    }
   };
 
   const approve = async () => {
@@ -531,9 +546,9 @@ export default function WorkspacePage() {
       current.map((item) =>
         item.id === activeLayerId
           ? {
-              ...item,
-              metrics: item.metrics.map((m) => ({ ...m, status: 'approved' })),
-            }
+            ...item,
+            metrics: item.metrics.map((m) => ({ ...m, status: 'approved' })),
+          }
           : item,
       ),
     );
@@ -547,9 +562,9 @@ export default function WorkspacePage() {
       current.map((item) =>
         item.id === activeLayerId
           ? {
-              ...item,
-              metrics: item.metrics.map((m) => (m.metric_id === metricId ? { ...m, status: 'approved' } : m)),
-            }
+            ...item,
+            metrics: item.metrics.map((m) => (m.metric_id === metricId ? { ...m, status: 'approved' } : m)),
+          }
           : item,
       ),
     );
@@ -563,7 +578,7 @@ export default function WorkspacePage() {
   };
 
   const pendingCount = activeLayer
-    ? activeLayer.metrics.filter((m) => m.status !== 'approved').length
+    ? activeLayer.metrics.filter((m) => !m.is_deleted && m.status !== 'approved').length
     : 0;
   const pendingSchemaCount = pendingSchema.tables + pendingSchema.columns;
 
@@ -606,20 +621,20 @@ export default function WorkspacePage() {
         const nextLayer = layers.find((item) => item.id === id);
         const nextCanChat = Boolean(
           permissions.can_use_chat &&
-            (canUseDataAssistant || canUseMetricStudio) &&
-            nextLayer?.source_type === 'live',
+          (canUseDataAssistant || canUseMetricStudio) &&
+          nextLayer?.source_type === 'live',
         );
         setTab(nextCanChat ? 'studio' : 'metrics');
       }}
       onRemoveDatabase={
         canManageSchema
           ? async (id) => {
-              const layer = layers.find((l) => l.id === id);
-              if (!layer || !token || !window.confirm(`Xóa database ${layer.db_name}?`)) return;
-              await deleteDatabaseApi(layer.id, token);
-              deleteLayer(layer.id);
-              setLayers((current) => current.filter((item) => item.id !== layer.id));
-            }
+            const layer = layers.find((l) => l.id === id);
+            if (!layer || !token || !window.confirm(`Xóa database ${layer.db_name}?`)) return;
+            await deleteDatabaseApi(layer.id, token);
+            deleteLayer(layer.id);
+            setLayers((current) => current.filter((item) => item.id !== layer.id));
+          }
           : undefined
       }
       onConnectDatabase={canManageSchema ? () => setConnectOpen(true) : undefined}
@@ -719,7 +734,10 @@ export default function WorkspacePage() {
               canManageMetrics={canManageMetrics}
               canApproveMetrics={canApproveMetrics}
               canSubmitMetric={canSubmitMetric}
+              onAddMetric={canManageMetrics ? () => openEditor() : undefined}
+              onSubmitMetric={canSubmitMetric ? () => openEditor() : undefined}
               onDeleteMetric={canManageMetrics ? removeMetric : undefined}
+              onRestoreMetric={canManageMetrics ? restoreMetric : undefined}
               onEditMetric={canManageMetrics ? (item) => openEditor(item) : undefined}
               onOpenStudio={canUseMetricStudio ? () => setTab('studio') : undefined}
               onApproveAll={canApproveMetrics ? approve : undefined}
@@ -892,7 +910,7 @@ async function loadLayerDetail(layer: SemanticLayerData, token: string): Promise
       );
     }
     const metrics = fullLayer.semantic_db_id
-      ? await listMetricsApi(String(fullLayer.semantic_db_id)).catch(() => [])
+      ? await listMetricsApi(String(fullLayer.semantic_db_id), true).catch(() => [])
       : [];
     return {
       ...fullLayer,
