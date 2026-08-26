@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
+
+from pydantic import ValidationError
 
 from src.agents.state import AgentState
 from src.models.schemas import (
@@ -26,9 +29,10 @@ logger = logging.getLogger(__name__)
 _VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 _PARSE_PROMPT = """Bạn là chuyên gia Semantic Query Parser của hệ thống AI Semantic Layer.
-Nhiệm vụ: Chuyển đổi câu hỏi tiếng Việt của người dùng thành cấu trúc truy vấn Semantic Query hoặc yêu cầu làm rõ (Clarification) nếu mơ hồ.
+Nhiệm vụ: Chuyển đổi câu hỏi tiếng Việt của người dùng thành cấu trúc truy vấn Semantic Query hoặc yêu cầu làm rõ (Clarification) nếu mơ hồ hoặc chưa có chỉ số.
 
 Thời gian hiện tại tại Việt Nam (Asia/Ho_Chi_Minh): {current_time}
+Vai trò người dùng: {role_description}
 
 CATALOG CHỈ SỐ VÀ CHIỀU ĐÃ ĐƯỢC PHÊ DUYỆT:
 {catalog_json}
@@ -40,10 +44,23 @@ Câu hỏi người dùng: "{user_message}"
 
 QUY TẮC BẮT BUỘC:
 1. CHỈ ĐƯỢC DÙNG metric_id và column_id có trong CATALOG ở trên. TUYỆT ĐỐI KHÔNG TỰ NGHĨ RA ID.
-2. ĐỘ PHÙ HỢP NGHIỆP VỤ (QUAN TRỌNG NHẤT):
-   - CHỈ CHỌN metric_id nếu ý nghĩa nghiệp vụ (name, business_name), công thức và filters có sẵn thực sự khớp với câu hỏi của người dùng.
-   - TUYỆT ĐỐI KHÔNG gượng ép chọn metric có ý nghĩa trái ngược hoặc khác biệt (ví dụ: người dùng hỏi "đơn hàng hoàn thành" / "thành công" mà trong catalog chỉ có metric "Tỷ lệ hủy đơn hàng" có filter is_canceled=1, thì TUYỆT ĐỐI KHÔNG CHỌN metric này).
-   - Nếu KHÔNG CÓ metric nào trong catalog phù hợp với câu hỏi của người dùng: BẮT BUỘC trả về status: "needs_clarification" với clarification.prompt giải thích rõ ràng metric chưa có và gợi ý các metric hiện có hoặc hướng dẫn tạo metric mới.
+2. ĐỘ CHÍNH XÁC VỀ KHÁI NIỆM NGHIỆP VỤ (CỰC KỲ QUAN TRỌNG):
+   - CHỈ ĐƯỢC CHỌN status: "resolved" khi chỉ số trong CATALOG thực sự mang đúng tên/định nghĩa hoặc là từ đồng nghĩa trực tiếp 100% của câu hỏi người dùng (ví dụ: "Doanh thu" <-> "Tổng doanh thu", "Số đơn" <-> "Số lượng đơn hàng").
+   - TUYỆT ĐỐI CẤM TỰ Ý GÁN / ÉP CHỈ SỐ GẦN GIỐNG KHI KHÁC KHÁI NIỆM:
+     + "Tỷ lệ giữ chân khách hàng (Retention Rate)" KHÔNG PHẢI LÀ "Tỷ lệ khách hàng quay lại mua hàng" hay "Số lượng khách hàng". Nếu catalog chỉ có "Tỷ lệ khách hàng quay lại mua hàng" mà người dùng hỏi "Tỷ lệ giữ chân khách hàng" -> BẮT BUỘC trả về status: "needs_clarification", TUYỆT ĐỐI KHÔNG CHỌN metric này!
+     + "Doanh thu thuần (Net Revenue)" KHÔNG PHẢI LÀ "Tổng doanh thu (Gross Revenue)".
+     + "Tỷ lệ chuyển đổi (Conversion Rate)" KHÔNG PHẢI LÀ "Số lượt xem" hay "Số đơn hàng".
+     + "Giá trị đơn hàng trung bình (AOV)" KHÔNG PHẢI LÀ "Tổng doanh thu".
+   - BẤT KỲ KHI NÀO chỉ số người dùng hỏi chưa có đúng định nghĩa trong CATALOG:
+     + BẮT BUỘC trả về status: "needs_clarification".
+     + TUYỆT ĐỐI KHÔNG CHỌN bất kỳ metric_ids nào trong catalog.
+     + clarification.prompt: Giải thích ngắn gọn rằng chỉ số này chưa có trong danh mục được phê duyệt của hệ thống và hỏi người dùng có muốn {action_prompt} không.
+       TUYỆT ĐỐI KHÔNG liệt kê các metric khác không đúng người dùng hỏi ở phía sau câu trả lời (ví dụ KHÔNG viết "Các chỉ số liên quan hiện có trong danh mục bao gồm...").
+       Mẫu câu chuẩn: "Hệ thống hiện chưa có chỉ số '<Tên chỉ số người dùng hỏi>'. Bạn có muốn {action_prompt} này không?"
+     + clarification.options: BẮT BUỘC trả về DUY NHẤT 1 option nút bấm:
+       [
+         {{"id": "create_metric", "label": "{action_label} '<Tên chỉ số người dùng hỏi>'", "description": "Yêu cầu AI đề xuất định nghĩa metric này", "spec": null, "action": "create_metric"}}
+       ]
 3. Nếu câu hỏi rõ ràng và map được metric/dimension/filter hợp lệ:
    - status: "resolved"
    - metric_ids: danh sách ID chỉ số đã chọn (ví dụ [1])
@@ -51,12 +68,16 @@ QUY TẮC BẮT BUỘC:
    - filters: danh sách {{"column_id": int, "operator": "eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"in"|"not_in"|"is_null"|"is_not_null", "value": any}}
    - time_ranges: danh sách {{"column_id": int, "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "label": "Năm 2024"}} (khoảng thời gian nửa mở [start_date, end_date))
    - limit: số dòng tối đa (mặc định 100, tối đa 1000)
-4. Nếu câu hỏi mơ hồ, thiếu thông tin hoặc chưa có metric phù hợp trong catalog:
+4. Nếu câu hỏi về một metric CÓ trong catalog nhưng mơ hồ về chiều phân tích hoặc bộ lọc (ví dụ: người dùng hỏi "Xem doanh thu" mà catalog có "Tổng doanh thu"):
    - status: "needs_clarification"
    - clarification: {{"prompt": "Câu hỏi làm rõ tiếng Việt", "options": [
        {{"id": "opt_1", "label": "Nhãn hiển thị ngắn", "description": "Mô tả chi tiết", "spec": {{"metric_ids": [...], "dimensions": [...], "filters": [], "limit": 100}}}}
-     ]}} (tối đa 3 options có spec hoàn chỉnh từ các metric sẵn có).
+     ]}} (tối đa 3 options có spec phân tích theo các dimension/filter hợp lệ của chính metric đó).
 5. rationale: Giải thích ngắn gọn lý do chọn metric/dimension hoặc lý do cần làm rõ.
+
+VÍ DỤ MẪU BẮT BUỘC TUÂN THEO:
+- Ví dụ 1 (Khớp đúng): User "Xem tổng doanh thu 2024", Catalog có "Tổng doanh thu" (id=1) -> status: "resolved", metric_ids: [1]
+- Ví dụ 2 (Chưa có chỉ số được hỏi, catalog chỉ có chỉ số gần giống): User "Xem tỷ lệ giữ chân khách hàng", Catalog có "Tỷ lệ khách hàng quay lại mua hàng" (id=9) -> KHÔNG ĐƯỢC CHỌN id=9 -> status: "needs_clarification", clarification.prompt: "Hệ thống hiện chưa có chỉ số 'Tỷ lệ giữ chân khách hàng'. Bạn có muốn {action_prompt} này không?", clarification.options: [{{"id": "create_metric", "label": "{action_label} 'Tỷ lệ giữ chân khách hàng'", "spec": null, "action": "create_metric"}}]
 
 CHỈ TRẢ VỀ DUY NHẤT 1 JSON OBJECT hợp lệ theo cấu trúc sau:
 {{
@@ -79,10 +100,11 @@ async def semantic_parse_node(state: AgentState) -> dict[str, Any]:
         return _empty_catalog_fallback()
 
     user_message = state.get("user_message", "").strip()
-    prompt = _build_parse_prompt(state, user_message, catalog)
+    can_generate = state.get("can_generate_metrics", False)
+    prompt = _build_parse_prompt(state, user_message, catalog, can_generate)
     try:
         raw_json = await ainvoke_json(get_llm(), prompt, retries=1)
-        interpretation = _parse_interpretation(raw_json, catalog)
+        interpretation = _parse_interpretation(raw_json, catalog, can_generate, user_message)
     except Exception as exc:
         logger.warning("Semantic parse node failed: %s", exc)
         interpretation = _fallback_interpretation(
@@ -102,13 +124,26 @@ def _empty_catalog_fallback() -> dict[str, Any]:
     return {"intent": "semantic_query", "interpretation": interp.model_dump(), "chat_response": msg}
 
 
-def _build_parse_prompt(state: AgentState, user_message: str, catalog: dict[str, Any]) -> str:
+def _build_parse_prompt(
+    state: AgentState, user_message: str, catalog: dict[str, Any], can_generate_metrics: bool
+) -> str:
     """Format catalog, history, and current Vietnam time into the prompt."""
     now_vn = datetime.now(_VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
     history_str = _format_history(state.get("chat_history", []))
     compact_catalog = json.dumps(catalog, ensure_ascii=False, indent=2)
+    if can_generate_metrics:
+        role_desc = "Data Lead / Quản trị viên (có quyền tạo và phê duyệt Metric)"
+        action_prompt = "đề xuất tạo Business Metric mới"
+        action_label = "Tạo Business Metric"
+    else:
+        role_desc = "Thành viên / Người xem (không có quyền tạo trực tiếp, có quyền gửi yêu cầu đề xuất lên Data Lead)"
+        action_prompt = "gửi Data Lead đề xuất Business Metric mới"
+        action_label = "Gửi Data Lead đề xuất chỉ số"
     return _PARSE_PROMPT.format(
         current_time=now_vn,
+        role_description=role_desc,
+        action_prompt=action_prompt,
+        action_label=action_label,
         catalog_json=compact_catalog,
         history=history_str,
         user_message=user_message,
@@ -126,20 +161,58 @@ def _format_history(history: list[dict[str, str]]) -> str:
     return "\n".join(lines) or "(none)"
 
 
-def _parse_interpretation(raw: dict[str, Any], catalog: dict[str, Any]) -> SemanticQueryInterpretation:
+def _is_forced_mismatch(user_message: str, metric_ids: list[int], catalog: dict[str, Any]) -> bool:
+    """Detect if distinct concepts (like retention rate) were forcefully mapped to unrelated metrics."""
+    lowered = user_message.lower()
+    valid_metrics = {m["id"]: m for m in catalog.get("metrics", [])}
+    for m_id in metric_ids:
+        m = valid_metrics.get(m_id)
+        if not m:
+            continue
+        m_name = (m.get("business_name") or m.get("name") or "").lower()
+        if ("giữ chân" in lowered or "retention" in lowered) and (
+            "giữ chân" not in m_name and "retention" not in m_name
+        ):
+            return True
+        if ("thuần" in lowered or "net" in lowered) and ("thuần" not in m_name and "net" not in m_name):
+            return True
+        if ("chuyển đổi" in lowered or "conversion" in lowered) and (
+            "chuyển đổi" not in m_name and "conversion" not in m_name
+        ):
+            return True
+        if ("aov" in lowered or "trung bình đơn" in lowered) and (
+            "aov" not in m_name and "trung bình" not in m_name and "average" not in m_name
+        ):
+            return True
+    return False
+
+
+def _parse_interpretation(
+    raw: dict[str, Any], catalog: dict[str, Any], can_generate_metrics: bool, user_message: str
+) -> SemanticQueryInterpretation:
     """Convert raw LLM dict into validated SemanticQueryInterpretation."""
     status = raw.get("status")
     if status == "resolved":
         spec = _build_spec(raw, catalog)
         if spec is not None:
-            time_ranges = _build_time_ranges(raw.get("time_ranges", []))
-            return SemanticQueryInterpretation(
-                status="resolved",
-                spec=spec,
-                time_ranges=time_ranges,
-                rationale=raw.get("rationale"),
-            )
-    return _build_clarification_interpretation(raw)
+            if _is_forced_mismatch(user_message, spec.metric_ids, catalog):
+                raw = {
+                    "status": "needs_clarification",
+                    "clarification": {
+                        "prompt": f"Hệ thống hiện chưa có chỉ số '{user_message.strip()}'.",
+                        "options": [],
+                    },
+                    "rationale": "Chỉ số được hỏi chưa tồn tại chính xác trong danh mục.",
+                }
+            else:
+                time_ranges = _build_time_ranges(raw.get("time_ranges", []))
+                return SemanticQueryInterpretation(
+                    status="resolved",
+                    spec=spec,
+                    time_ranges=time_ranges,
+                    rationale=raw.get("rationale"),
+                )
+    return _build_clarification_interpretation(raw, catalog, can_generate_metrics, user_message)
 
 
 def _build_spec(raw: dict[str, Any], catalog: dict[str, Any]) -> SemanticQuerySpec | None:
@@ -175,27 +248,102 @@ def _build_time_ranges(items: list[Any]) -> list[SemanticTimeRange]:
     return ranges
 
 
-def _build_clarification_interpretation(raw: dict[str, Any]) -> SemanticQueryInterpretation:
+def _is_missing_metric_prompt(prompt: str) -> bool:
+    """Detect if clarification prompt explains that requested metric is missing."""
+    lowered = prompt.lower()
+    markers = (
+        "chưa có chỉ số",
+        "chưa định nghĩa",
+        "chưa có metric",
+        "không có chỉ số",
+        "không có metric",
+        "chưa hỗ trợ",
+        "chưa có trong",
+        "không tồn tại",
+    )
+    return any(m in lowered for m in markers)
+
+
+def _extract_metric_name_from_text(text: str) -> str | None:
+    """Extract quoted metric name from clarification prompt if present."""
+    match = re.search(r"['\"`]([^'\"`]+)['\"`]", text)
+    return match.group(1).strip() if match else None
+
+
+def _clean_missing_metric_prompt(prompt: str, user_message: str, can_generate_metrics: bool) -> str:
+    """Ensure clarification prompt is clean and concise without listing unrelated metrics."""
+    raw_name = _extract_metric_name_from_text(prompt) or _extract_metric_name_from_text(user_message) or user_message
+    name = re.sub(
+        r"^(xem|cho\s+tôi\s+xem|thống\s+kê|báo\s+cáo|tính)\s+",
+        "",
+        raw_name.strip(),
+        flags=re.IGNORECASE,
+    ).strip()
+    name = re.sub(r"\s+(tháng\s+này|hôm\s+nay|năm\s+nay|tuần\s+này)$", "", name, flags=re.IGNORECASE).strip()
+    if can_generate_metrics:
+        return f"Hệ thống hiện chưa có chỉ số '{name}'. Bạn có muốn tôi đề xuất tạo Business Metric mới này không?"
+    return f"Hệ thống hiện chưa có chỉ số '{name}'. Bạn có muốn gửi Data Lead đề xuất chỉ số này không?"
+
+
+def _build_clarification_interpretation(
+    raw: dict[str, Any], catalog: dict[str, Any], can_generate_metrics: bool = False, user_message: str = ""
+) -> SemanticQueryInterpretation:
     """Build a needs_clarification interpretation from clarification payload."""
     clar_data = raw.get("clarification")
     prompt = "Tôi cần thêm thông tin để chạy truy vấn chính xác. Bạn vui lòng chọn một trong các gợi ý dưới đây:"
     options: list[ChatClarificationOption] = []
     if isinstance(clar_data, dict):
         prompt = clar_data.get("prompt") or prompt
-        for opt in clar_data.get("options", []):
-            if isinstance(opt, dict) and "id" in opt and "label" in opt and "spec" in opt:
-                try:
-                    options.append(
-                        ChatClarificationOption(
-                            id=str(opt["id"]),
-                            label=str(opt["label"]),
-                            description=opt.get("description"),
-                            spec=SemanticQuerySpec(**opt["spec"]),
+        raw_options = clar_data.get("options", [])
+        if _is_missing_metric_prompt(prompt):
+            prompt = _clean_missing_metric_prompt(prompt, user_message, can_generate_metrics)
+            name = _extract_metric_name_from_text(prompt) or user_message.strip()
+            clean_name = re.sub(
+                r"^(xem|cho\s+tôi\s+xem|thống\s+kê|báo\s+cáo|tính)\s+", "", name, flags=re.IGNORECASE
+            ).strip()
+            label = (
+                f"Tạo Business Metric '{clean_name}'"
+                if can_generate_metrics
+                else f"Gửi Data Lead đề xuất chỉ số '{clean_name}'"
+            )
+            options.append(
+                ChatClarificationOption(
+                    id="create_metric",
+                    label=label,
+                    description="Yêu cầu AI đề xuất định nghĩa metric này",
+                    spec=None,
+                    action="create_metric",
+                )
+            )
+        elif isinstance(raw_options, list):
+            valid_ids = {m["id"] for m in catalog.get("metrics", [])}
+            for opt in raw_options:
+                if isinstance(opt, dict) and "id" in opt and "label" in opt:
+                    spec_obj = None
+                    spec = opt.get("spec")
+                    if isinstance(spec, dict) and spec.get("metric_ids"):
+                        if set(spec["metric_ids"]).issubset(valid_ids):
+                            try:
+                                spec_obj = SemanticQuerySpec(**spec)
+                            except ValidationError as exc:
+                                logger.debug("Skipping invalid option spec: %s", exc)
+                                continue
+                        else:
+                            logger.debug("Skipping option with metric IDs outside approved catalog")
+                            continue
+                    try:
+                        options.append(
+                            ChatClarificationOption(
+                                id=str(opt["id"]),
+                                label=str(opt["label"]),
+                                description=opt.get("description"),
+                                spec=spec_obj,
+                                action=opt.get("action"),
+                            )
                         )
-                    )
-                except Exception as exc:
-                    logger.debug("Skipping invalid clarification option: %s", exc)
-                    continue
+                    except ValidationError as exc:
+                        logger.debug("Skipping invalid option: %s", exc)
+                        continue
     return SemanticQueryInterpretation(
         status="needs_clarification",
         clarification=ChatClarificationPayload(prompt=prompt, options=options[:3]),

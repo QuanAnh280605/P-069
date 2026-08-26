@@ -5,6 +5,7 @@ from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -1875,28 +1876,89 @@ async def _handle_clarification_selection(
     if not matched_option:
         raise HTTPException(status_code=400, detail="Invalid clarification option")
 
-    _, live_db = await _query_target(db, numeric_db_id, current_user.id, org_id)
-    catalog = await build_parser_catalog(db, numeric_db_id)
-    spec = SemanticQuerySpec(**matched_option["spec"])
-    query_result = await execute_natural_language_query(db, numeric_db_id, live_db, spec, catalog)
+    spec_dict = matched_option.get("spec")
+    if isinstance(spec_dict, dict) and spec_dict.get("metric_ids"):
+        catalog = await build_parser_catalog(db, numeric_db_id)
+        valid_ids = {m["id"] for m in catalog.get("metrics", [])}
+        if set(spec_dict["metric_ids"]).issubset(valid_ids):
+            _, live_db = await _query_target(db, numeric_db_id, current_user.id, org_id)
+            try:
+                spec = SemanticQuerySpec(**spec_dict)
+            except ValidationError as exc:
+                logger.warning("Invalid clarification option spec: %s", exc)
+                return await _invalid_clarification_option_response(
+                    db, session, current_user, body, can_generate_metrics, org_id
+                )
+            try:
+                query_result = await execute_natural_language_query(db, numeric_db_id, live_db, spec, catalog)
+            except SemanticCompileError as exc:
+                logger.warning("Semantic compile error for clarification option: %s (%s)", exc.message, exc.code)
+                return await _invalid_clarification_option_response(
+                    db, session, current_user, body, can_generate_metrics, org_id
+                )
 
+            user_msg = await save_chat_message(
+                db, session.id, "user", body.message, client_message_id=body.client_message_id
+            )
+            resp_text = query_result.explanation
+            assistant = await save_chat_message(
+                db,
+                session.id,
+                "assistant",
+                resp_text,
+                intent="semantic_query",
+                metadata_json=_assistant_metadata(semantic_query_result=query_result.model_dump(mode="json")),
+                client_message_id=f"{body.client_message_id}:assistant" if body.client_message_id else None,
+            )
+            refreshed = await get_chat_session_with_messages(db, session.id, current_user.id)
+            display_res = query_result if can_generate_metrics else query_result.model_copy(update={"sql": None})
+            return ChatResponse(
+                intent="semantic_query",
+                chat_response=resp_text,
+                semantic_query_result=display_res,
+                session_id=session.id,
+                user_message_id=user_msg.id,
+                assistant_message_id=assistant.id,
+                session=_session_summary(refreshed),
+            )
+
+    # When the option is to create/suggest a metric or is otherwise not a valid semantic
+    # execution spec, delegate to the standard chat flow.
+    body_copy = body.model_copy(update={"clarification_selection": None})
+    return await _process_standard_chat(
+        db, session, current_user, numeric_db_id, body_copy, can_generate_metrics, org_id
+    )
+
+
+_INVALID_OPTION_NOTICE = (
+    "Lựa chọn không hợp lệ hoặc chỉ số được chọn không còn khả dụng trong danh mục "
+    "được phê duyệt. Vui lòng chọn một tùy chọn khác hoặc đặt câu hỏi mới."
+)
+
+
+async def _invalid_clarification_option_response(
+    db: AsyncSession,
+    session: ChatSessionModel,
+    current_user: UserModel,
+    body: ChatRequest,
+    can_generate_metrics: bool,
+    org_id: int | None = None,
+) -> ChatResponse:
+    """Persist and return the stable invalid-option Vietnamese notice for a bad clarification selection."""
     user_msg = await save_chat_message(db, session.id, "user", body.message, client_message_id=body.client_message_id)
-    resp_text = query_result.explanation
     assistant = await save_chat_message(
         db,
         session.id,
         "assistant",
-        resp_text,
+        _INVALID_OPTION_NOTICE,
         intent="semantic_query",
-        metadata_json=_assistant_metadata(semantic_query_result=query_result.model_dump(mode="json")),
+        metadata_json=_assistant_metadata(),
         client_message_id=f"{body.client_message_id}:assistant" if body.client_message_id else None,
     )
     refreshed = await get_chat_session_with_messages(db, session.id, current_user.id)
-    display_res = query_result if can_generate_metrics else query_result.model_copy(update={"sql": None})
     return ChatResponse(
         intent="semantic_query",
-        chat_response=resp_text,
-        semantic_query_result=display_res,
+        chat_response=_INVALID_OPTION_NOTICE,
         session_id=session.id,
         user_message_id=user_msg.id,
         assistant_message_id=assistant.id,
@@ -1926,6 +1988,7 @@ async def _process_standard_chat(
     approved_metrics = await _load_approved_metric_context(db, numeric_db_id)
     classification = await orchestrator_node({"user_message": body.message, "chat_history": history})
     preclassified_intent = classification.get("intent", "data_question")
+    preclassified_chat_response = classification.get("chat_response")
 
     parser_catalog: dict[str, Any] = {}
     if preclassified_intent == "semantic_query":
@@ -1933,7 +1996,7 @@ async def _process_standard_chat(
         parser_catalog = await build_parser_catalog(db, numeric_db_id)
 
     context = await _build_chat_context(
-        db, numeric_db_id, body.message, preclassified_intent, get_settings().metric_context_token_budget
+        db, numeric_db_id, body.message, preclassified_intent, get_settings().metric_context_token_budget, history
     )
     existing_metrics, dedupe_performed = await load_existing_for_dedupe(db, str(numeric_db_id))
     final_state = await _chat_state_for_context(
@@ -1948,6 +2011,7 @@ async def _process_standard_chat(
         existing_metrics,
         dedupe_performed,
         parser_catalog,
+        chat_response=preclassified_chat_response,
     )
     return await _build_and_save_chat_response(
         db,
@@ -2084,6 +2148,7 @@ async def _chat_state_for_context(
     existing_metrics: list[dict[str, Any]] | None,
     dedupe_performed: bool,
     parser_catalog: dict[str, Any] | None = None,
+    chat_response: str | None = None,
 ) -> dict[str, Any]:
     """Run the graph only after consented context preparation succeeds."""
     if context.diagnostic["status"] != "ready":
@@ -2101,18 +2166,29 @@ async def _chat_state_for_context(
             "existing_metrics": existing_metrics or [],
             "dedupe_performed": dedupe_performed,
             "parser_catalog": parser_catalog or {},
+            "chat_response": chat_response,
         }
     )
 
 
 async def _build_chat_context(
-    db: AsyncSession, db_id: int, message: str, intent: str, token_budget: int
+    db: AsyncSession,
+    db_id: int,
+    message: str,
+    intent: str,
+    token_budget: int,
+    history: list[dict[str, str]] | None = None,
 ) -> MetricContextResult:
     """Prepare context only after the request intent is known."""
+    query = message
+    if history and len(message.strip().split()) <= 6:
+        prior_user_msgs = [m.get("content", "") for m in history if m.get("role") == "user" and m.get("content")]
+        if prior_user_msgs:
+            query = f"{prior_user_msgs[-1]}\nYêu cầu tiếp theo: {message}"
     if intent == "metric_query":
-        return await build_metric_context(db, db_id, message, token_budget)
+        return await build_metric_context(db, db_id, query, token_budget)
     if intent == "data_question":
-        return await build_data_context(db, db_id, message, token_budget)
+        return await build_data_context(db, db_id, query, token_budget)
     return MetricContextResult(schema={}, diagnostic={"status": "ready", "tables": [], "relationship_count": 0})
 
 

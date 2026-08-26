@@ -41,6 +41,7 @@ def chat_mocks():
         patch("src.api.routes.save_chat_message", new_callable=AsyncMock) as mock_save,
         patch("src.api.routes.get_chat_session_with_messages", new_callable=AsyncMock) as mock_refresh,
         patch("src.api.routes.build_data_context", new_callable=AsyncMock) as mock_data_ctx,
+        patch("src.api.routes.build_metric_context", new_callable=AsyncMock) as mock_metric_ctx,
         patch("src.api.routes._require_resource_permission", new_callable=AsyncMock),
         patch("src.api.routes._query_target", new_callable=AsyncMock) as mock_target,
         patch("src.api.routes.build_parser_catalog", new_callable=AsyncMock) as mock_catalog,
@@ -59,6 +60,7 @@ def chat_mocks():
         )
         mock_refresh.return_value = refreshed
         mock_data_ctx.return_value = MetricContextResult(schema={}, diagnostic={"status": "ready"})
+        mock_metric_ctx.return_value = MetricContextResult(schema={}, diagnostic={"status": "ready"})
         mock_target.return_value = (
             SimpleNamespace(id=101),
             SimpleNamespace(id=1, dialect="sqlite", conn_url_enc="enc"),
@@ -267,3 +269,111 @@ async def test_replay_returns_persisted_semantic_query_snapshot(
     assert body["semantic_query_result"]["columns"] == ["customer_id", "revenue"]
     assert body["semantic_query_result"]["rows"] == [[101, 1500000]]
     mock_exec.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("src.agents.chat_graph.chat_agent", new_callable=AsyncMock)
+@patch("src.agents.nodes.orchestrator_node.orchestrator_node", new_callable=AsyncMock)
+@patch("src.api.routes.get_chat_message", new_callable=AsyncMock)
+async def test_clarification_selection_for_create_metric_delegates_to_standard_chat(
+    mock_get_msg: AsyncMock,
+    mock_orch: AsyncMock,
+    mock_agent: AsyncMock,
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    chat_mocks: SimpleNamespace,
+) -> None:
+    """Clicking a create_metric clarification option delegates to standard chat to trigger metric generator."""
+    prev_msg = SimpleNamespace(
+        id="msg-prev-create",
+        session_id="sess-nl-1",
+        metadata_json={
+            "clarification": {
+                "prompt": "Chưa có metric 'Tỷ lệ giữ chân khách hàng'. Bạn có muốn tạo không?",
+                "options": [
+                    {
+                        "id": "create_metric",
+                        "label": "Tạo metric 'Tỷ lệ giữ chân khách hàng'",
+                        "action": "create_metric",
+                        "spec": None,
+                    }
+                ],
+            }
+        },
+    )
+    mock_get_msg.return_value = prev_msg
+    mock_orch.return_value = {"intent": "metric_query"}
+    mock_agent.ainvoke.return_value = {
+        "intent": "metric_query",
+        "chat_response": "Tôi đề xuất tạo metric Tỷ lệ giữ chân khách hàng.",
+    }
+
+    res = await client.post(
+        "/api/v1/semantic/101/chat",
+        json={
+            "message": "Tạo metric 'Tỷ lệ giữ chân khách hàng'",
+            "session_id": "00000000-0000-0000-0000-000000000001",
+            "clarification_selection": {
+                "assistant_message_id": "msg-prev-create",
+                "option_id": "create_metric",
+            },
+        },
+        headers=auth_headers,
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["intent"] == "metric_query"
+
+
+@pytest.mark.asyncio
+@patch("src.agents.chat_graph.chat_agent", new_callable=AsyncMock)
+@patch("src.agents.nodes.orchestrator_node.orchestrator_node", new_callable=AsyncMock)
+@patch("src.api.routes.get_chat_message", new_callable=AsyncMock)
+async def test_clarification_selection_with_stale_metric_id_delegates_to_standard_chat(
+    mock_get_msg: AsyncMock,
+    mock_orch: AsyncMock,
+    mock_agent: AsyncMock,
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    chat_mocks: SimpleNamespace,
+) -> None:
+    """A clarification option whose metric IDs are no longer in the approved catalog is not executed as a query."""
+    prev_msg = SimpleNamespace(
+        id="msg-prev-stale",
+        session_id="sess-nl-1",
+        metadata_json={
+            "clarification": {
+                "prompt": "Chọn chỉ số",
+                "options": [
+                    {
+                        "id": "opt_stale",
+                        "label": "Chỉ số đã xóa",
+                        "spec": {"metric_ids": [9999], "dimensions": [], "filters": [], "limit": 100},
+                    }
+                ],
+            }
+        },
+    )
+    mock_get_msg.return_value = prev_msg
+    mock_orch.return_value = {"intent": "data_question", "chat_response": "Không tìm thấy chỉ số phù hợp."}
+    mock_agent.ainvoke.return_value = {
+        "intent": "data_question",
+        "chat_response": "Không tìm thấy chỉ số phù hợp.",
+    }
+
+    res = await client.post(
+        "/api/v1/semantic/101/chat",
+        json={
+            "message": "Xem chỉ số đó",
+            "session_id": "00000000-0000-0000-0000-000000000001",
+            "clarification_selection": {
+                "assistant_message_id": "msg-prev-stale",
+                "option_id": "opt_stale",
+            },
+        },
+        headers=auth_headers,
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["intent"] != "semantic_query"
+    chat_mocks.mock_exec.assert_not_called()

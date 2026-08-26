@@ -12,10 +12,10 @@ logger = logging.getLogger(__name__)
 
 _OUT_OF_SCOPE_RESPONSE = (
     "Tôi là trợ lý AI chuyên về Semantic Layer và phân tích dữ liệu doanh nghiệp. "
+    "Câu hỏi hoặc yêu cầu của bạn hiện không thuộc phạm vi hỗ trợ của hệ thống. "
     "Tôi chỉ hỗ trợ các câu hỏi liên quan đến cơ sở dữ liệu, schema, bảng, cột, "
-    "Business Metrics và tính năng của hệ thống. "
-    "Rất tiếc tôi không thể trả lời câu hỏi ngoài phạm vi này. "
-    "Bạn có câu hỏi nào về dữ liệu không?"
+    "Business Metrics và tính năng của hệ thống Semantic Layer. "
+    "Bạn có câu hỏi nào về dữ liệu cần tôi hỗ trợ không?"
 )
 
 _CLASSIFY_PROMPT = """Bạn là bộ phân loại câu hỏi thông minh cho hệ thống AI Semantic Layer.
@@ -45,6 +45,11 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
     """
     existing_intent = state.get("intent")
     if existing_intent in _INTENTS:
+        if existing_intent == "out_of_scope":
+            return {
+                "intent": "out_of_scope",
+                "chat_response": state.get("chat_response") or _OUT_OF_SCOPE_RESPONSE,
+            }
         return {"intent": existing_intent}
     user_message = state.get("user_message", "").strip()
     if not user_message:
@@ -74,15 +79,16 @@ def _classification_prompt(state: AgentState, user_message: str) -> str:
 
 def _parse_intent(raw: str) -> str:
     """Parse raw LLM response into recognized intent string."""
-    if "semantic_query" in raw:
-        return "semantic_query"
-    if "metric_query" in raw:
+    cleaned = raw.strip().lower()
+    if "metric_query" in cleaned:
         return "metric_query"
-    if "data_question" in raw:
+    if "semantic_query" in cleaned:
+        return "semantic_query"
+    if "data_question" in cleaned:
         return "data_question"
-    if "out_of_scope" in raw or "unrelated" in raw:
+    if "out_of_scope" in cleaned or "unrelated" in cleaned:
         return "out_of_scope"
-    if "chitchat" in raw:
+    if "chitchat" in cleaned:
         return "chitchat"
     return "data_question"
 

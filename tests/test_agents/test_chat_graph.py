@@ -21,3 +21,13 @@ def test_data_question_reaches_data_assistant() -> None:
 def test_semantic_query_reaches_semantic_parse() -> None:
     """Live query questions route to the semantic parser node."""
     assert _route_by_intent({"intent": "semantic_query"}) == "semantic_query"
+
+
+def test_out_of_scope_routes_to_done() -> None:
+    """Out of scope requests route to chitchat_done."""
+    assert _route_by_intent({"intent": "out_of_scope"}) == "chitchat_done"
+
+
+def test_chat_response_routes_to_done() -> None:
+    """Messages with chat_response already prepared route to chitchat_done."""
+    assert _route_by_intent({"intent": "chitchat", "chat_response": "Xin chào"}) == "chitchat_done"

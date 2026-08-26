@@ -852,12 +852,13 @@ class SemanticTimeRange(BaseModel):
 
 
 class ChatClarificationOption(BaseModel):
-    """Self-contained pre-validated clarification option containing executable spec."""
+    """Self-contained pre-validated clarification option containing executable spec or action."""
 
     id: str
     label: str
     description: str | None = None
-    spec: SemanticQuerySpec
+    spec: SemanticQuerySpec | None = None
+    action: str | None = None
 
 
 class ChatClarificationSelection(BaseModel):

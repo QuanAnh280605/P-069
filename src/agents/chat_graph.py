@@ -16,7 +16,10 @@ def _route_by_intent(state: AgentState) -> str:
     """Route the server-classified intent without a metric-decision gate."""
     if state.get("chat_response"):
         return "chitchat_done"
-    return state.get("intent", "chitchat")
+    intent = state.get("intent", "chitchat")
+    if intent == "out_of_scope":
+        return "chitchat_done"
+    return intent
 
 
 def build_chat_graph() -> StateGraph:
@@ -36,6 +39,7 @@ def build_chat_graph() -> StateGraph:
             "data_question": "data_assistant",
             "metric_query": "metric_suggest",
             "semantic_query": "semantic_parse",
+            "out_of_scope": END,
             "chitchat_done": END,
         },
     )
