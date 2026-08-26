@@ -193,3 +193,22 @@ smoke/benchmark/release evidence rules: judge metrics that are entirely
 deterministic metrics are exempt only in `smoke` runs — `benchmark` and
 `release` require deterministic evidence for the score to be valid. The legacy
 engine remains the default (`--engine legacy`).
+
+---
+
+## Query case levels (L1–L4)
+
+Từ dataset contract 2.1.0, mỗi query case khai báo `level` (không bắt buộc —
+case âm/legacy để `null`) đi kèm tag `level_1..level_4`. Validator ép tính
+nhất quán level ↔ difficulty (`L1→easy`, `L2→medium`, `L3/L4→hard`):
+
+| Level                    | Ý nghĩa                                                                                      | Kỳ vọng                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **L1** Explicit          | Metric + dimension nêu trực tiếp, có sẵn trong catalog                                       | SQL chuẩn + số đúng                                                         |
+| **L2** Semantic/Implicit | Paraphrase nghiệp vụ; tự phân giải filter (kênh, bot), time grain, hoặc multi-metric cùng entity | Không bỏ cột nào so với ý định                                             |
+| **L3** Multi-hop Join    | Dimension phải đi qua chuỗi JOIN nhiều bảng theo relationship many-to-one                    | JOIN đúng path, không Cartesian                                             |
+| **L4** Ambiguous         | Câu hỏi mập mờ, không thể chọn duy nhất metric                                               | **KHÔNG chạy SQL** — hỏi lại làm rõ (`expected_error: NEEDS_CLARIFICATION`) |
+
+Case L4 và negative đi làn error (so khớp chính xác `expected_error`). Per-level
+breakdown cưỡi tag `level_N` qua `GroupScore` của legacy engine. Chi tiết vàng
+cho domain ecommerce: `golden_dataset/ecommerce/GROUND_TRUTH_NOTES.md`.

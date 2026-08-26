@@ -34,6 +34,27 @@ dimensions:
     business_name: "Ngày truy cập"
     type: time
     field: session_date
+  - name: has_cart_addition
+    business_name: "Có thêm vào giỏ"
+    type: boolean
+    field: has_cart_addition
+  - name: reached_checkout
+    business_name: "Đã đến bước thanh toán"
+    type: boolean
+    field: reached_checkout
+  - name: completed_checkout
+    business_name: "Đã hoàn tất thanh toán"
+    type: boolean
+    field: completed_checkout
+  - name: session_duration_seconds
+    business_name: "Thời lượng phiên (giây)"
+    type: number
+    field: session_duration_seconds
+  - name: utm_source
+    business_name: "Nguồn chiến dịch"
+    type: string
+    field: utm_source
+    synonyms: ["nguồn traffic", "utm"]
 relationships:
   - target_entity: order
     relation_type: BELONGS_TO

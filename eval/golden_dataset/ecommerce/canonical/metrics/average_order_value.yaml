@@ -4,18 +4,18 @@ domain: ecommerce
 metric_type: derived
 target_entity: order
 source_table: fact_orders
-aggregation: avg
+aggregation: ratio
 field: null
-business_formula: "Net Sales / Total Orders"
-sql_expression: "SUM(gross_amount - discount_amount - return_amount) / COUNT(DISTINCT order_id)"
+business_formula: "Net Sales / Valid Orders"
+sql_expression: "SUM(gross_amount - discount_amount - return_amount) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0)"
 dependencies: [net_revenue, order_count]
-description: "Giá trị trung bình mỗi đơn hàng, tính bằng doanh thu thuần chia cho tổng số đơn hàng."
+description: "Giá trị trung bình mỗi đơn hàng hợp lệ, tính bằng doanh thu thuần chia cho tổng số đơn hàng hợp lệ."
 default_filters:
-  - condition: "is_test_order = FALSE"
-allowed_dimensions: [order.order_date, order.channel, order.store_id]
+  - condition: "is_test_order = FALSE AND is_canceled = FALSE"
+allowed_dimensions: [order.order_date, order.channel, order.store_id, city.city_name, city.region_name]
 default_time_grain: day
 reference_source: "Shopify Analytics Fields"
 status: draft
 owner: Seller
-ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#average_order_value"
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#average_order_value"
 synonyms: ["AOV", "giá trị đơn hàng TB", "average order value"]

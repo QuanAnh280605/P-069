@@ -7,15 +7,15 @@ source_table: fact_orders
 aggregation: ratio
 field: null
 business_formula: "Returning Customers / Total Customers"
-sql_expression: "COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) / COUNT(DISTINCT customer_id)"
+sql_expression: "COUNT(DISTINCT CASE WHEN customer_order_seq > 1 THEN customer_id END) * 1.0 / NULLIF(COUNT(DISTINCT customer_id), 0)"
 dependencies: [customer_count]
 description: "Tỷ lệ phần trăm khách hàng đã mua hàng từ lần thứ hai trở lên trên tổng số khách hàng."
 default_filters:
   - condition: "is_test_order = FALSE"
-allowed_dimensions: [order.order_date, order.channel, order.store_id]
+allowed_dimensions: [order.order_date, order.channel, order.store_id, city.city_name, city.region_name]
 default_time_grain: month
 reference_source: "Shopify Analytics Fields"
 status: draft
 owner: Seller
-ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#returning_customer_rate"
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#returning_customer_rate"
 synonyms: ["tỷ lệ khách quay lại", "returning customer rate", "repeat purchase rate"]

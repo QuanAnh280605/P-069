@@ -6,7 +6,7 @@ terms:
     definition: "Đơn không phải đơn test và không có trạng thái cancelled."
     synonyms: ["valid order", "đơn thành công"]
   - term: "Phiên truy cập"
-    definition: "Một phiên người dùng truy cập cửa hàng; bot traffic không được tính."
+    definition: "Một phiên truy cập cửa hàng được ghi nhận; khi cần loại bot, lọc qua chiều is_bot_traffic."
     synonyms: ["session", "lượt truy cập"]
   - term: "Khách hàng quay lại"
     definition: "Khách hàng có customer_order_seq lớn hơn 1."
@@ -17,3 +17,27 @@ terms:
   - term: "COGS"
     definition: "Giá vốn hàng bán dùng để tính biên lợi nhuận gộp."
     synonyms: ["cost of goods sold", "giá vốn"]
+  - term: "Đơn hàng đã giao"
+    definition: "Đơn đã hoàn tất giao đến khách (is_delivered = TRUE, có delivered_time)."
+    synonyms: ["delivered order", "đơn giao thành công"]
+  - term: "Đơn hàng bị hủy"
+    definition: "Đơn bị hủy trước khi hoàn tất giao dịch (is_canceled = TRUE), không tính vào doanh thu thuần."
+    synonyms: ["cancelled order", "đơn hủy"]
+  - term: "Thẻ thành viên"
+    definition: "Mã thẻ khách hàng thân thiết gắn với đơn hàng lúc đặt (loyalty_card_id)."
+    synonyms: ["loyalty card", "thẻ thân thiết"]
+  - term: "Sản phẩm sắp hết hàng"
+    definition: "SKU đang kinh doanh, còn hàng và tồn kho hiện tại không vượt mức tồn kho tối thiểu."
+    synonyms: ["low stock SKU", "hàng sắp cháy"]
+  - term: "Tỷ lệ thêm vào giỏ"
+    definition: "Tỷ lệ phiên truy cập (không tính bot) có hành động thêm sản phẩm vào giỏ."
+    synonyms: ["add-to-cart rate", "tỷ lệ thêm giỏ"]
+  - term: "Bỏ bước thanh toán"
+    definition: "Phiên đã đến bước thanh toán nhưng không hoàn tất đặt hàng trong phiên đó."
+    synonyms: ["checkout abandonment", "bỏ checkout"]
+  - term: "Số sản phẩm mỗi đơn"
+    definition: "Số lượng sản phẩm bình quân trên mỗi đơn hàng hợp lệ."
+    synonyms: ["UPT", "units per transaction"]
+  - term: "Thời gian giao hàng"
+    definition: "Khoảng cách từ lúc đặt hàng đến lúc giao hàng xong, đo bằng giờ."
+    synonyms: ["delivery lead time", "thời gian giao"]

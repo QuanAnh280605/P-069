@@ -20,7 +20,7 @@ _WRITE_NODES = (
     exp.Merge,
     exp.TruncateTable,
 )
-_FORBIDDEN_FUNCTIONS = {"load_extension", "readfile", "writefile"}
+_FORBIDDEN_FUNCTIONS = {"load_extension", "pg_sleep", "readfile", "writefile"}
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,21 @@
+metric: returned_order_rate
+business_name: "Tỷ lệ đơn hoàn trả"
+domain: ecommerce
+metric_type: derived
+target_entity: order
+source_table: fact_orders
+aggregation: ratio
+field: null
+business_formula: "Returned Orders / Valid Orders"
+sql_expression: "COUNT(DISTINCT CASE WHEN order_status = 'returned' THEN order_id END) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0)"
+dependencies: []
+description: "Tỷ lệ đơn hàng hợp lệ bị hoàn trả hoặc hoàn tiền trên tổng số đơn hàng hợp lệ."
+default_filters:
+  - condition: "is_test_order = FALSE AND is_canceled = FALSE"
+allowed_dimensions: [order.order_date, order.channel, order.store_id, city.city_name, city.region_name]
+default_time_grain: month
+reference_source: "Shopify Analytics Fields"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#return_rate"
+synonyms: ["tỷ lệ hoàn trả", "return rate", "refund rate", "tỷ lệ đơn trả lại"]

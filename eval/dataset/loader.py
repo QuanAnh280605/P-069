@@ -36,6 +36,7 @@ from eval.dataset.validator import (
     validate_metric_references,
     validate_query_cases,
     validate_query_dialects,
+    validate_query_level_consistency,
     validate_query_references,
 )
 from src.models.raw_schema import RawSchema
@@ -180,6 +181,7 @@ def _validate_dataset(dataset: DomainDataset) -> None:
     )
     validate_query_references(dataset.query_cases, catalog)
     validate_query_dialects(dataset.query_cases, dataset.manifest)
+    validate_query_level_consistency(dataset.query_cases)
     validate_guardrail_expectations(dataset.guardrail_cases)
 
 

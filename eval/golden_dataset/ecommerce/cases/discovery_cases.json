@@ -6,8 +6,11 @@
     "raw_schema_ref": "raw_schema/postgresql_dump.json",
     "expected": {
       "entity_refs": [
+        "canonical/entities/address.yaml",
         "canonical/entities/cart.yaml",
+        "canonical/entities/city.yaml",
         "canonical/entities/customer.yaml",
+        "canonical/entities/item.yaml",
         "canonical/entities/order.yaml",
         "canonical/entities/order_item.yaml",
         "canonical/entities/payment.yaml",
@@ -52,6 +55,30 @@
           "source_field": "order_id",
           "target_entity": "order",
           "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "address",
+          "source_field": "city_id",
+          "target_entity": "city",
+          "target_field": "city_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "customer",
+          "source_field": "default_address_id",
+          "target_entity": "address",
+          "target_field": "address_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "item",
+          "source_field": "product_id",
+          "target_entity": "product",
+          "target_field": "id",
           "relation_type": "BELONGS_TO",
           "inferred": false
         }
@@ -71,8 +98,11 @@
     "raw_schema_ref": "raw_schema/mysql_dump.json",
     "expected": {
       "entity_refs": [
+        "canonical/entities/address.yaml",
         "canonical/entities/cart.yaml",
+        "canonical/entities/city.yaml",
         "canonical/entities/customer.yaml",
+        "canonical/entities/item.yaml",
         "canonical/entities/order.yaml",
         "canonical/entities/order_item.yaml",
         "canonical/entities/payment.yaml",
@@ -117,6 +147,30 @@
           "source_field": "order_id",
           "target_entity": "order",
           "target_field": "order_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "address",
+          "source_field": "city_id",
+          "target_entity": "city",
+          "target_field": "city_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "customer",
+          "source_field": "default_address_id",
+          "target_entity": "address",
+          "target_field": "address_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "item",
+          "source_field": "product_id",
+          "target_entity": "product",
+          "target_field": "id",
           "relation_type": "BELONGS_TO",
           "inferred": false
         }
@@ -136,8 +190,11 @@
     "raw_schema_ref": "raw_schema/sqlite_live.json",
     "expected": {
       "entity_refs": [
+        "canonical/entities/address.yaml",
         "canonical/entities/cart.yaml",
+        "canonical/entities/city.yaml",
         "canonical/entities/customer.yaml",
+        "canonical/entities/item.yaml",
         "canonical/entities/order.yaml",
         "canonical/entities/order_item.yaml",
         "canonical/entities/payment.yaml",
@@ -184,6 +241,30 @@
           "target_field": "order_id",
           "relation_type": "BELONGS_TO",
           "inferred": false
+        },
+        {
+          "source_entity": "address",
+          "source_field": "city_id",
+          "target_entity": "city",
+          "target_field": "city_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "customer",
+          "source_field": "default_address_id",
+          "target_entity": "address",
+          "target_field": "address_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "item",
+          "source_field": "product_id",
+          "target_entity": "product",
+          "target_field": "id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
         }
       ]
     },
@@ -201,8 +282,11 @@
     "raw_schema_ref": "raw_schema/postgresql_inferred_sessions.json",
     "expected": {
       "entity_refs": [
+        "canonical/entities/address.yaml",
         "canonical/entities/cart.yaml",
+        "canonical/entities/city.yaml",
         "canonical/entities/customer.yaml",
+        "canonical/entities/item.yaml",
         "canonical/entities/order.yaml",
         "canonical/entities/order_item.yaml",
         "canonical/entities/payment.yaml",
@@ -249,6 +333,30 @@
           "target_field": "order_id",
           "relation_type": "BELONGS_TO",
           "inferred": true
+        },
+        {
+          "source_entity": "address",
+          "source_field": "city_id",
+          "target_entity": "city",
+          "target_field": "city_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "customer",
+          "source_field": "default_address_id",
+          "target_entity": "address",
+          "target_field": "address_id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
+        },
+        {
+          "source_entity": "item",
+          "source_field": "product_id",
+          "target_entity": "product",
+          "target_field": "id",
+          "relation_type": "BELONGS_TO",
+          "inferred": false
         }
       ]
     },

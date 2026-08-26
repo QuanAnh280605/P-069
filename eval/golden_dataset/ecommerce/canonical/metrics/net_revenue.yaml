@@ -9,13 +9,13 @@ field: null
 business_formula: "SUM(Order Amount) - SUM(Discounts) - SUM(Returns)"
 sql_expression: "gross_amount - discount_amount - return_amount"
 dependencies: []
-description: "Doanh thu thực nhận sau khi trừ chiết khấu, hoàn trả và thuế trên tổng giá trị đơn hàng."
+description: "Doanh thu thực nhận sau khi trừ chiết khấu và hoàn trả trên tổng giá trị đơn hàng hợp lệ."
 default_filters:
-  - condition: "is_test_order = FALSE"
-allowed_dimensions: [order.order_date, order.channel, order.store_id]
+  - condition: "is_test_order = FALSE AND is_canceled = FALSE"
+allowed_dimensions: [order.order_date, order.channel, order.store_id, city.city_name, city.region_name]
 default_time_grain: day
 reference_source: "Shopify Analytics Fields"
 status: draft
 owner: Seller
-ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#net_revenue"
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#net_revenue"
 synonyms: ["doanh thu thuần", "doanh thu ròng", "net sales"]

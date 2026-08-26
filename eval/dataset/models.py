@@ -13,6 +13,7 @@ MetricType = Literal["simple", "derived"]
 MetricStatus = Literal["draft", "approved"]
 TimeGrain = Literal["day", "week", "month", "quarter", "year"]
 RelationType = Literal["BELONGS_TO", "HAS_MANY", "HAS_ONE"]
+QueryLevel = Literal["L1", "L2", "L3", "L4"]
 
 
 class StrictModel(BaseModel):
@@ -202,6 +203,7 @@ class QueryCase(StrictModel):
     case_id: str = Field(pattern=r"^[a-z][a-z0-9_]+$")
     question: str = Field(min_length=1)
     difficulty: Literal["easy", "medium", "hard"]
+    level: QueryLevel | None = None
     expected: QueryCaseExpected | None = None
     expected_error: str | None = None
     tags: list[str] = Field(min_length=2)

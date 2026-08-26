@@ -28,8 +28,16 @@ dimensions:
     business_name: "Ngày đăng ký"
     type: time
     field: created_at
+  - name: default_address_id
+    business_name: "Mã địa chỉ mặc định"
+    type: number
+    field: default_address_id
 relationships:
   - target_entity: order
     relation_type: HAS_MANY
     join_condition: "customers.id = fact_orders.customer_id"
+    inferred: false
+  - target_entity: address
+    relation_type: BELONGS_TO
+    join_condition: "customers.default_address_id = customer_addresses.address_id"
     inferred: false

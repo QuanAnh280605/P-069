@@ -1,7 +1,7 @@
 {
   "ecommerce_query_001": [
     {
-      "net_revenue": 3400
+      "net_revenue": 3000
     }
   ],
   "ecommerce_query_002": [
@@ -15,17 +15,7 @@
     },
     {
       "channel": "web",
-      "net_revenue": 1720
-    }
-  ],
-  "ecommerce_query_003": [
-    {
-      "store_id": 1,
-      "net_revenue": 2450
-    },
-    {
-      "store_id": 2,
-      "net_revenue": 950
+      "net_revenue": 1320
     }
   ],
   "ecommerce_query_004": [
@@ -35,7 +25,7 @@
     },
     {
       "month": "2026-08",
-      "net_revenue": 2070
+      "net_revenue": 1670
     },
     {
       "month": "2026-09",
@@ -77,7 +67,7 @@
   ],
   "ecommerce_query_008": [
     {
-      "average_order_value": 377.77777777777777
+      "average_order_value": 375.0
     }
   ],
   "ecommerce_query_009": [
@@ -91,7 +81,7 @@
     },
     {
       "channel": "web",
-      "average_order_value": 430.0
+      "average_order_value": 440.0
     }
   ],
   "ecommerce_query_010": [
@@ -101,7 +91,7 @@
     },
     {
       "month": "2026-08",
-      "average_order_value": 414.0
+      "average_order_value": 417.5
     },
     {
       "month": "2026-09",
@@ -110,7 +100,7 @@
   ],
   "ecommerce_query_011": [
     {
-      "conversion_rate": 0.6666666666666666
+      "conversion_rate": 0.6153846153846154
     }
   ],
   "ecommerce_query_012": [
@@ -127,47 +117,9 @@
       "conversion_rate": 0.6
     }
   ],
-  "ecommerce_query_013": [
-    {
-      "device_type": "desktop",
-      "conversion_rate": 0.6666666666666666
-    },
-    {
-      "device_type": "mobile",
-      "conversion_rate": 0.6666666666666666
-    }
-  ],
   "ecommerce_query_014": [
     {
-      "return_rate": 0.2222222222222222
-    }
-  ],
-  "ecommerce_query_015": [
-    {
-      "channel": "marketplace",
-      "return_rate": 0.6666666666666666
-    },
-    {
-      "channel": "mobile",
-      "return_rate": 0.0
-    },
-    {
-      "channel": "web",
-      "return_rate": 0.0
-    }
-  ],
-  "ecommerce_query_016": [
-    {
-      "month": "2026-07",
-      "return_rate": 0.0
-    },
-    {
-      "month": "2026-08",
-      "return_rate": 0.2
-    },
-    {
-      "month": "2026-09",
-      "return_rate": 0.3333333333333333
+      "returned_order_rate": 0.25
     }
   ],
   "ecommerce_query_017": [
@@ -191,20 +143,10 @@
     {
       "product_id": 104,
       "units_sold": 4
-    }
-  ],
-  "ecommerce_query_019": [
-    {
-      "channel": "marketplace",
-      "units_sold": 6
     },
     {
-      "channel": "mobile",
-      "units_sold": 8
-    },
-    {
-      "channel": "web",
-      "units_sold": 10
+      "product_id": 105,
+      "units_sold": null
     }
   ],
   "ecommerce_query_020": [
@@ -226,47 +168,9 @@
       "customer_count": 2
     }
   ],
-  "ecommerce_query_022": [
-    {
-      "store_id": 1,
-      "customer_count": 2
-    },
-    {
-      "store_id": 2,
-      "customer_count": 3
-    }
-  ],
   "ecommerce_query_023": [
     {
       "returning_customer_rate": 0.6
-    }
-  ],
-  "ecommerce_query_024": [
-    {
-      "channel": "marketplace",
-      "returning_customer_rate": 0.5
-    },
-    {
-      "channel": "mobile",
-      "returning_customer_rate": 1.0
-    },
-    {
-      "channel": "web",
-      "returning_customer_rate": 0.5
-    }
-  ],
-  "ecommerce_query_025": [
-    {
-      "month": "2026-07",
-      "returning_customer_rate": 0.0
-    },
-    {
-      "month": "2026-08",
-      "returning_customer_rate": 0.25
-    },
-    {
-      "month": "2026-09",
-      "returning_customer_rate": 1.0
     }
   ],
   "ecommerce_query_026": [
@@ -274,47 +178,175 @@
       "cart_abandonment_rate": 0.4
     }
   ],
-  "ecommerce_query_027": [
-    {
-      "channel": "marketplace",
-      "cart_abandonment_rate": 0.33333333333333337
-    },
-    {
-      "channel": "mobile",
-      "cart_abandonment_rate": 0.33333333333333337
-    },
-    {
-      "channel": "web",
-      "cart_abandonment_rate": 0.5
-    }
-  ],
-  "ecommerce_query_028": [
-    {
-      "device_type": "desktop",
-      "cart_abandonment_rate": 0.6
-    },
-    {
-      "device_type": "mobile",
-      "cart_abandonment_rate": 0.19999999999999996
-    }
-  ],
   "ecommerce_query_029": [
     {
-      "gross_margin": 0.3588235294117647
+      "gross_margin": 0.3566666666666667
     }
   ],
-  "ecommerce_query_030": [
+  "ecommerce_query_033": [
     {
-      "channel": "marketplace",
-      "gross_margin": 0.2727272727272727
+      "discount_rate": 0.05194805194805195
+    }
+  ],
+  "ecommerce_query_034": [
+    {
+      "order_cancellation_rate": 0.1111111111111111
+    }
+  ],
+  "ecommerce_query_035": [
+    {
+      "loyalty_order_penetration": 0.3333333333333333
+    }
+  ],
+  "ecommerce_query_036": [
+    {
+      "units_per_transaction": 2.5
+    }
+  ],
+  "ecommerce_query_037": [
+    {
+      "add_to_cart_rate": 0.6153846153846154
+    }
+  ],
+  "ecommerce_query_038": [
+    {
+      "average_session_duration": 276.15384615384613
+    }
+  ],
+  "ecommerce_query_039": [
+    {
+      "low_stock_sku_count": 2
+    }
+  ],
+  "ecommerce_query_040": [
+    {
+      "month": "2026-07",
+      "net_revenue": 250,
+      "order_count": 1
     },
     {
-      "channel": "mobile",
-      "gross_margin": 0.3805309734513274
+      "month": "2026-08",
+      "net_revenue": 1670,
+      "order_count": 4
     },
     {
-      "channel": "web",
-      "gross_margin": 0.37209302325581395
+      "month": "2026-09",
+      "net_revenue": 1080,
+      "order_count": 3
+    }
+  ],
+  "ecommerce_query_041": [
+    {
+      "delivery_type": null,
+      "average_delivery_lead_time_hours": null
+    },
+    {
+      "delivery_type": "express",
+      "average_delivery_lead_time_hours": 36.0
+    },
+    {
+      "delivery_type": "standard",
+      "average_delivery_lead_time_hours": 36.0
+    }
+  ],
+  "ecommerce_query_042": [
+    {
+      "city_name": "Cần Thơ",
+      "net_revenue": 250
+    },
+    {
+      "city_name": "Hà Nội",
+      "net_revenue": 1320
+    },
+    {
+      "city_name": "TP HCM",
+      "net_revenue": 1130
+    },
+    {
+      "city_name": "Đà Nẵng",
+      "net_revenue": 300
+    }
+  ],
+  "ecommerce_query_043": [
+    {
+      "region_name": "Bắc Bộ",
+      "order_count": 3
+    },
+    {
+      "region_name": "Nam Bộ",
+      "order_count": 3
+    },
+    {
+      "region_name": "Trung Bộ",
+      "order_count": 2
+    }
+  ],
+  "ecommerce_query_044": [
+    {
+      "city_name": "Cần Thơ",
+      "average_order_value": 250.0
+    },
+    {
+      "city_name": "Hà Nội",
+      "average_order_value": 440.0
+    },
+    {
+      "city_name": "TP HCM",
+      "average_order_value": 565.0
+    },
+    {
+      "city_name": "Đà Nẵng",
+      "average_order_value": 150.0
+    }
+  ],
+  "ecommerce_query_045": [
+    {
+      "city_name": "Cần Thơ",
+      "units_sold": 2
+    },
+    {
+      "city_name": "Hà Nội",
+      "units_sold": 10
+    },
+    {
+      "city_name": "TP HCM",
+      "units_sold": 8
+    },
+    {
+      "city_name": "Đà Nẵng",
+      "units_sold": 4
+    }
+  ],
+  "ecommerce_query_046": [
+    {
+      "region_name": "Bắc Bộ",
+      "loyalty_order_penetration": 0.5
+    },
+    {
+      "region_name": "Nam Bộ",
+      "loyalty_order_penetration": 0.3333333333333333
+    },
+    {
+      "region_name": "Trung Bộ",
+      "loyalty_order_penetration": 0.0
+    }
+  ],
+  "ecommerce_query_047": [
+    {
+      "city_name": "Cần Thơ",
+      "discount_rate": 0.0
+    },
+    {
+      "city_name": "Hà Nội",
+      "discount_rate": 0.07027027027027027
+    },
+    {
+      "city_name": "TP HCM",
+      "discount_rate": 0.058333333333333334
+    },
+    {
+      "city_name": "Đà Nẵng",
+      "discount_rate": 0.0
     }
   ]
 }

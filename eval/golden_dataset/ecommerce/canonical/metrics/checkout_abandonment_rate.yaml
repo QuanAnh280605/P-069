@@ -1,0 +1,20 @@
+metric: checkout_abandonment_rate
+business_name: "Tỷ lệ bỏ bước thanh toán"
+domain: ecommerce
+metric_type: derived
+target_entity: session
+source_table: fact_sessions
+aggregation: ratio
+field: null
+business_formula: "Checkout Sessions without Completion / Checkout Sessions"
+sql_expression: "COUNT(DISTINCT CASE WHEN reached_checkout = TRUE AND completed_checkout = FALSE THEN session_id END) * 1.0 / NULLIF(COUNT(DISTINCT CASE WHEN reached_checkout = TRUE THEN session_id END), 0)"
+dependencies: []
+description: "Tỷ lệ phiên đã đến bước thanh toán nhưng không hoàn tất đặt hàng, định nghĩa theo phiên (không theo giỏ hàng); lọc bot qua chiều is_bot_traffic khi cần."
+default_filters: []
+allowed_dimensions: [session.session_date, session.channel, session.device_type, session.store_id, session.utm_source, session.is_bot_traffic]
+default_time_grain: day
+reference_source: "Ecommerce Metric Dictionary (Expanded)"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#checkout_abandonment_rate"
+synonyms: ["tỷ lệ bỏ checkout", "checkout abandonment rate", "bỏ bước thanh toán"]

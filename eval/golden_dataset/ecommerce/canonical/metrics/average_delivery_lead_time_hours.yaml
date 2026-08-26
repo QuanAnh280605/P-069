@@ -1,0 +1,21 @@
+metric: average_delivery_lead_time_hours
+business_name: "Thời gian giao hàng trung bình (giờ)"
+domain: ecommerce
+metric_type: derived
+target_entity: order
+source_table: fact_orders
+aggregation: avg
+field: null
+business_formula: "AVG(Delivered Time - Order Time) in Hours"
+sql_expression: "AVG((julianday(delivered_time) - julianday(order_date)) * 24.0)"
+dependencies: []
+description: "Số giờ trung bình từ lúc đặt hàng đến lúc giao hàng xong, tính trên các đơn không test đã giao thành công."
+default_filters:
+  - condition: "is_test_order = FALSE AND is_delivered = TRUE"
+allowed_dimensions: [order.order_date, order.channel, order.store_id, order.delivery_type, city.city_name, city.region_name]
+default_time_grain: month
+reference_source: "Ecommerce Metric Dictionary (Expanded)"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#average_delivery_lead_time_hours"
+synonyms: ["thời gian giao hàng tb", "delivery lead time", "lead time giao hàng"]

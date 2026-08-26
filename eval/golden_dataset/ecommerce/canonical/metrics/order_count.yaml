@@ -11,11 +11,11 @@ sql_expression: "COUNT(DISTINCT order_id)"
 dependencies: []
 description: "Tổng số đơn hàng hợp lệ được đặt thành công trong kỳ, không tính đơn hủy hoặc đơn test."
 default_filters:
-  - condition: "is_test_order = FALSE AND order_status <> 'cancelled'"
-allowed_dimensions: [order.order_date, order.channel, order.store_id]
+  - condition: "is_test_order = FALSE AND is_canceled = FALSE"
+allowed_dimensions: [order.order_date, order.channel, order.store_id, city.city_name, city.region_name]
 default_time_grain: day
 reference_source: "Shopify Analytics Fields"
 status: draft
 owner: Seller
-ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#order_count"
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#order_count"
 synonyms: ["tổng đơn hàng", "số lượng đơn", "total orders", "order count"]

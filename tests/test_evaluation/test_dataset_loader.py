@@ -9,26 +9,41 @@ from eval.dataset.validator import DatasetValidationError
 
 GOLDEN_ROOT = Path("eval/golden_dataset")
 GROUND_TRUTH_METRICS = {
+    "add_to_cart_rate",
+    "average_delivery_lead_time_hours",
     "average_order_value",
+    "average_session_duration",
     "cart_abandonment_rate",
+    "checkout_abandonment_rate",
     "conversion_rate",
     "customer_count",
+    "discount_rate",
     "gross_margin",
+    "loyalty_order_penetration",
+    "low_stock_sku_count",
     "net_revenue",
+    "order_cancellation_rate",
     "order_count",
-    "return_rate",
+    "returned_order_rate",
     "returning_customer_rate",
+    "units_per_transaction",
     "units_sold",
 }
 CANONICAL_ENTITIES = {
+    "address",
     "cart",
+    "city",
     "customer",
+    "item",
     "order",
     "order_item",
     "payment",
     "product",
     "session",
 }
+REFERENCE_SOURCES = {"Shopify Analytics Fields", "Ecommerce Metric Dictionary (Expanded)"}
+# Golden renames whose workbook anchor keeps the original row name.
+WORKBOOK_ANCHOR_RENAMES = {"returned_order_rate": "return_rate"}
 
 
 @pytest.mark.asyncio
@@ -36,19 +51,19 @@ async def test_load_ecommerce_domain_dataset() -> None:
     """Load every ecommerce artifact and verify baseline completeness."""
     dataset = await load_domain_dataset(GOLDEN_ROOT, "ecommerce")
 
-    assert dataset.manifest.dataset_version == "2.0.1"
-    assert dataset.manifest.contract_version == "2.0.0"
-    assert dataset.manifest.ground_truth_metric_count == 10
+    assert dataset.manifest.dataset_version == "3.0.0"
+    assert dataset.manifest.contract_version == "2.1.0"
+    assert dataset.manifest.ground_truth_metric_count == 19
     assert dataset.manifest.review_status == "pending"
     assert set(dataset.manifest.supported_dialects) == {"postgresql", "mysql", "sqlite"}
     assert len(dataset.discovery_cases) == 4
-    assert len(dataset.metric_cases) == 12
-    assert len(dataset.query_cases) == 32
-    assert len(dataset.guardrail_cases) == 13
-    assert len(dataset.expected_query_results) == 30
+    assert len(dataset.metric_cases) == 21
+    assert len(dataset.query_cases) == 39
+    assert len(dataset.guardrail_cases) == 16
+    assert len(dataset.expected_query_results) == 34
     assert len(dataset.raw_schemas) == 4
     assert set(dataset.canonical_entities) == CANONICAL_ENTITIES
-    assert len(dataset.canonical_metrics) == 10
+    assert len(dataset.canonical_metrics) == 19
     assert "gross_margin" in dataset.canonical_metrics
     assert "payment_amount" not in dataset.canonical_metrics
 
@@ -62,8 +77,9 @@ async def test_canonical_metrics_match_ground_truth_registry() -> None:
     for metric in dataset.canonical_metrics.values():
         assert metric.status == "draft"
         assert metric.owner == "Seller"
-        assert metric.reference_source == "Shopify Analytics Fields"
-        assert metric.ground_truth_source.endswith(f"#{metric.metric}")
+        assert metric.reference_source in REFERENCE_SOURCES
+        anchor = WORKBOOK_ANCHOR_RENAMES.get(metric.metric, metric.metric)
+        assert metric.ground_truth_source.endswith(f"#{anchor}")
         assert metric.allowed_dimensions
 
 
@@ -72,7 +88,8 @@ async def test_vietnamese_case_text_has_no_encoding_replacement() -> None:
     """Reject question marks introduced inside words by a bad encoding pipe."""
     dataset = await load_domain_dataset(GOLDEN_ROOT, "ecommerce")
 
-    assert all("?" not in case.request for case in dataset.metric_cases)
+    # A sentence-final question mark is legitimate; mid-text "?" flags mojibake.
+    assert all("?" not in case.request.rstrip("?") for case in dataset.metric_cases)
     for case in dataset.query_cases:
         assert "?" not in case.question.rstrip("?")
         assert "�" not in case.question

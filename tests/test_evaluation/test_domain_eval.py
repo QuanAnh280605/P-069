@@ -112,11 +112,11 @@ async def test_complete_domain_perfect_replay_scores_one() -> None:
         EvaluationDependencies(EvaluationConfig(), guardrail_adapter=PerfectGuardrail(dataset)),
     )
     suites = (result.enrichment, result.metrics, result.compiler, result.guardrails)
-    assert [suite.total_cases for suite in suites] == [4, 12, 32, 13]
+    assert [suite.total_cases for suite in suites] == [4, 21, 39, 16]
     assert all(suite.macro_score == 1.0 for suite in suites)
     assert all(all(case.status == "passed" for case in suite.cases) for suite in suites)
     assert result.frozen_evaluation_date == dataset.manifest.frozen_evaluation_date
-    assert result.domain == "ecommerce" and result.dataset_contract_version == "2.0.0"
+    assert result.domain == "ecommerce" and result.dataset_contract_version == "2.1.0"
     assert any(group.tag == "easy" for group in result.compiler.group_scores)
     assert result.model_dump_json()
 

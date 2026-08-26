@@ -54,6 +54,32 @@ dimensions:
     business_name: "Thứ tự đơn của khách"
     type: number
     field: customer_order_seq
+  - name: delivered_time
+    business_name: "Thời gian giao hàng xong"
+    type: time
+    field: delivered_time
+  - name: is_delivered
+    business_name: "Đã giao hàng"
+    type: boolean
+    field: is_delivered
+  - name: delivery_type
+    business_name: "Hình thức giao hàng"
+    type: string
+    field: delivery_type
+    synonyms: ["loại giao hàng", "phương thức giao"]
+  - name: is_canceled
+    business_name: "Đơn bị hủy"
+    type: boolean
+    field: is_canceled
+  - name: cancel_reason
+    business_name: "Lý do hủy đơn"
+    type: string
+    field: cancel_reason
+  - name: loyalty_card_id
+    business_name: "Mã thẻ thành viên"
+    type: number
+    field: loyalty_card_id
+    synonyms: ["thẻ thân thiết", "loyalty card"]
 relationships:
   - target_entity: customer
     relation_type: BELONGS_TO

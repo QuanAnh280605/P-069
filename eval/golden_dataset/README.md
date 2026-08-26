@@ -22,22 +22,26 @@ golden_dataset/
 - `postgresql`: Dialect sản xuất chính (PostgreSQL schema dumps & dialect SQL queries).
 - `mysql`: Dialect sản xuất phụ (MySQL schema dumps & dialect SQL queries).
 
-## Ecommerce v2.0.1
+## Ecommerce v3.0.0
 
-- 10 canonical metrics đồng bộ từ Ecommerce Metric Dictionary Ground Truth.
+- 19 canonical metrics đồng bộ từ `Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx`
+  (gồm 9 metric mới và 2 rename: `returned_order_rate`, `average_delivery_lead_time_hours`).
+- 10 canonical entities: thêm `item`, `address`, `city`; chuỗi L3
+  `order → customer → address → city` qua FK many-to-one.
 - 4 discovery cases, gồm declared FK và inferred session→order relationship.
-- 12 metric-definition cases: 10 ground-truth success và 2 negative cases.
-- 32 runtime query cases: 30 success cases và 2 negative cases.
-- 13 SQL guardrail cases, gồm nested DML, `SELECT INTO`, multi-statement và LIMIT policy.
-- 30 expected result sets tái lập từ SQLite in-memory fixture.
+- 21 metric-definition cases: 19 ground-truth success và 2 negative cases.
+- 39 runtime query cases chia 4 level — L1 16 / L2 12 / L3 6 / L4 3 —
+  cộng 2 negative (`UNKNOWN_METRIC`, `UNSAFE_INTENT`); 34 success cases.
+- 16 SQL guardrail cases: thêm `FOR UPDATE`, `PRAGMA`, `pg_sleep`
+  (lockstep mở rộng `exp.Lock` + `pg_sleep` trong eval validator).
+- 34 expected result sets tái lập từ SQLite in-memory fixture
+  (`scripts/verify_golden_results.py`).
 
 Canonical registry dùng một thư mục `entities/` và một thư mục `metrics/` duy
-nhất. Metric legacy không có benchmark coverage đã được loại bỏ; baseline chỉ
-giữ 10 metric từ workbook của nhóm.
+nhất. Định nghĩa 4 level, chính sách "đơn hợp lệ", các internal definitions và
+product gaps cố ý lộ được ghi tại `ecommerce/GROUND_TRUTH_NOTES.md`.
 
-Dataset đang ở trạng thái `pending` vì cả 10 metric trong workbook hiện có status `Draft`.
-Các khác biệt semantics cần xác nhận được ghi tại
-`ecommerce/GROUND_TRUTH_NOTES.md`.
+Dataset đang ở trạng thái `pending` vì toàn bộ metric trong workbook có status `Draft`.
 
 ## Validation
 

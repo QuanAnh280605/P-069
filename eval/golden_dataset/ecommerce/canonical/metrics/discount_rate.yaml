@@ -1,0 +1,21 @@
+metric: discount_rate
+business_name: "Tỷ lệ giảm giá"
+domain: ecommerce
+metric_type: derived
+target_entity: order
+source_table: fact_orders
+aggregation: ratio
+field: null
+business_formula: "Total Discounts / Gross Sales"
+sql_expression: "SUM(discount_amount) * 1.0 / NULLIF(SUM(gross_amount), 0)"
+dependencies: []
+description: "Tỷ trọng giá trị giảm giá trên doanh thu gộp của các đơn hàng không test."
+default_filters:
+  - condition: "is_test_order = FALSE"
+allowed_dimensions: [order.order_date, order.channel, order.store_id, city.city_name, city.region_name]
+default_time_grain: month
+reference_source: "Ecommerce Metric Dictionary (Expanded)"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#discount_rate"
+synonyms: ["tỷ lệ chiết khấu", "discount rate", "mức giảm giá"]

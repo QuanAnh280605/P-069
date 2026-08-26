@@ -1,0 +1,20 @@
+metric: add_to_cart_rate
+business_name: "Tỷ lệ thêm vào giỏ"
+domain: ecommerce
+metric_type: derived
+target_entity: session
+source_table: fact_sessions
+aggregation: ratio
+field: null
+business_formula: "Sessions with Cart Addition / Total Sessions"
+sql_expression: "COUNT(DISTINCT CASE WHEN has_cart_addition = TRUE THEN session_id END) * 1.0 / NULLIF(COUNT(DISTINCT session_id), 0)"
+dependencies: []
+description: "Tỷ lệ phiên truy cập có hành động thêm sản phẩm vào giỏ hàng; lọc bot qua chiều is_bot_traffic khi cần."
+default_filters: []
+allowed_dimensions: [session.session_date, session.channel, session.device_type, session.store_id, session.utm_source, session.is_bot_traffic]
+default_time_grain: day
+reference_source: "Ecommerce Metric Dictionary (Expanded)"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#add_to_cart_rate"
+synonyms: ["tỷ lệ thêm giỏ", "add-to-cart rate", "cart addition rate"]

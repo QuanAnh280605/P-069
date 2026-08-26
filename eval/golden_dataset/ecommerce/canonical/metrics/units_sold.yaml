@@ -9,13 +9,13 @@ field: quantity
 business_formula: "SUM(Quantity)"
 sql_expression: "SUM(quantity)"
 dependencies: []
-description: "Tổng số đơn vị sản phẩm (SKU) đã bán ra trong các đơn hàng hợp lệ."
+description: "Tổng số đơn vị sản phẩm đã đặt trong kỳ trên các dòng đơn không test (số lượng gross, chưa trừ hoàn trả và chưa loại dòng thuộc đơn bị hủy)."
 default_filters:
   - condition: "is_test_order = FALSE"
-allowed_dimensions: [order_item.order_date, order_item.product_id, order_item.channel, order_item.store_id]
+allowed_dimensions: [order_item.order_date, order_item.product_id, order_item.channel, order_item.store_id, city.city_name, city.region_name]
 default_time_grain: day
 reference_source: "Shopify Analytics Fields"
 status: draft
 owner: Seller
-ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#units_sold"
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#units_sold"
 synonyms: ["số lượng bán", "units sold", "sản phẩm bán ra"]

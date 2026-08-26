@@ -1,0 +1,56 @@
+entity: item
+table_mapping: dim_items
+business_name: "Đơn vị hàng tồn kho"
+description: "Chi tiết SKU tồn kho dùng cho các metric cảnh báo sắp hết hàng."
+synonyms: ["SKU", "mã hàng", "item"]
+accepted_business_names: ["Đơn vị hàng tồn kho", "SKU"]
+dimensions:
+  - name: item_id
+    business_name: "Mã SKU"
+    type: number
+    field: item_id
+    primary_key: true
+  - name: product_id
+    business_name: "Mã sản phẩm"
+    type: number
+    field: product_id
+  - name: item_name
+    business_name: "Tên SKU"
+    type: string
+    field: item_name
+    synonyms: ["tên đơn vị hàng"]
+  - name: current_stock_quantity
+    business_name: "Tồn kho hiện tại"
+    type: number
+    field: current_stock_quantity
+    synonyms: ["số lượng tồn"]
+  - name: min_stock_quantity
+    business_name: "Mức tồn kho tối thiểu"
+    type: number
+    field: min_stock_quantity
+    synonyms: ["ngưỡng bổ sung"]
+  - name: is_active
+    business_name: "Đang kinh doanh"
+    type: boolean
+    field: is_active
+  - name: in_stock
+    business_name: "Còn hàng"
+    type: boolean
+    field: in_stock
+  - name: category_id
+    business_name: "Mã danh mục"
+    type: number
+    field: category_id
+  - name: supplier_id
+    business_name: "Mã nhà cung cấp"
+    type: number
+    field: supplier_id
+  - name: store_id
+    business_name: "Mã cửa hàng"
+    type: number
+    field: store_id
+relationships:
+  - target_entity: product
+    relation_type: BELONGS_TO
+    join_condition: "dim_items.product_id = products.id"
+    inferred: false

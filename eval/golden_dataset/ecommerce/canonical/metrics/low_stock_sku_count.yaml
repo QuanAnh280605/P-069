@@ -1,0 +1,21 @@
+metric: low_stock_sku_count
+business_name: "Số SKU sắp hết hàng"
+domain: ecommerce
+metric_type: simple
+target_entity: item
+source_table: dim_items
+aggregation: count
+field: item_id
+business_formula: "COUNT(SKU at Low Stock)"
+sql_expression: "COUNT(DISTINCT item_id)"
+dependencies: []
+description: "Số SKU đang kinh doanh, còn hàng và tồn kho hiện tại không vượt mức tồn kho tối thiểu (không tính SKU đã hết hàng hoặc ngừng kinh doanh)."
+default_filters:
+  - condition: "is_active = TRUE AND in_stock = TRUE AND current_stock_quantity <= min_stock_quantity"
+allowed_dimensions: [item.category_id, item.supplier_id, item.store_id, item.product_id]
+default_time_grain: day
+reference_source: "Ecommerce Metric Dictionary (Expanded)"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#low_stock_sku_count"
+synonyms: ["số SKU tồn kho thấp", "low stock SKU count", "SKU sắp cháy hàng"]

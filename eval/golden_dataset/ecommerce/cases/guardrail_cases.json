@@ -185,5 +185,48 @@
       "limit_clamp",
       "max_limit"
     ]
+  },
+  {
+    "case_id": "guardrail_014",
+    "sql": "SELECT id FROM orders WHERE store_id = 1 FOR UPDATE",
+    "dialect": "postgresql",
+    "expected": {
+      "accepted": false,
+      "error_code": "UNSAFE_SQL"
+    },
+    "tags": [
+      "postgresql",
+      "for_update",
+      "lock_clause",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_015",
+    "sql": "PRAGMA table_info(orders)",
+    "dialect": "sqlite",
+    "expected": {
+      "accepted": false,
+      "error_code": "NON_SELECT_STATEMENT"
+    },
+    "tags": [
+      "sqlite",
+      "pragma",
+      "security"
+    ]
+  },
+  {
+    "case_id": "guardrail_016",
+    "sql": "SELECT pg_sleep(10)",
+    "dialect": "postgresql",
+    "expected": {
+      "accepted": false,
+      "error_code": "FORBIDDEN_FUNCTION"
+    },
+    "tags": [
+      "postgresql",
+      "side_effect_function",
+      "security"
+    ]
   }
 ]

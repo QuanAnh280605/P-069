@@ -1,0 +1,20 @@
+metric: average_session_duration
+business_name: "Thời lượng phiên trung bình (giây)"
+domain: ecommerce
+metric_type: simple
+target_entity: session
+source_table: fact_sessions
+aggregation: avg
+field: session_duration_seconds
+business_formula: "AVG(Session Duration Seconds)"
+sql_expression: "AVG(session_duration_seconds)"
+dependencies: []
+description: "Số giây trung bình của một phiên truy cập; lọc bot qua chiều is_bot_traffic khi cần."
+default_filters: []
+allowed_dimensions: [session.session_date, session.channel, session.device_type, session.store_id, session.utm_source, session.is_bot_traffic]
+default_time_grain: day
+reference_source: "Ecommerce Metric Dictionary (Expanded)"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#average_session_duration"
+synonyms: ["thời lượng phiên tb", "average session duration", "session duration"]

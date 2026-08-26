@@ -1,0 +1,27 @@
+entity: city
+table_mapping: cities
+business_name: "Thành phố"
+description: "Khu vực địa lý tham chiếu của địa chỉ khách hàng."
+synonyms: ["khu vực", "city", "địa bàn tỉnh thành"]
+accepted_business_names: ["Thành phố", "Khu vực"]
+dimensions:
+  - name: city_id
+    business_name: "Mã thành phố"
+    type: number
+    field: city_id
+    primary_key: true
+  - name: city_name
+    business_name: "Tên thành phố"
+    type: string
+    field: city_name
+    synonyms: ["tp", "tỉnh thành"]
+  - name: region_name
+    business_name: "Vùng miền"
+    type: string
+    field: region_name
+    synonyms: ["miền", "khu vực địa lý"]
+relationships:
+  - target_entity: address
+    relation_type: HAS_MANY
+    join_condition: "cities.city_id = customer_addresses.city_id"
+    inferred: false

@@ -1,0 +1,21 @@
+metric: units_per_transaction
+business_name: "Số sản phẩm trung bình mỗi đơn"
+domain: ecommerce
+metric_type: derived
+target_entity: order_item
+source_table: fact_order_items
+aggregation: ratio
+field: null
+business_formula: "SUM(Quantity) / COUNT(DISTINCT Valid Order ID)"
+sql_expression: "SUM(quantity) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0)"
+dependencies: []
+description: "Số đơn vị sản phẩm bình quân trên mỗi đơn hàng hợp lệ, tính trên các dòng đơn không test và không thuộc đơn bị hủy."
+default_filters:
+  - condition: "is_test_order = FALSE AND is_canceled = FALSE"
+allowed_dimensions: [order_item.order_date, order_item.product_id, order_item.channel, order_item.store_id, city.city_name, city.region_name]
+default_time_grain: month
+reference_source: "Ecommerce Metric Dictionary (Expanded)"
+status: draft
+owner: Seller
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#units_per_transaction"
+synonyms: ["UPT", "units per transaction", "số sản phẩm mỗi đơn"]

@@ -32,6 +32,7 @@ FORBIDDEN_SQL_NODES = (
     exp.Drop,
     exp.Insert,
     exp.Into,
+    exp.Lock,
     exp.Merge,
     exp.Transaction,
     exp.TruncateTable,
@@ -45,9 +46,12 @@ FORBIDDEN_SELECT_FUNCTIONS = {
     "lo_import",
     "pg_read_binary_file",
     "pg_read_file",
+    "pg_sleep",
     "set_config",
     "sleep",
 }
+#: Expected difficulty for each declared query level (L3/L4 both map to hard).
+LEVEL_DIFFICULTY: dict[str, str] = {"L1": "easy", "L2": "medium", "L3": "hard", "L4": "hard"}
 
 
 class DatasetValidationError(Exception):
@@ -176,6 +180,13 @@ def validate_query_dialects(cases: list[QueryCase], manifest: DomainManifest) ->
             raise DatasetValidationError(f"Dialect coverage mismatch: {case.case_id}")
         if case.expected and case.expected.domain != manifest.domain:
             raise DatasetValidationError(f"Manifest domain mismatch: {case.case_id}")
+
+
+def validate_query_level_consistency(cases: list[QueryCase]) -> None:
+    """Require the declared level, when present, to match the difficulty tag."""
+    for case in cases:
+        if case.level is not None and case.difficulty != LEVEL_DIFFICULTY[case.level]:
+            raise DatasetValidationError(f"Level/difficulty mismatch: {case.case_id}")
 
 
 def validate_canonical_domains(

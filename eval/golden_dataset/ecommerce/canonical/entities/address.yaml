@@ -1,0 +1,38 @@
+entity: address
+table_mapping: customer_addresses
+business_name: "Địa chỉ khách hàng"
+description: "Địa chỉ giao hàng của khách hàng, liên kết tới thành phố và vùng miền."
+synonyms: ["địa chỉ", "address", "địa chỉ giao hàng"]
+accepted_business_names: ["Địa chỉ khách hàng", "Địa chỉ giao hàng"]
+dimensions:
+  - name: address_id
+    business_name: "Mã địa chỉ"
+    type: number
+    field: address_id
+    primary_key: true
+  - name: customer_id
+    business_name: "Mã khách hàng"
+    type: number
+    field: customer_id
+  - name: city_id
+    business_name: "Mã thành phố"
+    type: number
+    field: city_id
+  - name: address
+    business_name: "Địa chỉ chi tiết"
+    type: string
+    field: address
+    synonyms: ["số nhà, đường"]
+  - name: is_default
+    business_name: "Địa chỉ mặc định"
+    type: boolean
+    field: is_default
+relationships:
+  - target_entity: city
+    relation_type: BELONGS_TO
+    join_condition: "customer_addresses.city_id = cities.city_id"
+    inferred: false
+  - target_entity: customer
+    relation_type: HAS_ONE
+    join_condition: "customer_addresses.address_id = customers.default_address_id"
+    inferred: false

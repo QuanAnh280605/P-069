@@ -43,9 +43,38 @@ async def test_success_and_error_query_partition_is_complete() -> None:
     dataset = await load_domain_dataset(GOLDEN_ROOT, "ecommerce")
     successes = [case for case in dataset.query_cases if case.expected]
     errors = [case for case in dataset.query_cases if case.expected_error]
-    assert len(successes) == len(dataset.expected_query_results) == 30
-    assert len(errors) == 2
+    assert len(successes) == len(dataset.expected_query_results) == 34
+    assert len(errors) == 5
     assert len(successes) + len(errors) == len(dataset.query_cases)
+
+
+@pytest.mark.asyncio
+async def test_query_level_coverage_and_distribution() -> None:
+    """Every ecommerce query case declares a level; distribution follows v3 plan."""
+    dataset = await load_domain_dataset(GOLDEN_ROOT, "ecommerce")
+
+    leveled = [case for case in dataset.query_cases if case.level is not None]
+    assert len(leveled) == len(dataset.query_cases) - 2  # two negatives stay null
+    distribution: dict[str, int] = {}
+    for case in dataset.query_cases:
+        if case.level is not None:
+            distribution[case.level] = distribution.get(case.level, 0) + 1
+            assert f"level_{case.level[-1]}" in case.tags, case.case_id
+    assert distribution == {"L1": 16, "L2": 12, "L3": 6, "L4": 3}
+
+
+@pytest.mark.asyncio
+async def test_l4_and_negative_cases_expect_errors_only() -> None:
+    """L4 ambiguous and negative queries must never compile to SQL."""
+    dataset = await load_domain_dataset(GOLDEN_ROOT, "ecommerce")
+
+    for case in dataset.query_cases:
+        if case.level == "L4":
+            assert case.expected is None, case.case_id
+            assert case.expected_error == "NEEDS_CLARIFICATION", case.case_id
+            assert case.difficulty == "hard", case.case_id
+        if case.level is None:
+            assert case.expected_error in {"UNKNOWN_METRIC", "UNSAFE_INTENT"}, case.case_id
 
 
 def _execute_case(connection: sqlite3.Connection, sql: str) -> list[dict[str, object]]:

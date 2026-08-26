@@ -9,13 +9,13 @@ field: customer_id
 business_formula: "COUNT(DISTINCT Customer ID)"
 sql_expression: "COUNT(DISTINCT customer_id)"
 dependencies: []
-description: "Tổng số khách hàng riêng biệt đã đặt ít nhất một đơn hàng trong kỳ."
+description: "Tổng số khách hàng riêng biệt (không tính khách vãng lai không có mã khách hàng) đã đặt ít nhất một đơn hàng trong kỳ."
 default_filters:
   - condition: "is_test_order = FALSE"
-allowed_dimensions: [order.order_date, order.channel, order.store_id]
+allowed_dimensions: [order.order_date, order.channel, order.store_id, city.city_name, city.region_name]
 default_time_grain: day
 reference_source: "Shopify Analytics Fields"
 status: draft
 owner: Seller
-ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#customer_count"
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#customer_count"
 synonyms: ["số khách hàng", "unique buyers", "customer count"]

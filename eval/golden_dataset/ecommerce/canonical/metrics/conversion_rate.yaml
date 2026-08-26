@@ -6,16 +6,15 @@ target_entity: session
 source_table: fact_sessions
 aggregation: ratio
 field: null
-business_formula: "Total Orders / Total Sessions"
-sql_expression: "COUNT(DISTINCT order_id) / COUNT(DISTINCT session_id)"
+business_formula: "Completed Checkout Sessions / Total Sessions"
+sql_expression: "COUNT(DISTINCT CASE WHEN completed_checkout = TRUE THEN session_id END) * 1.0 / NULLIF(COUNT(DISTINCT session_id), 0)"
 dependencies: []
-description: "Tỷ lệ phần trăm phiên truy cập cửa hàng dẫn đến đơn hàng mua thành công."
-default_filters:
-  - condition: "is_bot_traffic = FALSE"
-allowed_dimensions: [session.session_date, session.channel, session.device_type, session.store_id]
+description: "Tỷ lệ phần trăm phiên truy cập cửa hàng hoàn tất thanh toán trong phiên; lọc bot qua chiều is_bot_traffic khi cần."
+default_filters: []
+allowed_dimensions: [session.session_date, session.channel, session.device_type, session.store_id, session.utm_source, session.is_bot_traffic]
 default_time_grain: day
 reference_source: "Shopify Analytics Fields"
 status: draft
 owner: Seller
-ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx#conversion_rate"
+ground_truth_source: "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx#conversion_rate"
 synonyms: ["tỷ lệ chuyển đổi", "CR", "conversion rate"]

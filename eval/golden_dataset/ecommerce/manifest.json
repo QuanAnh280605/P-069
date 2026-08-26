@@ -1,6 +1,6 @@
 {
-  "dataset_version": "2.0.1",
-  "contract_version": "2.0.0",
+  "dataset_version": "3.0.0",
+  "contract_version": "2.1.0",
   "domain": "ecommerce",
   "language": "vi",
   "supported_dialects": [
@@ -13,8 +13,8 @@
   "approved_by": [],
   "reviewed_at": null,
   "frozen_evaluation_date": "2026-08-01T00:00:00Z",
-  "ground_truth_source": "Ecommerce_Metric_Dictionary_Ground_Truth.xlsx",
-  "ground_truth_metric_count": 10,
+  "ground_truth_source": "Ecommerce_Metric_Dictionary_Ground_Truth_Expanded.xlsx",
+  "ground_truth_metric_count": 19,
   "case_files": {
     "discovery": "cases/discovery_cases.json",
     "metric_definition": "cases/metric_definition_cases.json",
