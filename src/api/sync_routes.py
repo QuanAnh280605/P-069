@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -79,10 +80,10 @@ async def get_sync_status(
     if live_db:
         try:
             conn_url = decrypt_conn_url(live_db.conn_url_enc)
-            current_fp = fast_introspect_schema_fingerprint(conn_url, live_db.dialect)
+            current_fp = await asyncio.to_thread(fast_introspect_schema_fingerprint, conn_url, live_db.dialect)
             in_sync = current_fp == sem_db.schema_fingerprint
             if not in_sync:
-                raw_schema = introspect_live_database(conn_url, live_db.dialect)
+                raw_schema = await asyncio.to_thread(introspect_live_database, conn_url, live_db.dialect)
                 tbl_stmt = (
                     select(SemanticTableModel)
                     .where(SemanticTableModel.db_id == db_id)

@@ -218,7 +218,7 @@ async def test_register_creates_workspace_atomically(async_session: AsyncSession
 async def test_google_signup_creates_personal_workspace(async_session: AsyncSession, monkeypatch) -> None:
     """First-time Google signup must create exactly one personal Workspace membership as admin."""
 
-    async def _fake_verify(credential: str) -> dict:
+    def _fake_verify(credential: str) -> dict:
         return {"email": "guser@company.com", "name": "G User"}
 
     monkeypatch.setattr("src.api.auth._verify_google_credential", _fake_verify)

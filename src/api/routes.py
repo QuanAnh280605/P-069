@@ -1,5 +1,6 @@
 """API Routes for Semantic Layer Flow 1, Business Metrics, Live DB, and HITL inline edits."""
 
+import asyncio
 import logging
 from typing import Any, NoReturn
 
@@ -1522,7 +1523,7 @@ async def _query_target(
     if check_drift:
         try:
             conn_url = decrypt_conn_url(live_db.conn_url_enc)
-            current_fp = fast_introspect_schema_fingerprint(conn_url, live_db.dialect)
+            current_fp = await asyncio.to_thread(fast_introspect_schema_fingerprint, conn_url, live_db.dialect)
             if semantic_db.schema_fingerprint and current_fp != semantic_db.schema_fingerprint:
                 logger.info("Schema drift detected before query on db_id=%d. Triggering self-healing...", db_id)
                 await execute_self_healing(db, db_id, trigger_type="instant_check")

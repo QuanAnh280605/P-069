@@ -370,7 +370,7 @@ export default function WorkspacePage() {
       void checkSync();
       const interval = window.setInterval(() => {
         void checkSync();
-      }, 3000);
+      }, 20000);
       const onFocus = () => void checkSync();
       window.addEventListener('focus', onFocus);
       return () => {

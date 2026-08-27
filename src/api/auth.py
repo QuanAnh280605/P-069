@@ -310,7 +310,7 @@ async def google_auth(
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Authenticate or register user via Google OAuth ID token."""
-    payload = await _verify_google_credential(body.credential)
+    payload = _verify_google_credential(body.credential)
     email = payload.get("email")
     name = payload.get("name", "Google User")
 

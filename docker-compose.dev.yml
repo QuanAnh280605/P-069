@@ -39,11 +39,11 @@ services:
         condition: service_healthy # đợi postgres sẵn sàng trước
     restart: "no" # dev thường tắt thủ công
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 60s
-      timeout: 5s
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:8000/health" ]
+      interval: 30s
+      timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 20s
 
   pgadmin:
     image: dpage/pgadmin4
