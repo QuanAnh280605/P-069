@@ -44,6 +44,8 @@ Hỗ trợ 2 luồng chính:
 ### 🔴 Database & Migrations
 - **Bắt buộc tạo migration mới khi thay đổi DB schema**: Mỗi khi sửa đổi Database schema (models/tables/fields), **PHẢI** tạo 1 file Alembic migration mới (`alembic revision --autogenerate -m "..."`)
 - **KHÔNG** sửa trực tiếp DB schema cũ, không chỉnh sửa migration script cũ đã apply, không drop/recreate database để tránh làm mất/hỏng dữ liệu hoặc ảnh hưởng đến các user khác
+- **Revision ID phải duy nhất trên toàn bộ `alembic/versions/`**; trước và sau khi tạo migration phải chạy `alembic heads`, `alembic history` và migration graph tests để phát hiện duplicate revision hoặc nhiều head ngoài ý muốn
+- **KHÔNG đổi revision ID, `down_revision` hoặc reparent migration có thể đã được stamp/apply**; khi merge branch tạo nhiều head hợp lệ, phải thêm migration merge mới (không đổi schema) thay vì sửa lịch sử migration
 
 ### 🔴 LLM Usage
 - **Luôn dùng `get_llm()`** từ `src/services/llm.py` — không khởi tạo `ChatOpenAI` trực tiếp
