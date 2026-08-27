@@ -42,6 +42,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, bool]] = {
         "can_use_data_assistant": True,
         "can_use_metric_studio": False,
         "can_view_pending_metrics": False,
+        "can_export": False,
     },
     "data_lead": {
         "can_manage_members": False,
@@ -55,6 +56,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, bool]] = {
         "can_use_data_assistant": True,
         "can_use_metric_studio": True,
         "can_view_pending_metrics": True,
+        "can_export": True,
     },
     "member": {
         "can_manage_members": False,
@@ -68,6 +70,7 @@ ROLE_PERMISSIONS: dict[str, dict[str, bool]] = {
         "can_use_data_assistant": True,
         "can_use_metric_studio": False,
         "can_view_pending_metrics": False,
+        "can_export": False,
     },
 }
 

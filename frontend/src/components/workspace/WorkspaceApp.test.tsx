@@ -3,6 +3,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceApp } from '@/components/workspace/WorkspaceApp';
 import type { WorkspaceDatabase, ViewId } from '@/components/workspace/shared';
 
+vi.mock('@/context/WorkspaceContext', () => ({
+  useWorkspace: () => ({
+    workspaces: [],
+    currentWorkspace: { id: 1, name: 'Test Workspace', role: 'data_lead' },
+    role: 'data_lead',
+    permissions: { can_export: true },
+    switchWorkspace: vi.fn(),
+  }),
+}));
+
 describe('WorkspaceApp', () => {
   afterEach(() => cleanup());
   const mockDatabases: WorkspaceDatabase[] = [

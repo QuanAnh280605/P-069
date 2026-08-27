@@ -910,7 +910,7 @@ async def submit_metric_request(
     db: AsyncSession = Depends(get_db_session),
 ) -> MetricRequestResponse:
     """Submit one server-verified AI suggestion for Data Lead review."""
-    database = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_use_data_assistant")
+    database = await _require_resource_permission(db, current_user.id, db_id, org_id, "can_submit_metric")
     if await _chat_can_generate_metrics(db, database, current_user.id):
         raise HTTPException(status_code=403, detail="Data Leads should save metrics directly")
     try:
@@ -1481,8 +1481,7 @@ async def export_semantic_layer(
     """Export approved Semantic Layer as JSON or YAML file download."""
     if format not in ("json", "yaml"):
         raise HTTPException(status_code=400, detail="format must be 'json' or 'yaml'")
-    if await _owned_semantic_database(db, db_id, current_user.id, org_id) is None:
-        raise HTTPException(status_code=404, detail="Semantic database not found")
+    await _require_resource_permission(db, current_user.id, db_id, org_id, "can_export")
 
     try:
         layer = await build_semantic_layer_dict(db, db_id)

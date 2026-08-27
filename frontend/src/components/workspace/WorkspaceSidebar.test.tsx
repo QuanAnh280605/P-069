@@ -9,6 +9,7 @@ const workspaceState = vi.hoisted(() => ({
     can_manage_members: true,
     can_manage_invitations: true,
     can_manage_schema: false,
+    can_export: true,
   } as Record<string, boolean>,
 }));
 
@@ -30,6 +31,7 @@ describe('WorkspaceSidebar', () => {
       can_manage_members: true,
       can_manage_invitations: true,
       can_manage_schema: false,
+      can_export: true,
     };
   });
 
@@ -331,6 +333,25 @@ describe('WorkspaceSidebar', () => {
 
       fireEvent.click(screen.getByLabelText('Toggle theme'));
       expect(onToggleTheme).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('export nav visibility', () => {
+    it.each([
+      ['admin', false],
+      ['member', false],
+      ['data_lead', true],
+    ])('shows Export Playground only when can_export is %s for %s', (role, canExport) => {
+      workspaceState.role = role;
+      workspaceState.permissions = { can_export: canExport };
+
+      render(<WorkspaceSidebar {...defaultProps} />);
+
+      if (canExport) {
+        expect(screen.getByRole('button', { name: 'Export Playground' })).toBeInTheDocument();
+      } else {
+        expect(screen.queryByRole('button', { name: 'Export Playground' })).not.toBeInTheDocument();
+      }
     });
   });
 

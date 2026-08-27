@@ -118,9 +118,11 @@ export function WorkspaceSidebar({
     permissions.can_manage_members || permissions.can_manage_invitations,
   );
   const canManageSchema = Boolean(permissions.can_manage_schema);
+  const canExport = Boolean(permissions.can_export);
   const visibleNavItems = navItems.filter((item) => {
     if (item.id === 'ai-studio') return canChat;
     if (item.id === 'schema') return canManageSchema;
+    if (item.id === 'export') return canExport;
     return true;
   });
   const getNavLabel = (id: ViewId, label: string) =>

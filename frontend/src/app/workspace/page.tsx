@@ -239,6 +239,7 @@ export default function WorkspacePage() {
   const canManageMetrics = Boolean(permissions.can_manage_metrics ?? permissions.can_create_metrics);
   const canSubmitMetric = Boolean(permissions.can_submit_metric);
   const canApproveMetrics = Boolean(permissions.can_approve_metrics);
+  const canExport = Boolean(permissions.can_export);
   const canEditDashboard = Boolean(permissions.can_manage_metrics || role === 'data_lead' || role === 'admin');
   const canChat = Boolean(
     permissions.can_use_chat &&
@@ -975,7 +976,7 @@ export default function WorkspacePage() {
               onDrillDown={handleDashboardDrillDown}
             />
           )}
-          {tab === 'export' && (
+          {tab === 'export' && canExport && (
             <ExportPlaygroundView
               dbId={activeLayer.semantic_db_id}
               metrics={activeLayer.metrics}

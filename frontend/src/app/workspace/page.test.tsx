@@ -42,6 +42,9 @@ vi.mock('@/context/WorkspaceContext', () => ({
   }),
 }));
 vi.mock('@/components/views/AIStudioView', () => ({ AIStudioView: () => null }));
+vi.mock('@/components/views/ExportPlaygroundView', () => ({
+  ExportPlaygroundView: () => <div data-testid="export-playground-view" />,
+}));
 vi.mock('@/components/views/MetricsCatalogView', () => ({ MetricsCatalogView: () => null }));
 vi.mock('@/components/views/MetricsDashboardView', () => ({
   MetricsDashboardView: () => <div data-testid="metrics-dashboard-view" />,
@@ -61,6 +64,9 @@ vi.mock('@/components/workspace/WorkspaceApp', () => ({
       {props.onRemoveDatabase && <button onClick={() => props.onRemoveDatabase?.('1')}>page-delete</button>}
       {props.onSelectView && (
         <button onClick={() => props.onSelectView?.('dashboard')}>page-nav-dashboard</button>
+      )}
+      {props.onSelectView && (
+        <button onClick={() => props.onSelectView?.('export')}>page-nav-export</button>
       )}
       {props.children}
     </div>
@@ -166,5 +172,58 @@ describe('WorkspacePage dashboard navigation', () => {
 
     const dashboardView = await screen.findByTestId('metrics-dashboard-view');
     expect(dashboardView).toBeInTheDocument();
+  });
+});
+
+describe('WorkspacePage export guard', () => {
+  afterEach(() => {
+    cleanup();
+    state.permissions = { can_manage_schema: false };
+    vi.mocked(apiModule.listLiveTargetDbs).mockResolvedValue([]);
+  });
+
+  it('renders the Export Playground view for a role with can_export', async () => {
+    state.permissions = { can_export: true };
+    vi.mocked(apiModule.listLiveTargetDbs).mockResolvedValue([
+      {
+        id: 1,
+        display_name: 'Test DB',
+        dialect: 'postgresql',
+        updated_at: '',
+        created_at: '',
+        semantic_db_id: 1,
+        table_count: 5,
+      },
+    ]);
+
+    render(<WorkspacePage />);
+
+    const exportNav = await screen.findByText('page-nav-export');
+    fireEvent.click(exportNav);
+
+    const exportView = await screen.findByTestId('export-playground-view');
+    expect(exportView).toBeInTheDocument();
+  });
+
+  it('does not render the Export Playground view without can_export', async () => {
+    state.permissions = { can_export: false };
+    vi.mocked(apiModule.listLiveTargetDbs).mockResolvedValue([
+      {
+        id: 1,
+        display_name: 'Test DB',
+        dialect: 'postgresql',
+        updated_at: '',
+        created_at: '',
+        semantic_db_id: 1,
+        table_count: 5,
+      },
+    ]);
+
+    render(<WorkspacePage />);
+
+    const exportNav = await screen.findByText('page-nav-export');
+    fireEvent.click(exportNav);
+
+    expect(screen.queryByTestId('export-playground-view')).not.toBeInTheDocument();
   });
 });

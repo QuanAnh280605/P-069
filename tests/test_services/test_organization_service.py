@@ -64,6 +64,7 @@ def test_admin_permissions_match_matrix():
         "can_use_data_assistant": True,
         "can_use_metric_studio": False,
         "can_view_pending_metrics": False,
+        "can_export": False,
     }
 
 
@@ -80,6 +81,7 @@ def test_data_lead_permissions_match_matrix():
         "can_use_data_assistant": True,
         "can_use_metric_studio": True,
         "can_view_pending_metrics": True,
+        "can_export": True,
     }
 
 
@@ -96,6 +98,7 @@ def test_member_permissions_match_matrix():
         "can_use_data_assistant": True,
         "can_use_metric_studio": False,
         "can_view_pending_metrics": False,
+        "can_export": False,
     }
 
 
@@ -104,9 +107,9 @@ def test_can_create_metrics_removed_from_matrix():
         assert "can_create_metrics" not in role_perms
 
 
-def test_each_role_has_exactly_11_permissions():
+def test_each_role_has_exactly_12_permissions():
     for role, perms in ROLE_PERMISSIONS.items():
-        assert len(perms) == 11, f"{role} has {len(perms)} permissions, expected 11"
+        assert len(perms) == 12, f"{role} has {len(perms)} permissions, expected 12"
 
 
 # ---------------------------------------------------------------------------
