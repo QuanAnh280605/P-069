@@ -183,7 +183,7 @@ describe('MetricsCatalogView', () => {
       />,
     );
 
-    const deleteButtons = screen.getAllByTitle('Xóa metric');
+    const deleteButtons = screen.getAllByTitle('Chuyển vào Thùng rác');
     fireEvent.click(deleteButtons[0]);
 
     expect(handleDelete).toHaveBeenCalledWith(2);
@@ -241,7 +241,7 @@ describe('MetricsCatalogView', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent(/chế độ chỉ xem/i);
     expect(screen.getByRole('status')).not.toHaveTextContent(/liên hệ Data Lead/i);
-    expect(screen.getByRole('button', { name: 'Tất cả (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tất cả(1)' })).toBeInTheDocument();
     expect(screen.queryByText('Số lượng đơn hàng mới')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Gửi metric/i })).not.toBeInTheDocument();
     expect(
@@ -280,7 +280,7 @@ describe('MetricsCatalogView', () => {
     expect(
       screen.queryByRole('button', { name: /Chỉnh sửa|Duyệt chỉ số/i }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Xóa metric')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Chuyển vào Thùng rác')).not.toBeInTheDocument();
   });
 
   it('renders "Đề xuất với AI" button for Member when onOpenStudio is provided', () => {
@@ -317,7 +317,7 @@ describe('MetricsCatalogView', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Chỉnh sửa' })).toBeInTheDocument();
-    expect(screen.getByTitle('Xóa metric')).toBeInTheDocument();
+    expect(screen.getByTitle('Chuyển vào Thùng rác')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Duyệt chỉ số này/i })).toBeInTheDocument();
   });
 
@@ -376,9 +376,9 @@ describe('MetricsCatalogView', () => {
       />,
     );
     // Filter tabs should show counts
-    expect(screen.getByText(/Tất cả \(2\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Chờ phê duyệt \(1\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Đã phê duyệt \(1\)/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Tất cả\(2\)/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Chờ phê duyệt\(1\)/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Đã phê duyệt\(1\)/ })).toBeInTheDocument();
   });
 
   it('counts only the rendered sections in the Tất cả tab for a member submitter', () => {
@@ -394,9 +394,9 @@ describe('MetricsCatalogView', () => {
 
     // Sections rendered: "Đã gửi" (own unverified) + "Đã phê duyệt"; another user's
     // pending metric is not displayed anywhere, so it must not inflate the total.
-    expect(screen.getByText(/Tất cả \(2\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Đã gửi \(1\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Đã phê duyệt \(1\)/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Tất cả\(2\)/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Đã gửi\(1\)/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Đã phê duyệt\(1\)/ })).toBeInTheDocument();
   });
 
   it('filters metrics when filter tab is clicked', async () => {
@@ -500,7 +500,7 @@ describe('MetricsCatalogView', () => {
     expect(screen.queryByText('Metric đã xóa')).not.toBeInTheDocument();
 
     // Check Trash tab button with count
-    const trashTab = screen.getByRole('button', { name: /Thùng rác \(1\)/i });
+    const trashTab = screen.getByRole('button', { name: /Thùng rác\(1\)/i });
     expect(trashTab).toBeInTheDocument();
     fireEvent.click(trashTab);
 
