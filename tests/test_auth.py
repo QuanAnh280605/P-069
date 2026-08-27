@@ -2,6 +2,7 @@
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth import (
@@ -14,7 +15,7 @@ from src.api.auth import (
     verify_password,
 )
 from src.main import app
-from src.models.db import UserModel
+from src.models.db import OrganizationMemberModel, OrganizationModel, UserModel
 from src.services.database import get_db_session
 
 
@@ -173,6 +174,109 @@ async def test_refresh_endpoint(async_session: AsyncSession) -> None:
         assert res_reuse.status_code == 401
 
     app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_register_creates_workspace_atomically(async_session: AsyncSession) -> None:
+    """Local registration must create exactly one personal Workspace membership as admin."""
+
+    async def _override_db():
+        yield async_session
+
+    app.dependency_overrides[get_db_session] = _override_db
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        res_reg = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "wsuser@company.com",
+                "username": "wsuser",
+                "password": "Password123!",
+                "full_name": "WS User",
+            },
+        )
+        assert res_reg.status_code == 201
+
+    app.dependency_overrides.clear()
+
+    user = (
+        await async_session.execute(select(UserModel).where(UserModel.email == "wsuser@company.com"))
+    ).scalar_one_or_none()
+    assert user is not None
+    memberships = list(
+        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id))).scalars().all()
+    )
+    assert len(memberships) == 1
+    assert memberships[0].role == "admin"
+    orgs = list(
+        (await async_session.execute(select(OrganizationModel).where(OrganizationModel.id == memberships[0].org_id))).scalars().all()
+    )
+    assert len(orgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_google_signup_creates_personal_workspace(async_session: AsyncSession, monkeypatch) -> None:
+    """First-time Google signup must create exactly one personal Workspace membership as admin."""
+
+    async def _fake_verify(credential: str) -> dict:
+        return {"email": "guser@company.com", "name": "G User"}
+
+    monkeypatch.setattr("src.api.auth._verify_google_credential", _fake_verify)
+
+    async def _override_db():
+        yield async_session
+
+    app.dependency_overrides[get_db_session] = _override_db
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        res = await client.post("/api/v1/auth/google", json={"credential": "fake"})
+        assert res.status_code == 200
+
+    app.dependency_overrides.clear()
+
+    user = (
+        await async_session.execute(select(UserModel).where(UserModel.email == "guser@company.com"))
+    ).scalar_one_or_none()
+    assert user is not None
+    memberships = list(
+        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id))).scalars().all()
+    )
+    assert len(memberships) == 1
+    assert memberships[0].role == "admin"
+
+
+@pytest.mark.asyncio
+async def test_register_rolls_back_when_workspace_provision_fails(async_session: AsyncSession, monkeypatch) -> None:
+    """If Workspace provisioning raises, the transaction rolls back and no user row remains."""
+
+    async def _boom(db, user_id: int) -> None:
+        raise RuntimeError("provision failed")
+
+    monkeypatch.setattr("src.api.auth.provision_personal_workspace", _boom)
+
+    async def _override_db():
+        yield async_session
+
+    app.dependency_overrides[get_db_session] = _override_db
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        res = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "rollback@company.com",
+                "username": "rollbackuser",
+                "password": "Password123!",
+                "full_name": "Rollback User",
+            },
+        )
+        assert res.status_code >= 500
+
+    app.dependency_overrides.clear()
+
+    user = (
+        await async_session.execute(select(UserModel).where(UserModel.email == "rollback@company.com"))
+    ).scalar_one_or_none()
+    assert user is None
 
 
 @pytest.mark.asyncio

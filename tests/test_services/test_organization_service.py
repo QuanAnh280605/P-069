@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from src.models.db import OrganizationInvitationModel, OrganizationMemberModel, UserModel
+from src.models.db import OrganizationInvitationModel, OrganizationMemberModel, OrganizationModel, UserModel
 from src.services.organization_service import (
     _MEMBERSHIP_CACHE,
     ROLE_PERMISSIONS,
@@ -17,6 +17,8 @@ from src.services.organization_service import (
     get_membership,
     invalidate_membership_cache,
     list_members,
+    list_organizations,
+    provision_personal_workspace,
     remove_member,
     require_permission,
 )
@@ -370,6 +372,60 @@ async def test_list_members_returns_workspace_members(async_session):
 
     members = await list_members(async_session, organization.id)
     assert {member.user_id for member in members} == {1, 2}
+
+
+# ---------------------------------------------------------------------------
+# 5b. Personal Workspace provisioning
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_organizations_repairs_legacy_user(async_session):
+    """A legacy user with zero memberships is repaired with a personal Workspace."""
+    user = await _add_user(async_session, 99, "legacy@company.com")
+
+    result = await list_organizations(async_session, user.id)
+
+    assert len(result) == 1
+    assert result[0].name == "Personal Workspace"
+    assert result[0].role == "admin"
+    # Idempotent: a second listing does not create a second Workspace.
+    result2 = await list_organizations(async_session, user.id)
+    assert len(result2) == 1
+
+
+@pytest.mark.asyncio
+async def test_provision_personal_workspace_idempotent(async_session):
+    """Provisioning twice for the same user yields one membership and one Workspace."""
+    user = await _add_user(async_session, 77, "idem@company.com")
+
+    first = await provision_personal_workspace(async_session, user.id)
+    second = await provision_personal_workspace(async_session, user.id)
+
+    assert first.org_id == second.org_id
+    memberships = list(
+        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id))).scalars().all()
+    )
+    assert len(memberships) == 1
+    orgs = list(
+        (await async_session.execute(select(OrganizationModel).where(OrganizationModel.id == memberships[0].org_id))).scalars().all()
+    )
+    assert len(orgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_provision_personal_workspace_returns_existing_membership(async_session):
+    """Provisioning does not create a second Workspace when one already exists."""
+    user = await _add_user(async_session, 66, "existing@company.com")
+    organization = await create_organization(async_session, user.id, "Acme", "acme")
+
+    membership = await provision_personal_workspace(async_session, user.id)
+
+    assert membership.org_id == organization.id
+    memberships = list(
+        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id))).scalars().all()
+    )
+    assert len(memberships) == 1
 
 
 # ---------------------------------------------------------------------------
