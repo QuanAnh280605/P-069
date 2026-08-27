@@ -22,6 +22,13 @@ ignore = [
     "UP038",  # keep isinstance(x, (A, B)) tuple form; avoid churn across services
 ]
 
+[lint.per-file-ignores]
+# Pre-existing, already-applied Alembic migration scripts must not be edited.
+# These auto-generated files legitimately violate import-order (I001), use
+# idempotency try/except/pass guards (S110), and interpolate table names into
+# read-only validation queries (S608). Ignore only these rules for versions.
+"alembic/versions/*.py" = ["I001", "S110", "S608"]
+
 [format]
 quote-style = "double"
 indent-style = "space"
