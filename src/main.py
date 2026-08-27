@@ -12,8 +12,6 @@ from src.api.review_routes import review_router
 from src.api.routes import router
 from src.api.sync_routes import sync_router
 from src.config import get_settings
-from src.models.db import Base
-from src.services.database import get_async_engine
 from src.services.rate_limiter import RateLimitMiddleware
 from src.services.schema_cron_service import start_schema_cron_scheduler, stop_schema_cron_scheduler
 
@@ -30,10 +28,6 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     settings = get_settings()
     logger.info("Starting %s in %s mode", settings.app_name, settings.app_env)
-    engine = get_async_engine()
-    if settings.app_env in {"development", "test"}:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
     if settings.app_env != "test":
         start_schema_cron_scheduler()
     yield
