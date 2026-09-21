@@ -11,6 +11,7 @@ class SemanticCompileError(ValueError):
     def __init__(self, code: str, message: str, context: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.message = message
         self.context = context or {}
 
     def to_detail(self) -> dict[str, Any]:

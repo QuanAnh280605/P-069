@@ -1,10 +1,10 @@
 'use client';
 
-import { AlertCircle, Check, CheckCircle2, ChevronRight, Loader2, Sparkles } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronRight, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import {
   approveSchemaReviewApi,
   getSchemaReviewApi,
@@ -14,7 +14,14 @@ import {
   type SchemaReviewColumn,
   type SchemaReviewTable,
 } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import {
+  RelationshipReviewSection,
+  ReviewBadge,
+  RowEditor,
+  type Draft,
+  type DraftMap,
+  relationshipKey,
+} from '@/components/views/RelationshipReviewSection';
 import { SectionLabel, type WorkspaceDatabase } from '@/components/workspace/shared';
 import { ViewHeader } from '@/components/workspace/ViewHeader';
 
@@ -26,114 +33,6 @@ interface SchemaReviewViewProps {
   onNotify?: (message: string) => void;
   onReviewChanged?: () => void;
 }
-
-/** Badge showing whether a metadata row is officially stored or still in review. */
-function ReviewBadge({ status }: { status: 'pending_review' | 'approved' }) {
-  const approved = status === 'approved';
-  return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-[10px]',
-        approved
-          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-          : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-      )}
-    >
-      <span className={cn('h-1.5 w-1.5 rounded-full', approved ? 'bg-emerald-500' : 'bg-amber-500')} />
-      {approved ? 'Đã lưu chính thức' : 'Chờ review'}
-    </span>
-  );
-}
-
-/** Show the AI proposal only when it differs from the value the reviewer sees. */
-function AiSuggestion({
-  suggestion,
-  current,
-  onAccept,
-  disabled,
-}: {
-  suggestion?: string | null;
-  current: string;
-  onAccept: () => void;
-  disabled?: boolean;
-}) {
-  if (!suggestion || suggestion === current) return null;
-  return (
-    <button
-      type="button"
-      onClick={onAccept}
-      disabled={disabled}
-      className="mt-1 inline-flex items-center gap-1.5 text-left font-mono text-[10px] text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
-      title="Dùng đề xuất của AI"
-    >
-      <Sparkles className="h-3 w-3 shrink-0" />
-      <span className="truncate">AI đề xuất: {suggestion}</span>
-    </button>
-  );
-}
-
-interface RowEditorProps {
-  businessName: string;
-  description: string;
-  aiBusinessName?: string | null;
-  disabled?: boolean;
-  saving?: boolean;
-  dirty?: boolean;
-  onChange: (patch: { business_name?: string; description?: string }) => void;
-  onSave: () => void;
-}
-
-/** Inline editor for one table or column row. */
-function RowEditor({
-  businessName,
-  description,
-  aiBusinessName,
-  disabled,
-  saving,
-  dirty,
-  onChange,
-  onSave,
-}: RowEditorProps) {
-  return (
-    <div className="grid flex-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto]">
-      <div className="min-w-0">
-        <Input
-          value={businessName}
-          disabled={disabled}
-          placeholder="Tên nghiệp vụ"
-          className="h-8 text-xs"
-          onChange={(event) => onChange({ business_name: event.target.value })}
-        />
-        <AiSuggestion
-          suggestion={aiBusinessName}
-          current={businessName}
-          disabled={disabled}
-          onAccept={() => onChange({ business_name: aiBusinessName || '' })}
-        />
-      </div>
-      <Input
-        value={description}
-        disabled={disabled}
-        placeholder="Mô tả nghiệp vụ"
-        className="h-8 text-xs"
-        onChange={(event) => onChange({ description: event.target.value })}
-      />
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={disabled || saving || !dirty}
-        onClick={onSave}
-        className="h-8 shrink-0 gap-1.5 text-[11px]"
-      >
-        {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-        Lưu
-      </Button>
-    </div>
-  );
-}
-
-type Draft = { business_name: string; description: string };
-type DraftMap = Record<string, Draft>;
 
 function tableKey(table: SchemaReviewTable): string {
   return `t:${table.table_name}`;
@@ -156,6 +55,12 @@ function buildDrafts(review: SchemaReview): DraftMap {
         description: column.description || '',
       };
     }
+  }
+  for (const rel of review.relationships) {
+    drafts[relationshipKey(rel)] = {
+      business_name: rel.business_name || '',
+      description: rel.description ?? '',
+    };
   }
   return drafts;
 }
@@ -224,15 +129,18 @@ export function SchemaReviewView({
     }
   };
 
-  const approve = async (tableNames?: string[]) => {
+  const approve = async (tableNames?: string[], relationshipIds?: number[]) => {
     if (!dbId) return;
-    setApproving(tableNames?.[0] ?? '*');
+    setApproving(tableNames?.[0] ?? relationshipIds?.[0]?.toString() ?? '*');
     setError('');
     try {
-      const result = await approveSchemaReviewApi(String(dbId), tableNames);
-      onNotify?.(
-        `Đã duyệt ${result.approved_tables} bảng và ${result.approved_columns} cột vào Metadata Store`,
-      );
+      const result = await approveSchemaReviewApi(String(dbId), tableNames, relationshipIds);
+      const parts = [
+        `${result.approved_tables} bảng`,
+        `${result.approved_columns} cột`,
+        `${result.approved_relationships} quan hệ`,
+      ];
+      onNotify?.(`Đã duyệt ${parts.join(', ')} vào Metadata Store`);
       await load();
       onReviewChanged?.();
     } catch (caught) {
@@ -242,7 +150,14 @@ export function SchemaReviewView({
     }
   };
 
-  const pendingTotal = (review?.pending_tables || 0) + (review?.pending_columns || 0);
+  const approveRelationship = (relationshipId: number) => {
+    void approve(undefined, [relationshipId]);
+  };
+
+  const pendingTotal =
+    (review?.pending_tables || 0) +
+    (review?.pending_columns || 0) +
+    (review?.pending_relationships || 0);
   const dirtyCount = useMemo(
     () => Object.keys(drafts).filter((key) => isDirty(key)).length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -280,7 +195,11 @@ export function SchemaReviewView({
           </p>
         )}
         {error && (
-          <p className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+          <p
+            role="status"
+            aria-live="polite"
+            className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive"
+          >
             <AlertCircle className="h-4 w-4 shrink-0" />
             {error}
           </p>
@@ -431,6 +350,25 @@ export function SchemaReviewView({
             </section>
           );
         })}
+
+        {review && (
+          <div className="space-y-3">
+            <SectionLabel>Quan hệ (Relationships)</SectionLabel>
+            <RelationshipReviewSection
+              dbId={dbId}
+              relationships={review.relationships ?? []}
+              drafts={drafts}
+              isDirty={isDirty}
+              patch={patch}
+              savingKey={savingKey}
+              saveRow={saveRow}
+              approving={approving}
+              canManageSchema={canManageSchema}
+              canApproveSchema={canApproveSchema}
+              onApproveRelationship={approveRelationship}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

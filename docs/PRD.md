@@ -22,16 +22,16 @@ RBAC chỉ có phạm vi **Workspace**; không tồn tại vai trò ứng dụng
 
 ### Persona 1: Workspace Admin
 - **Mục tiêu:** Quản trị thành viên, tạo/thu hồi URL mời và gán vai trò trong Workspace.
-- **Ranh giới:** Không quản trị schema hoặc metric; không phải Admin toàn nền tảng. Workspace luôn phải còn ít nhất một Admin.
+- **Ranh giới:** Không quản trị schema hoặc metric; không phải Admin toàn nền tảng; **không tạo hay gửi metric** (không có quyền `can_generate_metrics`) nhưng vẫn dùng chat/query thông thường. Workspace luôn phải còn ít nhất một Admin.
 
 ### Persona 2 (Chính): Data Lead / Analytics Engineer
 - **Mục tiêu:** Quản trị schema/kết nối, thiết lập `canonical_relationships`, tạo và quản lý metric, xét duyệt submission của Member và khai thác Live Database an toàn.
-- **Nhu cầu:** Chỉnh sửa/xóa metric chưa duyệt, phê duyệt `unverified -> approved`, truy vết lịch sử và dùng Query Engine với Guardrails bắt buộc.
-- **Ranh giới:** Không quản trị thành viên hoặc invitation.
+- **Nhu cầu:** Chỉnh sửa/xóa metric chưa duyệt, phê duyệt `unverified -> approved`, truy vết lịch sử, chọn `preferred_join_paths` khi có nhiều đường JOIN, và dùng Query Engine với Guardrails bắt buộc.
+- **Ranh giới:** Không quản trị thành viên hoặc invitation. Quyền tạo/gửi metric được kiểm soát bởi `can_generate_metrics` (thay thế khái niệm `can_use_metric_studio` cũ).
 
 ### Persona 3: Member / Business Analyst
-- **Mục tiêu:** Gửi đề xuất metric mới, theo dõi submission của chính mình và sử dụng catalog metric đã duyệt để query/chat.
-- **Ranh giới:** Submission được tạo ở trạng thái `unverified` và Member không thể sửa, xóa hay tự phê duyệt sau khi gửi.
+- **Mục tiêu:** Gửi đề xuất metric mới (trạng thái `unverified`), theo dõi submission của chính mình và sử dụng catalog metric đã duyệt để query/chat.
+- **Ranh giới:** Submission được tạo ở trạng thái `unverified` và Member không thể sửa, xóa hay tự phê duyệt sau khi gửi; Member không có quyền `can_generate_metrics` nên không tạo metric trực tiếp.
 
 ---
 

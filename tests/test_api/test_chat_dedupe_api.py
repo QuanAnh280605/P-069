@@ -25,16 +25,17 @@ def chat_session_mocks():
     session = SimpleNamespace(id="sess-1", db_id=101, title="Phiên test", created_at=now, updated_at=now)
     refreshed = SimpleNamespace(id="sess-1", db_id=101, title="Phiên test", created_at=now, updated_at=now)
     with (
-        patch("src.api.routes.get_chat_database", new_callable=AsyncMock),
+        patch("src.api.routes.get_chat_database", new_callable=AsyncMock) as mock_get_db,
         patch("src.api.routes._chat_can_generate_metrics", new_callable=AsyncMock) as mock_can,
         patch("src.api.routes._resolve_chat_session", new_callable=AsyncMock) as mock_resolve,
         patch("src.api.routes._replay_chat_response", new_callable=AsyncMock) as mock_replay,
         patch("src.api.routes.get_recent_chat_history", new_callable=AsyncMock) as mock_history,
         patch("src.api.routes.save_chat_message", new_callable=AsyncMock) as mock_save,
         patch("src.api.routes.get_chat_session_with_messages", new_callable=AsyncMock) as mock_refresh,
-        patch("src.api.routes.build_metric_context", new_callable=AsyncMock) as mock_context,
+        patch("src.api.routes._build_chat_context", new_callable=AsyncMock) as mock_context,
         patch("src.agents.nodes.orchestrator_node.orchestrator_node", new_callable=AsyncMock) as mock_orch,
     ):
+        mock_get_db.return_value = SimpleNamespace(id=101, org_id=None, semantic_db_id=101)
         mock_can.return_value = True
         mock_resolve.return_value = session
         mock_replay.return_value = None

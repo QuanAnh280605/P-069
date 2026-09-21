@@ -74,6 +74,37 @@ def test_openai_protocol_builds_chat_openai(monkeypatch: pytest.MonkeyPatch) -> 
     assert client.temperature == 0.0
 
 
+def test_openrouter_client_disables_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OpenRouter clients must not spend latency on unnecessary reasoning tokens."""
+    _patch_settings(
+        monkeypatch,
+        llm_provider="openai",
+        llm_api_base="https://openrouter.ai/api/v1",
+        llm_api_key="sk-or-test",
+        llm_model="deepseek/deepseek-v4-flash-0731",
+    )
+
+    client = llm_module.get_llm(role="metric")
+
+    assert client.extra_body == {"reasoning": {"enabled": False}}
+
+
+def test_openrouter_client_preserves_reasoning_for_gemini_and_glm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reasoning-native models reject reasoning: {enabled: false} on OpenRouter with HTTP 400."""
+    _patch_settings(
+        monkeypatch,
+        llm_provider="openai",
+        llm_api_base="https://openrouter.ai/api/v1",
+        llm_api_key="sk-or-test",
+        llm_model="google/gemini-3.8-flash",
+        llm_fallback_model="z-ai/glm-5.3-flash",
+    )
+
+    client = llm_module.get_llm(role="metric")
+    primary = getattr(client, "first", client)
+    assert primary.extra_body == {"models": ["google/gemini-3.8-flash", "z-ai/glm-5.3-flash"]}
+
+
 def test_anthropic_protocol_builds_anthropic_client(monkeypatch: pytest.MonkeyPatch) -> None:
     chat_anthropic = pytest.importorskip("langchain_anthropic").ChatAnthropic
     _patch_settings(
@@ -91,3 +122,12 @@ def test_env_file_change_is_ignored_outside_development(monkeypatch: pytest.Monk
     _patch_settings(monkeypatch, app_env="production")
     monkeypatch.setattr(llm_module, "_env_file_changed", lambda: pytest.fail("must not stat .env in prod"))
     assert llm_module.get_llm() is not None
+
+
+def test_fallback_model_builds_runnable_with_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
+    from langchain_core.runnables import RunnableWithFallbacks
+
+    _patch_settings(monkeypatch, llm_fallback_model="z-ai/glm-5.3-flash")
+    client = llm_module.get_llm()
+    assert isinstance(client, RunnableWithFallbacks)
+

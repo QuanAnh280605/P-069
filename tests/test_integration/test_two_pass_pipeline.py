@@ -671,3 +671,110 @@ async def async_iter(items):
     """Async generator helper for mocking get_db_session."""
     for item in items:
         yield item
+
+
+# ---------------------------------------------------------------------------
+# Test 7: Ultra-wide (>40 cols) enrichment — lossless + case + retry safety
+# ---------------------------------------------------------------------------
+
+
+def _wide_table(name: str, num_cols: int) -> TableMetadata:
+    """Build a wide table with num_cols varchar columns (no FKs)."""
+    cols = [_col(f"c_{i}", "varchar") for i in range(num_cols)]
+    return _table(name, cols)
+
+
+class TestUltraWideIntegration:
+    """Ultra-wide tables must preserve every source column end-to-end."""
+
+    @pytest.mark.asyncio
+    async def test_ultra_wide_preserves_all_source_columns(self) -> None:
+        tables = [_wide_table("wide_table", 50)]
+        raw_schema = _make_raw_schema(tables)
+        state: AgentState = {"raw_schema": raw_schema, "db_type": "postgresql"}
+
+        pass1 = _build_pass1_glossary(tables)
+        mock_p1 = _make_mock_llm_for_pass1(pass1, tables)
+        mock_p2 = _make_mock_llm_for_pass2(tables)
+
+        with patch("src.services.pass1_global_glossary.get_llm", return_value=mock_p1):
+            with patch("src.services.llm_caller.get_llm", return_value=mock_p2):
+                result = await enrich_node(state)
+
+        enriched = result["enriched_schema"]["tables"]
+        assert len(enriched) == 1
+        et = enriched[0]
+        assert et["business_name"] == "Wide Table"
+        assert len(et["columns"]) == 50
+        assert [c["column_name"] for c in et["columns"]] == [f"c_{i}" for i in range(50)]
+        # LLM Vietnamese names preserved
+        assert et["columns"][0]["business_name"] == "C 0"
+
+    @pytest.mark.asyncio
+    async def test_ultra_wide_case_mismatch_preserves_columns(self) -> None:
+        """Source 'order_header' matches LLM key 'Order_Header'; all cols kept."""
+        tables = [_wide_table("order_header", 50)]
+        raw_schema = _make_raw_schema(tables)
+        state: AgentState = {"raw_schema": raw_schema, "db_type": "postgresql"}
+
+        pass1 = _build_pass1_glossary(tables)
+        mock_p1 = _make_mock_llm_for_pass1(pass1, tables)
+
+        mock_p2 = AsyncMock()
+
+        def _ainvoke(prompt: str):
+            cols = [
+                {"column_name": f"c_{i}", "business_name": f"Trường {i}", "description": f"Mô tả {i}"}
+                for i in range(50)
+            ]
+            resp = MagicMock()
+            resp.content = json.dumps(
+                {
+                    "matched_tables": ["Order_Header"],
+                    "tables": {
+                        "Order_Header": {
+                            "business_name": "Đơn hàng",
+                            "description": "Mo ta",
+                            "columns": cols,
+                        }
+                    },
+                },
+                ensure_ascii=False,
+            )
+            return resp
+
+        mock_p2.ainvoke = AsyncMock(side_effect=_ainvoke)
+
+        with patch("src.services.pass1_global_glossary.get_llm", return_value=mock_p1):
+            with patch("src.services.llm_caller.get_llm", return_value=mock_p2):
+                result = await enrich_node(state)
+
+        et = result["enriched_schema"]["tables"][0]
+        assert et["business_name"] == "Đơn hàng"
+        assert len(et["columns"]) == 50
+        assert et["columns"][0]["business_name"] == "Trường 0"
+
+    @pytest.mark.asyncio
+    async def test_ultra_wide_failed_chunk_preserves_all_columns(self) -> None:
+        """Every chunk times out → fallback entries for ALL source columns (no loss)."""
+        tables = [_wide_table("wide_table", 50)]
+        raw_schema = _make_raw_schema(tables)
+        state: AgentState = {"raw_schema": raw_schema, "db_type": "postgresql"}
+
+        pass1 = _build_pass1_glossary(tables)
+        mock_p1 = _make_mock_llm_for_pass1(pass1, tables)
+        mock_p2 = _make_mock_llm_for_pass2(tables)
+
+        with patch("src.services.pass1_global_glossary.get_llm", return_value=mock_p1):
+            with patch("src.services.llm_caller.get_llm", return_value=mock_p2):
+                with patch(
+                    "src.services.llm_caller.execute_llm_request",
+                    side_effect=TimeoutError("simulated timeout"),
+                ):
+                    result = await enrich_node(state)
+
+        et = result["enriched_schema"]["tables"][0]
+        assert len(et["columns"]) == 50
+        assert [c["column_name"] for c in et["columns"]] == [f"c_{i}" for i in range(50)]
+        # Fallback title-case business names
+        assert et["columns"][0]["business_name"] == "C 0"

@@ -307,6 +307,36 @@ app.add_middleware(
 
 ---
 
+## Semantic Query & Join Path Errors
+
+Các lỗi dưới đây là **fail-closed**: compiler từ chối sinh SQL thay vì đoán đường dẫn JOIN. Nguyên nhân thường do quan hệ chưa được duyệt hoặc `preferred_join_paths` không còn khớp.
+
+### `AMBIGUOUS_JOIN_PATH` — Nhiều đường JOIN an toàn bằng nhau
+
+**Nguyên nhân:** Một bảng đích có từ 2 đường đi `many_to_one` ngắn nhất trở lên, và metric chưa lưu `preferred_join_paths` cho bảng đó.
+
+**Cách sửa:** Mở Metric Modal, chọn một đường dẫn (relationship-id sequence) trong phần "Ngữ cảnh quan hệ" rồi lưu. Compiler sẽ dùng đúng đường đã chọn, không hỏi lại khi query.
+
+### `INVALID_PREFERRED_JOIN_PATH` — Preferred path lỗi thời/không khớp
+
+**Nguyên nhân:** `preferred_join_paths` đã lưu không còn khớp với bất kỳ đường an toàn nào hiện tại (quan hệ bị xoá, đổi chiều, hoặc không còn `approved`/`valid`).
+
+**Cách sửa:** Vào Metric Modal, xoá lựa chọn không hợp lệ (nút "Xoá lựa chọn không hợp lệ") và chọn lại đường dẫn hiện tại, hoặc nhờ Data Lead duyệt lại quan hệ liên quan.
+
+### `CONFLICTING_JOIN_PATH` — Xung đột giữa nhiều metric
+
+**Nguyên nhân:** Nhiều metric trong cùng một query chọn hai chuỗi relationship-id khác nhau cho cùng một cặp (base, target).
+
+**Cách sửa:** Chọn lại `preferred_join_paths` sao cho các metric cùng dùng một đường dẫn nhất quán, hoặc tách query thành nhiều request riêng biệt.
+
+### Quan hệ không được biên dịch (`UNREACHABLE_DIMENSION` / `UNSAFE_FANOUT`)
+
+**Nguyên nhân:** Quan hệ chưa thỏa mãn cổng biên dịch — cần đồng thời `validation_status == 'valid'` VÀ `review_status == 'approved'` (chiều `many_to_one`). Quan hệ chỉ hợp lệ nhưng chưa duyệt sẽ bị loại.
+
+**Cách sửa:** Data Lead duyệt quan hệ (`approved`) trong Semantic Layer Review; sau đó các metric dùng quan hệ đó mới có thể compile.
+
+---
+
 ## Lỗi không xác định?
 
 1. **Đọc error message kỹ** — Python traceback thường chỉ rõ file và dòng gây lỗi

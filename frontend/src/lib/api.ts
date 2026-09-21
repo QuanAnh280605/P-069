@@ -1,4 +1,10 @@
-import { getStoredToken } from '@/lib/jwt';
+import {
+  getStoredRefreshToken,
+  getStoredToken,
+  removeStoredTokens,
+  setStoredRefreshToken,
+  setStoredToken,
+} from '@/lib/jwt';
 
 export interface SemanticColumn {
   column_name: string;
@@ -43,13 +49,28 @@ export interface MetricDefinition {
     base_entity: string;
     base_entity_id?: number | null;
     grain?: { column_ids: number[] };
+    dimensions?: string[];
     filters: MetricFilter[];
     status: MetricStatus;
     confidence?: MetricConfidence | null;
     excluded_notes: string;
+    /** Persisted governed join context: target entity id -> ordered relationship ids. */
+    preferred_join_paths?: Record<string, number[]>;
   };
   diagnostics?: Array<{ code: string; message: string }>;
 }
+
+/** One safe governed join-path candidate for a target entity from a base entity. */
+export interface JoinPathOption {
+  relationship_ids: number[];
+  entity_ids: number[];
+  labels: string[];
+  descriptions: Array<string | null>;
+}
+
+/** Join-path options keyed by target entity id (stringified int from JSON). */
+export type MetricJoinPathOptions = Record<string, JoinPathOption[]>;
+
 
 export interface MetricRecord {
   metric_id: number;
@@ -445,6 +466,41 @@ export function getAuthHeader(): Record<string, string> {
   };
 }
 
+let refreshPromise: Promise<string | null> | null = null;
+
+export async function refreshAccessToken(): Promise<string | null> {
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    const refreshToken = getStoredRefreshToken();
+    if (!refreshToken) return null;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (!res.ok) {
+        removeStoredTokens();
+        return null;
+      }
+
+      const data = (await res.json()) as { access_token: string; refresh_token: string };
+      setStoredToken(data.access_token);
+      setStoredRefreshToken(data.refresh_token);
+      return data.access_token;
+    } catch {
+      return null;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
 export function listWorkspacesApi(): Promise<WorkspaceSummary[]> {
   return semanticRequest<WorkspaceSummary[]>('/api/v1/org/my-orgs');
 }
@@ -522,14 +578,24 @@ export function isPermissionDenied(error: unknown): boolean {
 }
 
 export async function semanticRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      ...getAuthHeader(),
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-      ...init.headers,
-    },
-  });
+  const doFetch = (authHeaders: Record<string, string>) =>
+    fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: {
+        ...authHeaders,
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init.headers,
+      },
+    });
+
+  let response = await doFetch(getAuthHeader());
+  if (response.status === 401 && getStoredRefreshToken()) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      response = await doFetch({ Authorization: `Bearer ${newToken}`, ...getWorkspaceHeader() });
+    }
+  }
+
   if (!response.ok) throw await toSemanticApiError(response);
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -577,12 +643,16 @@ export interface GeneratedMetricsResult {
   isLiveLLM: boolean;
 }
 
+async function fetchAiRequest(url: string, init: RequestInit): Promise<Response> {
+  return fetch(url, init);
+}
+
 export async function generateCustomMetricsApi(
   dbId: string,
   prompt: string,
   targetTables: string[] = [],
 ): Promise<GeneratedMetricsResult> {
-  const res = await fetch(`${API_BASE}/api/v1/semantic/${dbId}/metrics/generate`, {
+  const res = await fetchAiRequest(`${API_BASE}/api/v1/semantic/${dbId}/metrics/generate`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -622,7 +692,11 @@ export interface ChatClarificationOption {
   id: string;
   label: string;
   description?: string | null;
-  spec: {
+  /** Canonical technical dimension names retained for metric-creation options. */
+  dimensions?: string[];
+  /** Optional backend-triggered action (e.g. open catalog). Server-derived, never trusted from the client. */
+  action?: string | null;
+  spec?: {
     metric_ids: number[];
     dimensions?: { column_id: number; time_grain?: string | null }[];
     filters?: { column_id: number; operator: string; value?: unknown }[];
@@ -632,12 +706,30 @@ export interface ChatClarificationOption {
 
 export interface ChatClarificationSelection {
   assistant_message_id: string;
-  option_id: string;
+  option_id?: string | null;
+  custom_answer?: string | null;
+  skipped?: boolean;
+}
+
+/** Persisted resolution derived server-side from the matched stored option. */
+export interface ClarificationResolution {
+  status: 'answered' | 'skipped';
+  selected_option_id?: string | null;
+  /** Server-derived label; do not trust the client-supplied option label. */
+  selected_label?: string | null;
+  custom_answer?: string | null;
 }
 
 export interface ChatClarificationPayload {
   prompt: string;
   options: ChatClarificationOption[];
+  resolution?: ClarificationResolution | null;
+  /** Server-written resolution fields persisted in place on the original card. */
+  selected_option_id?: string | null;
+  selected_label?: string | null;
+  custom_answer?: string | null;
+  resolution_kind?: 'option' | 'custom' | 'skip' | null;
+  resolved_at?: string | null;
 }
 
 export interface ChatSemanticQueryResult {
@@ -656,7 +748,13 @@ export interface ChatSemanticQueryResult {
 }
 
 export interface ChatOrchestratorResponse {
-  intent: 'chitchat' | 'data_question' | 'metric_query' | 'semantic_query' | 'out_of_scope';
+  intent:
+    | 'chitchat'
+    | 'data_question'
+    | 'metric_query'
+    | 'semantic_query'
+    | 'out_of_scope'
+    | 'clarification_skipped';
   chat_response?: string | null;
   suggestions?: MetricSuggestion[] | null;
   duplicates?: DuplicateMetricNotice[];
@@ -665,8 +763,10 @@ export interface ChatOrchestratorResponse {
   suggestion_action?: 'save_metric' | 'submit_metric_request' | null;
   semantic_query_result?: ChatSemanticQueryResult | null;
   clarification?: ChatClarificationPayload | null;
+  /** Canonical server-written resolution for the resolved clarification card. */
+  clarification_resolution?: ClarificationResolution | null;
   session_id: string;
-  user_message_id: string;
+  user_message_id?: string | null;
   assistant_message_id: string;
   session?: ChatSessionItem | null;
 }
@@ -697,6 +797,7 @@ export interface ChatMessageItem {
     suggestion_action?: 'save_metric' | 'submit_metric_request' | null;
     semantic_query_result?: ChatSemanticQueryResult | null;
     clarification?: ChatClarificationPayload | null;
+    clarification_resolution?: ClarificationResolution | null;
     error?: string | null;
   } | null;
   created_at: string;
@@ -708,14 +809,26 @@ export interface ChatSessionDetail extends ChatSessionItem {
 }
 
 async function chatRequest<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const buildRequest = (authHeaders: Record<string, string>) => ({
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...getAuthHeader(),
+      ...authHeaders,
       ...(init?.headers || {}),
     },
   });
+
+  let request = buildRequest(getAuthHeader());
+  let res = init?.method === 'POST' ? await fetchAiRequest(url, request) : await fetch(url, request);
+
+  if (res.status === 401 && getStoredRefreshToken()) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      request = buildRequest({ Authorization: `Bearer ${newToken}`, ...getWorkspaceHeader() });
+      res = init?.method === 'POST' ? await fetchAiRequest(url, request) : await fetch(url, request);
+    }
+  }
+
   if (!res.ok) {
     const errData = await res.json().catch(() => ({ detail: 'Lỗi khi gọi API Chat' }));
     throw new Error(
@@ -1065,20 +1178,55 @@ export interface SchemaReviewTable {
   columns: SchemaReviewColumn[];
 }
 
+/** One physical FK column pair of a canonical relationship, with resolved names. */
+export interface RelationshipColumnPair {
+  from_column_id?: number | null;
+  to_column_id?: number | null;
+  from_column_name?: string | null;
+  to_column_name?: string | null;
+}
+
+/** One equal-length join-path target group a reviewer must disambiguate. */
+export interface RelationshipAmbiguityGroup {
+  target_entity_id: number;
+  candidate_relationship_ids: number[][];
+}
+
+/** One canonical relationship awaiting or having passed BA/DA review. */
+export interface SchemaReviewRelationship {
+  relationship_id: number;
+  from_entity_id: number;
+  to_entity_id: number;
+  from_table_name: string;
+  to_table_name: string;
+  column_pairs: RelationshipColumnPair[];
+  business_name: string;
+  description: string | null;
+  ai_business_name: string | null;
+  ai_description: string | null;
+  validation_status: string;
+  review_status: string;
+  ambiguous_target_groups: RelationshipAmbiguityGroup[];
+}
+
 export interface SchemaReview {
   db_id: number;
   status: 'pending_review' | 'approved';
   pending_tables: number;
   pending_columns: number;
+  pending_relationships: number;
   tables: SchemaReviewTable[];
+  relationships: SchemaReviewRelationship[];
 }
 
 export interface SchemaApproveResult {
   db_id: number;
   approved_tables: number;
   approved_columns: number;
+  approved_relationships: number;
   pending_tables: number;
   pending_columns: number;
+  pending_relationships: number;
   status: 'pending_review' | 'approved';
 }
 
@@ -1115,14 +1263,34 @@ export async function updateColumnReviewApi(
   });
 }
 
-/** Approve the review queue (or only `tableNames`) into the Metadata Store. */
+/** Save a reviewer's inline edit of a relationship; the row stays pending until approved. */
+export async function updateRelationshipReviewApi(
+  dbId: string,
+  relationshipId: number,
+  businessName: string,
+  description: string,
+): Promise<SchemaReviewRelationship> {
+  return semanticRequest<SchemaReviewRelationship>(
+    `/api/v1/semantic/${dbId}/relationship/${relationshipId}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ business_name: businessName, description }),
+    },
+  );
+}
+
+/** Approve the review queue (or only `tableNames` / `relationshipIds`) into the Metadata Store. */
 export async function approveSchemaReviewApi(
   dbId: string,
   tableNames?: string[],
+  relationshipIds?: number[],
 ): Promise<SchemaApproveResult> {
   return semanticRequest<SchemaApproveResult>(`/api/v1/semantic/${dbId}/schema/approve`, {
     method: 'POST',
-    body: JSON.stringify({ table_names: tableNames ?? null }),
+    body: JSON.stringify({
+      table_names: tableNames ?? null,
+      relationship_ids: relationshipIds ?? null,
+    }),
   });
 }
 
@@ -1587,6 +1755,23 @@ export async function getMetricFilterColumnsApi(
     `/api/v1/semantic/${dbId}/metric/${metricId}/filter-columns`,
   );
 }
+
+/**
+ * Fetch governed, safe join-path options for every entity reachable from a base
+ * entity. Only technically-valid, human-approved relationships are traversed, so
+ * the result is exactly the set of paths a metric may persist as a preferred
+ * path. Requires the `can_submit_metric` permission (Data Lead + Member; Admin
+ * forbidden), matching the governed metric-creation contract.
+ */
+export async function getMetricJoinPathOptionsApi(
+  dbId: number | string,
+  baseEntityId: number,
+): Promise<MetricJoinPathOptions> {
+  return semanticRequest<MetricJoinPathOptions>(
+    `/api/v1/semantic/${dbId}/metric/join-path-options?base_entity_id=${baseEntityId}`,
+  );
+}
+
 
 // ---------------------------------------------------------------------------
 // Schema Sync & Self-Healing Types & APIs

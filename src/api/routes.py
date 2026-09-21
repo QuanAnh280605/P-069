@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import re
+import uuid
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
@@ -28,6 +30,7 @@ from src.models.db import (
     UserModel,
 )
 from src.models.metric_definition import MetricDefinition
+from src.models.review_mixin import REVIEW_STATUS_APPROVED
 from src.models.schema_metadata import DiagnosticCode, RawSchemaMetadata, SchemaDialect
 from src.models.schemas import (
     ApproveRequest,
@@ -41,12 +44,14 @@ from src.models.schemas import (
     ChatSessionDetailResponse,
     ChatSessionSummaryResponse,
     ChatSessionUpdateRequest,
+    ClarificationResolution,
     CustomMetricGenerateRequest,
     CustomMetricGenerateResponse,
     GenerateRequest,
     ImportedSchemaCreateRequest,
     ImportedSchemaResponse,
     ImportedSchemaSummaryResponse,
+    JoinPathOption,
     LiveDbConnectRequest,
     LiveDbResponse,
     LiveDbSummaryResponse,
@@ -72,7 +77,6 @@ from src.models.schemas import (
     SemanticColumnUpdate,
     SemanticGenerateV2Response,
     SemanticQueryCompileResponse,
-    SemanticQueryInterpretation,
     SemanticQueryRequest,
     SemanticQueryResponse,
     SemanticQuerySpec,
@@ -81,6 +85,7 @@ from src.models.schemas import (
 )
 from src.services.chat_service import (
     ChatAuthorizationError,
+    ClarificationAlreadyResolvedError,
     auto_generate_session_title,
     create_chat_session,
     delete_chat_session,
@@ -92,6 +97,7 @@ from src.services.chat_service import (
     get_chat_session_with_messages,
     get_recent_chat_history,
     list_chat_sessions,
+    resolve_clarification_message,
     save_chat_message,
     update_chat_session_title,
 )
@@ -104,13 +110,18 @@ from src.services.imported_schema_service import (
     get_imported_schema,
     list_imported_schemas,
 )
+from src.services.join_path_service import join_path_options
 from src.services.live_db_service import (
     create_live_target_db,
     delete_live_target_db,
     get_live_target_db,
     list_live_target_dbs,
 )
-from src.services.metric_context import MetricContextResult, build_data_context, build_metric_context
+from src.services.metric_context import (
+    MetricContextResult,
+    build_data_context,
+    fast_metric_context,
+)
 from src.services.metric_dedupe import load_existing_for_dedupe
 from src.services.metric_request_service import (
     MetricRequestError,
@@ -123,12 +134,17 @@ from src.services.metric_request_service import (
     reject_metric_request,
 )
 from src.services.metric_rollback import rollback_metric as rollback_metric_record
+from src.services.metric_schema_selector import select_metric_schema
 from src.services.metric_versioning import latest_open_version
-from src.services.metrics import generate_metrics_from_prompt, normalize_prompt
+from src.services.metrics import (
+    MetricGenerationError,
+    MetricGenerationTimeoutError,
+    generate_metrics_from_prompt,
+    normalize_prompt,
+)
 from src.services.natural_language_query import (
     build_parser_catalog,
     execute_natural_language_query,
-    normalize_interpretation,
 )
 from src.services.notification_stream import notification_event_stream
 from src.services.organization_service import (
@@ -148,6 +164,10 @@ from src.services.schema_review_service import (
 )
 from src.services.schema_self_healing_service import execute_self_healing
 from src.services.semantic_compile_error import SemanticCompileError
+from src.services.semantic_concept_resolver import (
+    format_semantic_schema_for_prompt,
+    get_reachable_semantic_schema,
+)
 from src.services.semantic_service import (
     DuplicateMetricError,
     _coerce_metric_definition,
@@ -800,11 +820,24 @@ async def _load_approved_metric_context(db: AsyncSession, db_id: int) -> list[di
 
 
 async def _chat_can_generate_metrics(db: AsyncSession, database: SemanticDatabaseModel, user_id: int) -> bool:
-    """Resolve metric-authoring capability from Workspace membership."""
+    """Resolve metric-authoring capability from Workspace membership.
+
+    The capability is a Data Lead-only capability and is never inferred from
+    generic query/chat access. It is sourced from the explicit ``can_generate_metrics``
+    permission so the contract stays decoupled from ``can_use_metric_studio``.
+    """
     if database.org_id is None:
         return True
     membership = await get_membership(db, user_id, database.org_id)
-    return bool(membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_use_metric_studio", False))
+    return bool(membership and ROLE_PERMISSIONS.get(membership.role, {}).get("can_generate_metrics", False))
+
+
+async def _chat_role(db: AsyncSession, database: SemanticDatabaseModel, user_id: int) -> str:
+    """Resolve the active workspace role used for role-aware chat clarification."""
+    if database.org_id is None:
+        return "data_lead"
+    membership = await get_membership(db, user_id, database.org_id)
+    return membership.role if membership else "member"
 
 
 @router.post("/semantic/{db_id}/metrics/generate", response_model=CustomMetricGenerateResponse)
@@ -829,17 +862,16 @@ async def generate_custom_metrics(
     except ValueError as error:
         raise HTTPException(status_code=404, detail=f"Database with id {db_id} not found") from error
     await _require_resource_permission(db, current_user.id, numeric_db_id, org_id, "can_submit_metric")
-    context = await build_metric_context(
-        db, numeric_db_id, clean_prompt, get_settings().metric_context_token_budget, body.target_tables
-    )
-    if context.diagnostic["status"] != "ready":
-        raise HTTPException(status_code=422, detail=context.diagnostic["message"])
+    context = await fast_metric_context(db, numeric_db_id)
+    schema = select_metric_schema(context.schema, clean_prompt, body.target_tables)
+    if not schema.get("tables"):
+        raise HTTPException(status_code=422, detail="Bảng được chọn không tồn tại trong schema.")
 
     try:
         existing, dedupe_performed = await load_existing_for_dedupe(db, db_id)
         suggestions, duplicates = await generate_metrics_from_prompt(
             prompt=clean_prompt,
-            schema_context=context.schema,
+            schema_context=schema,
             target_tables=body.target_tables,
             existing_metrics=existing or None,
         )
@@ -848,12 +880,21 @@ async def generate_custom_metrics(
             duplicates=duplicates,
             dedupe_performed=dedupe_performed,
         )
+    except MetricGenerationError as exc:
+        raise _metric_generation_http_error(exc) from exc
     except Exception as exc:
         logger.error(f"Lỗi khi sinh metrics từ prompt: {exc}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Không thể sinh metrics từ AI Service: {exc}",
         ) from exc
+
+
+def _metric_generation_http_error(error: MetricGenerationError) -> HTTPException:
+    """Map bounded Metric LLM failures to stable upstream HTTP semantics."""
+    if isinstance(error, MetricGenerationTimeoutError):
+        return HTTPException(status_code=504, detail="AI phản hồi quá 45 giây. Vui lòng thử lại.")
+    return HTTPException(status_code=502, detail="AI trả về Metric Definition không hợp lệ.")
 
 
 @router.post("/semantic/{db_id}/metric", response_model=MetricResponse, status_code=201)
@@ -1169,15 +1210,27 @@ def _catalog_relationship(rel: CanonicalRelationshipModel) -> CanonicalRelations
         to_entity_id=rel.to_entity_id,
         relationship_type=rel.relationship_type,
         join_condition=rel.join_condition,
+        business_name=rel.business_name,
+        description=rel.description,
+        validation_status=rel.validation_status,
+        review_status=rel.review_status,
         created_at=rel.created_at,
     )
 
 
 async def _catalog_relationships(db: AsyncSession, db_id: int) -> list[CanonicalRelationshipResponse]:
-    """Load canonical relationships for a semantic database."""
+    """Load only valid, human-approved canonical relationships for a semantic database.
+
+    Flow 2 consumers must never receive pending or technically invalid
+    relationships, so the query filters on both governance signals.
+    """
     stmt = (
         select(CanonicalRelationshipModel)
-        .where(CanonicalRelationshipModel.connection_id == db_id)
+        .where(
+            CanonicalRelationshipModel.connection_id == db_id,
+            CanonicalRelationshipModel.review_status == REVIEW_STATUS_APPROVED,
+            CanonicalRelationshipModel.validation_status == "valid",
+        )
         .order_by(CanonicalRelationshipModel.id)
     )
     records = (await db.execute(stmt)).scalars().all()
@@ -1299,6 +1352,29 @@ async def get_metric_filter_columns(
         base_table=base_table_name,
         columns=cols,
     )
+
+
+@router.get(
+    "/semantic/{db_id}/metric/join-path-options",
+    response_model=dict[str, list[JoinPathOption]],
+)
+async def get_metric_join_path_options(
+    db_id: int,
+    base_entity_id: int = Query(..., description="Base entity id to enumerate join paths from"),
+    org_id: int | None = Header(default=None, alias="X-Organization-ID"),
+    db: AsyncSession = Depends(get_db_session),
+    current_user: UserModel = Depends(get_current_user),
+) -> dict[str, list[JoinPathOption]]:
+    """List governed, safe join-path options for every entity reachable from a base.
+
+    Only relationships that are technically valid and human-approved are traversed,
+    so the options are exactly the paths a metric may persist as a preferred path.
+    """
+    await _require_resource_permission(db, current_user.id, db_id, org_id, "can_submit_metric")
+    stmt_rels = select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.connection_id == db_id)
+    relationships = (await db.execute(stmt_rels)).scalars().all()
+    options = join_path_options(list(relationships), base_entity_id)
+    return {str(target_id): [JoinPathOption(**option) for option in opts] for target_id, opts in options.items()}
 
 
 async def _metric_update_response(db: AsyncSession, metric: SemanticMetricModel) -> MetricUpdateResponse:
@@ -1850,10 +1926,24 @@ async def chat_orchestrator(
                 org_id,
             )
         return await _process_standard_chat(
-            db, session, current_user, numeric_db_id, body, can_generate_metrics, org_id
+            db, session, current_user, numeric_db_id, body, can_generate_metrics, org_id, chat_database
         )
     except ChatAuthorizationError as exc:
         raise HTTPException(status_code=404, detail="Chat session or database not found") from exc
+    except ClarificationAlreadyResolvedError as exc:
+        raise HTTPException(status_code=409, detail="clarification_already_resolved") from exc
+
+
+def _resolution_payload(clar_meta: dict) -> ClarificationResolution:
+    """Build the canonical resolution object returned to the frontend."""
+    if clar_meta.get("resolution_kind") == "skip":
+        return ClarificationResolution(status="skipped")
+    return ClarificationResolution(
+        status="answered",
+        selected_option_id=clar_meta.get("selected_option_id"),
+        selected_label=clar_meta.get("selected_label"),
+        custom_answer=clar_meta.get("custom_answer"),
+    )
 
 
 async def _handle_clarification_selection(
@@ -1861,72 +1951,266 @@ async def _handle_clarification_selection(
     session: ChatSessionModel,
     current_user: UserModel,
     numeric_db_id: int,
-    selection: ChatClarificationSelection,
+    resolution: ChatClarificationSelection,
     body: ChatRequest,
     can_generate_metrics: bool,
     org_id: int | None = None,
 ) -> ChatResponse:
-    """Execute a pre-validated clarification option without re-invoking the LLM."""
-    prev_msg = await get_chat_message(db, session.id, selection.assistant_message_id)
+    """Route a clarification resolution to the skip/custom/option handlers."""
+    prev_msg = await get_chat_message(db, session.id, resolution.assistant_message_id)
     if not prev_msg or not isinstance(prev_msg.metadata_json, dict):
         raise HTTPException(status_code=400, detail="Clarification message not found")
     clar_meta = prev_msg.metadata_json.get("clarification") or {}
     options = clar_meta.get("options", [])
-    matched_option = next((opt for opt in options if opt.get("id") == selection.option_id), None)
+    prompt = clar_meta.get("prompt", "")
+    if resolution.skipped:
+        return await _resolve_skip_clarification(db, session, current_user, prev_msg, resolution)
+    if resolution.custom_answer:
+        return await _resolve_custom_clarification(
+            db, session, current_user, numeric_db_id, prev_msg, resolution, prompt, body, can_generate_metrics, org_id
+        )
+    return await _resolve_option_clarification(
+        db,
+        session,
+        current_user,
+        numeric_db_id,
+        prev_msg,
+        resolution,
+        options,
+        prompt,
+        body,
+        can_generate_metrics,
+        org_id,
+    )
+
+
+async def _resolve_skip_clarification(
+    db: AsyncSession,
+    session: ChatSessionModel,
+    current_user: UserModel,
+    prev_msg: ChatMessageModel,
+    resolution: ChatClarificationSelection,
+) -> ChatResponse:
+    """Persist a skip resolution and return without a user bubble or continuation."""
+    resolved = await resolve_clarification_message(
+        db, session.id, current_user.id, prev_msg.id, resolution, "Đã bỏ qua"
+    )
+    refreshed = await get_chat_session_with_messages(db, session.id, current_user.id)
+    return ChatResponse(
+        intent="clarification_skipped",
+        chat_response="Đã bỏ qua",
+        session_id=session.id,
+        assistant_message_id=prev_msg.id,
+        clarification_resolution=_resolution_payload(resolved.metadata_json["clarification"]),
+        session=_session_summary(refreshed),
+    )
+
+
+async def _resolve_custom_clarification(
+    db: AsyncSession,
+    session: ChatSessionModel,
+    current_user: UserModel,
+    numeric_db_id: int,
+    prev_msg: ChatMessageModel,
+    resolution: ChatClarificationSelection,
+    prompt: str,
+    body: ChatRequest,
+    can_generate_metrics: bool,
+    org_id: int | None = None,
+) -> ChatResponse:
+    """Persist a custom answer as exactly one user bubble, then continue analysis."""
+    custom_text = resolution.custom_answer.strip()
+    client_id = body.client_message_id or f"clarify-custom-{uuid.uuid4()}"
+    resolved = await resolve_clarification_message(
+        db, session.id, current_user.id, prev_msg.id, resolution, custom_text
+    )
+    user_msg = await save_chat_message(
+        db,
+        session.id,
+        "user",
+        custom_text,
+        client_message_id=client_id,
+        metadata_json={"clarification_response_to": prev_msg.id},
+    )
+    analysis_message = f"{prompt}\n{custom_text}" if prompt else custom_text
+    body_copy = body.model_copy(
+        update={"message": analysis_message, "clarification_selection": None, "client_message_id": client_id}
+    )
+    response = await _process_standard_chat(
+        db, session, current_user, numeric_db_id, body_copy, can_generate_metrics, org_id, save_user_msg=False
+    )
+    response.user_message_id = user_msg.id
+    response.clarification_resolution = _resolution_payload(resolved.metadata_json["clarification"])
+    return response
+
+
+async def _resolve_option_clarification(
+    db: AsyncSession,
+    session: ChatSessionModel,
+    current_user: UserModel,
+    numeric_db_id: int,
+    prev_msg: ChatMessageModel,
+    resolution: ChatClarificationSelection,
+    options: list[dict],
+    prompt: str,
+    body: ChatRequest,
+    can_generate_metrics: bool,
+    org_id: int | None = None,
+) -> ChatResponse:
+    """Resolve an option in place; no user bubble, resolution metadata is sufficient."""
+    matched_option = next((opt for opt in options if opt.get("id") == resolution.option_id), None)
     if not matched_option:
         raise HTTPException(status_code=400, detail="Invalid clarification option")
+    selected_label = matched_option.get("label", "")
+    resolution_payload = None
+    try:
+        resolved = await resolve_clarification_message(
+            db, session.id, current_user.id, prev_msg.id, resolution, selected_label
+        )
+        resolution_payload = _resolution_payload(resolved.metadata_json["clarification"])
+    except ChatAuthorizationError:
+        pass
 
-    spec_dict = matched_option.get("spec")
-    if isinstance(spec_dict, dict) and spec_dict.get("metric_ids"):
-        catalog = await build_parser_catalog(db, numeric_db_id)
-        valid_ids = {m["id"] for m in catalog.get("metrics", [])}
-        if set(spec_dict["metric_ids"]).issubset(valid_ids):
-            _, live_db = await _query_target(db, numeric_db_id, current_user.id, org_id)
-            try:
-                spec = SemanticQuerySpec(**spec_dict)
-            except ValidationError as exc:
-                logger.warning("Invalid clarification option spec: %s", exc)
-                return await _invalid_clarification_option_response(
-                    db, session, current_user, body, can_generate_metrics, org_id
-                )
-            try:
-                query_result = await execute_natural_language_query(db, numeric_db_id, live_db, spec, catalog)
-            except SemanticCompileError as exc:
-                logger.warning("Semantic compile error for clarification option: %s (%s)", exc.message, exc.code)
-                return await _invalid_clarification_option_response(
-                    db, session, current_user, body, can_generate_metrics, org_id
-                )
+    opt_dims: list[str] = []
+    if isinstance(matched_option.get("spec"), dict):
+        raw_dims = matched_option.get("spec", {}).get("dimensions", [])
+        if isinstance(raw_dims, list):
+            opt_dims = [str(d) for d in raw_dims if d]
+    elif isinstance(matched_option.get("dimensions"), list):
+        opt_dims = [str(d) for d in matched_option["dimensions"] if d]
+    if not opt_dims and "gắn chiều" in selected_label.lower():
+        part = selected_label.lower().split("gắn chiều")[-1]
+        opt_dims = [d.strip() for d in re.split(r"[,&và]", part) if d.strip()]
+    clar_meta = prev_msg.metadata_json.get("clarification") if isinstance(prev_msg.metadata_json, dict) else {}
+    target_metric_name = clar_meta.get("target_metric_name") if isinstance(clar_meta, dict) else None
+    if not target_metric_name and prompt:
+        match = re.search(r"tạo chỉ số ['\"‘“](.*?)['\"’”]", prompt, re.IGNORECASE)
+        if match:
+            target_metric_name = match.group(1).strip()
 
-            user_msg = await save_chat_message(
-                db, session.id, "user", body.message, client_message_id=body.client_message_id
-            )
-            resp_text = query_result.explanation
-            assistant = await save_chat_message(
-                db,
-                session.id,
-                "assistant",
-                resp_text,
-                intent="semantic_query",
-                metadata_json=_assistant_metadata(semantic_query_result=query_result.model_dump(mode="json")),
-                client_message_id=f"{body.client_message_id}:assistant" if body.client_message_id else None,
-            )
-            refreshed = await get_chat_session_with_messages(db, session.id, current_user.id)
-            display_res = query_result if can_generate_metrics else query_result.model_copy(update={"sql": None})
-            return ChatResponse(
-                intent="semantic_query",
-                chat_response=resp_text,
-                semantic_query_result=display_res,
-                session_id=session.id,
-                user_message_id=user_msg.id,
-                assistant_message_id=assistant.id,
-                session=_session_summary(refreshed),
-            )
+    dims_suffix = f" với các chiều phân tích: {', '.join(opt_dims)}" if opt_dims else ""
+    if target_metric_name:
+        analysis_message = (
+            f"Tạo chỉ số '{target_metric_name}' theo tiêu chí đã chọn: {selected_label}. "
+            f"Chi tiết logic: {matched_option.get('description', '')}{dims_suffix}"
+        )
+    else:
+        analysis_message = (
+            f"Tạo metric dựa trên lựa chọn đã làm rõ: {selected_label}. "
+            f"Chi tiết: {matched_option.get('description', '')}{dims_suffix}"
+        )
+    body_copy = body.model_copy(
+        update={"message": analysis_message, "clarification_selection": None, "client_message_id": None}
+    )
+    response = await _process_standard_chat(
+        db,
+        session,
+        current_user,
+        numeric_db_id,
+        body_copy,
+        can_generate_metrics,
+        org_id,
+        save_user_msg=False,
+        clarified_dimensions=opt_dims,
+        forced_intent="metric_query",
+        is_clarified=True,
+    )
+    response.user_message_id = None
+    response.clarification_resolution = resolution_payload
+    return response
 
-    # When the option is to create/suggest a metric or is otherwise not a valid semantic
-    # execution spec, delegate to the standard chat flow.
-    body_copy = body.model_copy(update={"clarification_selection": None})
-    return await _process_standard_chat(
-        db, session, current_user, numeric_db_id, body_copy, can_generate_metrics, org_id
+
+async def _try_execute_clarification_spec(
+    db: AsyncSession,
+    session: ChatSessionModel,
+    current_user: UserModel,
+    numeric_db_id: int,
+    prev_msg: ChatMessageModel,
+    body: ChatRequest,
+    spec_dict: dict,
+    can_generate_metrics: bool,
+    org_id: int | None = None,
+) -> ChatResponse | None:
+    """Execute a pre-validated clarification option spec, or None to delegate."""
+    catalog = await _load_clarification_catalog(db, numeric_db_id, spec_dict)
+    if catalog is None:
+        return None
+    _, live_db = await _query_target(db, numeric_db_id, current_user.id, org_id)
+    outcome = await _compile_clarification_spec(
+        db, session, current_user, numeric_db_id, org_id, live_db, catalog, spec_dict, body, can_generate_metrics
+    )
+    if isinstance(outcome, ChatResponse):
+        return outcome
+    return await _persist_clarification_spec_response(db, session, current_user, body, outcome, can_generate_metrics)
+
+
+async def _load_clarification_catalog(db: AsyncSession, numeric_db_id: int, spec_dict: dict) -> dict | None:
+    """Return the parser catalog if every spec metric id is approved, else None."""
+    catalog = await build_parser_catalog(db, numeric_db_id)
+    valid_ids = {m["id"] for m in catalog.get("metrics", [])}
+    if not set(spec_dict["metric_ids"]).issubset(valid_ids):
+        return None
+    return catalog
+
+
+async def _compile_clarification_spec(
+    db: AsyncSession,
+    session: ChatSessionModel,
+    current_user: UserModel,
+    numeric_db_id: int,
+    org_id: int | None,
+    live_db: LiveTargetDbModel,
+    catalog: dict,
+    spec_dict: dict,
+    body: ChatRequest,
+    can_generate_metrics: bool,
+) -> ChatResponse | ChatSemanticQueryResult:
+    """Compile and run the clarification spec; return invalid ChatResponse on failure."""
+    try:
+        spec = SemanticQuerySpec(**spec_dict)
+    except ValidationError as exc:
+        logger.warning("Invalid clarification option spec: %s", exc)
+        return await _invalid_clarification_option_response(
+            db, session, current_user, body, can_generate_metrics, org_id
+        )
+    try:
+        return await execute_natural_language_query(db, numeric_db_id, live_db, spec, catalog)
+    except SemanticCompileError as exc:
+        msg = getattr(exc, "message", str(exc))
+        logger.warning("Semantic compile error for clarification option: %s (%s)", msg, exc.code)
+        return await _invalid_clarification_option_response(
+            db, session, current_user, body, can_generate_metrics, org_id
+        )
+
+
+async def _persist_clarification_spec_response(
+    db: AsyncSession,
+    session: ChatSessionModel,
+    current_user: UserModel,
+    body: ChatRequest,
+    query_result: ChatSemanticQueryResult,
+    can_generate_metrics: bool,
+) -> ChatResponse:
+    """Persist the executed clarification spec as an assistant message and respond."""
+    assistant = await save_chat_message(
+        db,
+        session.id,
+        "assistant",
+        query_result.explanation,
+        intent="semantic_query",
+        metadata_json=_assistant_metadata(semantic_query_result=query_result.model_dump(mode="json")),
+        client_message_id=f"{body.client_message_id}:assistant" if body.client_message_id else None,
+    )
+    refreshed = await get_chat_session_with_messages(db, session.id, current_user.id)
+    display_res = query_result if can_generate_metrics else query_result.model_copy(update={"sql": None})
+    return ChatResponse(
+        intent="semantic_query",
+        chat_response=query_result.explanation,
+        semantic_query_result=display_res,
+        session_id=session.id,
+        user_message_id=None,
+        assistant_message_id=assistant.id,
+        session=_session_summary(refreshed),
     )
 
 
@@ -1974,31 +2258,59 @@ async def _process_standard_chat(
     body: ChatRequest,
     can_generate_metrics: bool,
     org_id: int | None = None,
+    chat_database: SemanticDatabaseModel | None = None,
+    save_user_msg: bool = True,
+    clarified_dimensions: list[str] | None = None,
+    forced_intent: str | None = None,
+    is_clarified: bool = False,
 ) -> ChatResponse:
     """Process a standard chat query through the graph and execution layer."""
+
     from src.agents.chat_graph import chat_agent
     from src.agents.nodes.orchestrator_node import orchestrator_node
 
     history = await get_recent_chat_history(db, session.id)
-    user_message = await save_chat_message(
-        db, session.id, "user", body.message, client_message_id=body.client_message_id
-    )
-    if session.title == "Cuộc trò chuyện mới":
-        await update_chat_session_title(db, session.id, current_user.id, auto_generate_session_title(body.message))
+    user_message = None
+    if save_user_msg:
+        user_message = await save_chat_message(
+            db, session.id, "user", body.message, client_message_id=body.client_message_id
+        )
+        if session.title == "Cuộc trò chuyện mới":
+            await update_chat_session_title(db, session.id, current_user.id, auto_generate_session_title(body.message))
     approved_metrics = await _load_approved_metric_context(db, numeric_db_id)
-    classification = await orchestrator_node({"user_message": body.message, "chat_history": history})
-    preclassified_intent = classification.get("intent", "data_question")
-    preclassified_chat_response = classification.get("chat_response")
+
+    if forced_intent:
+        preclassified_intent = forced_intent
+        preclassified_chat_response = None
+    else:
+        classification = await orchestrator_node({"user_message": body.message, "chat_history": history})
+        preclassified_intent = classification.get("intent", "semantic_query")
+        preclassified_chat_response = classification.get("chat_response")
 
     parser_catalog: dict[str, Any] = {}
-    if preclassified_intent == "semantic_query":
-        await _query_target(db, numeric_db_id, current_user.id, org_id)
+    if preclassified_intent in {"semantic_query", "metric_query"}:
+        try:
+            await _query_target(db, numeric_db_id, current_user.id, org_id)
+        except Exception as err:
+            logger.debug("Live DB query target check skipped: %s", err)
         parser_catalog = await build_parser_catalog(db, numeric_db_id)
+
+    grounded_candidate_dims: list[dict[str, Any]] = []
+    semantic_schema_text = ""
+    if numeric_db_id and parser_catalog:
+        grounded_candidate_dims, semantic_schema_text = await _discover_candidate_dimensions_for_query(
+            db, numeric_db_id, parser_catalog, body.message
+        )
 
     context = await _build_chat_context(
         db, numeric_db_id, body.message, preclassified_intent, get_settings().metric_context_token_budget, history
     )
     existing_metrics, dedupe_performed = await load_existing_for_dedupe(db, str(numeric_db_id))
+    role = (
+        await _chat_role(db, chat_database, current_user.id)
+        if chat_database is not None
+        else ("data_lead" if can_generate_metrics else "member")
+    )
     final_state = await _chat_state_for_context(
         chat_agent,
         context,
@@ -2012,6 +2324,11 @@ async def _process_standard_chat(
         dedupe_performed,
         parser_catalog,
         chat_response=preclassified_chat_response,
+        role=role,
+        grounded_candidate_dimensions=grounded_candidate_dims,
+        semantic_schema_text=semantic_schema_text,
+        clarified_dimensions=clarified_dimensions,
+        is_clarified=is_clarified or bool(clarified_dimensions),
     )
     return await _build_and_save_chat_response(
         db,
@@ -2052,15 +2369,24 @@ async def _build_and_save_chat_response(
     performed = final_state.get("dedupe_performed", dedupe_performed)
 
     query_res, clar_payload = None, None
-    if intent == "semantic_query":
+    if final_state.get("clarification") or (
+        (intent == "semantic_query" or final_state.get("interpretation"))
+        and not (intent == "metric_query" and raw_metrics)
+    ):
         query_res, clar_payload, response_text = await _execute_or_clarify_semantic_query(
             db, numeric_db_id, current_user.id, org_id, final_state, parser_catalog
         )
+        if clar_payload is not None or query_res is not None:
+            intent = "semantic_query"
     elif intent == "metric_query":
         response_text = (
-            f"Đã đề xuất {len(raw_metrics)} Metric Definition."
-            if raw_metrics
-            else "Không sinh được metric phù hợp với schema."
+            response_text
+            if (response_text and ("đề xuất" in response_text.lower() or "chỉ số" in response_text.lower()))
+            else (
+                f"Đã đề xuất {len(raw_metrics)} Metric Definition."
+                if raw_metrics
+                else (response_text or "Không sinh được metric phù hợp với schema.")
+            )
         )
 
     assistant = await save_chat_message(
@@ -2099,7 +2425,7 @@ async def _build_and_save_chat_response(
         semantic_query_result=display_res,
         clarification=clar_payload,
         session_id=session.id,
-        user_message_id=user_message.id,
+        user_message_id=user_message.id if user_message is not None else None,
         assistant_message_id=assistant.id,
         session=_session_summary(refreshed),
     )
@@ -2113,27 +2439,61 @@ async def _execute_or_clarify_semantic_query(
     final_state: dict[str, Any],
     parser_catalog: dict[str, Any],
 ) -> tuple[ChatSemanticQueryResult | None, ChatClarificationPayload | None, str]:
-    """Execute normalized semantic query on Live DB or prepare clarification payload."""
+    """Prepare clarification payload or provide guidance without direct DB execution in chat."""
+    clar = ChatClarificationPayload(**final_state["clarification"]) if final_state.get("clarification") else None
+    if clar is not None:
+        return None, clar, clar.prompt
+
     interp_raw = final_state.get("interpretation") or {}
-    interp = normalize_interpretation(SemanticQueryInterpretation(**interp_raw), parser_catalog)
-    if interp.status == "resolved" and interp.spec:
-        _, live_db = await _query_target(db, numeric_db_id, user_id, org_id)
-        try:
-            query_result = await execute_natural_language_query(
-                db, numeric_db_id, live_db, interp.spec, parser_catalog, interp.time_ranges
-            )
-            return query_result, None, query_result.explanation
-        except SemanticCompileError as exc:
-            logger.warning("Semantic query compile error: %s (%s)", exc.message, exc.code)
-            return None, None, f"Không thể biên dịch câu hỏi này: {exc.message}."
-        except Exception as exc:
-            logger.error("Failed to execute semantic query: %s", exc, exc_info=True)
-            return None, None, f"Không thể thực thi truy vấn trên cơ sở dữ liệu: {exc}"
-    clar = interp.clarification or (
-        ChatClarificationPayload(**final_state["clarification"]) if final_state.get("clarification") else None
+    if interp_raw.get("clarification"):
+        clar = ChatClarificationPayload(**interp_raw["clarification"])
+        return None, clar, clar.prompt
+
+    prompt = (
+        final_state.get("chat_response")
+        or "Hệ thống hỗ trợ tra cứu và phân tích số liệu trực tiếp tại tab **Metric Explorer**. "
+        "Tại chat, tôi hỗ trợ giải thích cấu trúc dữ liệu và tạo mới các chỉ số (Business Metric)."
     )
-    prompt = clar.prompt if clar else (final_state.get("chat_response") or "Vui lòng làm rõ câu hỏi số liệu.")
-    return None, clar, prompt
+    return None, None, prompt
+
+
+async def _discover_candidate_dimensions_for_query(
+    db: AsyncSession,
+    numeric_db_id: int,
+    parser_catalog: dict[str, Any],
+    message: str,
+) -> tuple[list[dict[str, Any]], str]:
+    """Discover reachable multi-hop tables and dimensions without rule-based taxonomies."""
+    metrics = parser_catalog.get("metrics") or []
+    base_entities = [m.get("base_entity") for m in metrics if m.get("base_entity")]
+    base_ids: list[int] = []
+    if base_entities:
+        stmt = select(SemanticTableModel.id).where(
+            SemanticTableModel.db_id == numeric_db_id,
+            SemanticTableModel.table_name.in_(base_entities),
+        )
+        base_ids = list((await db.execute(stmt)).scalars().all())
+
+    schema_items = await get_reachable_semantic_schema(db, numeric_db_id, base_ids)
+    schema_text = format_semantic_schema_for_prompt(schema_items)
+
+    candidates = []
+    for item in schema_items:
+        for d in item["dimensions"]:
+            label = f"{d['business_name']} (bảng {item['table_business_name']})"
+            candidates.append(
+                {
+                    "column_id": d["column_id"],
+                    "column_name": d["column_name"],
+                    "business_name": d["business_name"],
+                    "table_name": item["table_name"],
+                    "table_business_name": item["table_business_name"],
+                    "sample_values": d.get("sample_values", []),
+                    "hop_count": item["hops"],
+                    "label": label,
+                }
+            )
+    return candidates, schema_text
 
 
 async def _chat_state_for_context(
@@ -2149,10 +2509,15 @@ async def _chat_state_for_context(
     dedupe_performed: bool,
     parser_catalog: dict[str, Any] | None = None,
     chat_response: str | None = None,
+    role: str = "",
+    grounded_candidate_dimensions: list[dict[str, Any]] | None = None,
+    semantic_schema_text: str = "",
+    clarified_dimensions: list[str] | None = None,
+    is_clarified: bool = False,
 ) -> dict[str, Any]:
     """Run the graph only after consented context preparation succeeds."""
-    if context.diagnostic["status"] != "ready":
-        return {"intent": "data_question", "chat_response": context.diagnostic["message"]}
+    if context.diagnostic.get("status") != "ready" and intent not in {"semantic_query", "metric_query"}:
+        return {"intent": "data_question", "chat_response": context.diagnostic.get("message", "")}
     return await chat_agent.ainvoke(
         {
             "session_id": session_id,
@@ -2161,12 +2526,17 @@ async def _chat_state_for_context(
             "enriched_schema": context.schema,
             "approved_metrics": approved_metrics,
             "can_generate_metrics": can_generate_metrics,
+            "role": role,
             "context_diagnostic": context.diagnostic,
             "intent": intent,
             "existing_metrics": existing_metrics or [],
             "dedupe_performed": dedupe_performed,
             "parser_catalog": parser_catalog or {},
             "chat_response": chat_response,
+            "grounded_candidate_dimensions": grounded_candidate_dimensions or [],
+            "semantic_schema_text": semantic_schema_text,
+            "clarified_dimensions": clarified_dimensions or [],
+            "is_clarified": is_clarified,
         }
     )
 
@@ -2185,8 +2555,8 @@ async def _build_chat_context(
         prior_user_msgs = [m.get("content", "") for m in history if m.get("role") == "user" and m.get("content")]
         if prior_user_msgs:
             query = f"{prior_user_msgs[-1]}\nYêu cầu tiếp theo: {message}"
-    if intent == "metric_query":
-        return await build_metric_context(db, db_id, query, token_budget)
+    if intent in {"metric_query", "semantic_query"}:
+        return await fast_metric_context(db, db_id)
     if intent == "data_question":
         return await build_data_context(db, db_id, query, token_budget)
     return MetricContextResult(schema={}, diagnostic={"status": "ready", "tables": [], "relationship_count": 0})

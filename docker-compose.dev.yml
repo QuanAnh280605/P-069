@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    container_name: p-069-postgres
     ports:
       - "127.0.0.1:5432:5432"
     environment:
@@ -20,6 +21,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
+    container_name: p-069-backend
     ports:
       - "8000:8000" # API
       - "5678:5678" # debugpy (Python remote debug)

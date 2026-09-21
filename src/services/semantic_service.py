@@ -473,7 +473,60 @@ async def _upsert_relationship(
         existing.validation_status = "valid"
         return
 
-    record = CanonicalRelationshipModel(
+    await _insert_new_relationship(
+        db,
+        connection_id=connection_id,
+        from_entity_id=from_entity_id,
+        to_entity_id=to_entity_id,
+        join_condition=join_condition,
+        relationship_key=relationship_key,
+        constraint_name=constraint_name,
+        column_pairs=column_pairs,
+    )
+
+
+async def _insert_new_relationship(
+    db: AsyncSession,
+    *,
+    connection_id: int,
+    from_entity_id: int,
+    to_entity_id: int,
+    join_condition: str,
+    relationship_key: str,
+    constraint_name: str | None,
+    column_pairs: list[dict[str, int]],
+) -> None:
+    """Derive a suggestion and persist a new pending canonical relationship."""
+    business_name, description = await _derive_relationship_suggestion(db, from_entity_id, to_entity_id, column_pairs)
+    db.add(
+        _build_new_relationship_record(
+            connection_id=connection_id,
+            from_entity_id=from_entity_id,
+            to_entity_id=to_entity_id,
+            join_condition=join_condition,
+            relationship_key=relationship_key,
+            constraint_name=constraint_name,
+            column_pairs=column_pairs,
+            business_name=business_name,
+            description=description,
+        )
+    )
+
+
+def _build_new_relationship_record(
+    *,
+    connection_id: int,
+    from_entity_id: int,
+    to_entity_id: int,
+    join_condition: str,
+    relationship_key: str,
+    constraint_name: str | None,
+    column_pairs: list[dict[str, int]],
+    business_name: str,
+    description: str,
+) -> CanonicalRelationshipModel:
+    """Construct a new pending canonical relationship with governance fields."""
+    return CanonicalRelationshipModel(
         connection_id=connection_id,
         from_entity_id=from_entity_id,
         to_entity_id=to_entity_id,
@@ -483,8 +536,45 @@ async def _upsert_relationship(
         constraint_name=constraint_name,
         column_pairs=column_pairs,
         validation_status="valid",
+        business_name=business_name,
+        description=description,
+        ai_business_name=business_name,
+        ai_description=description,
+        review_status=REVIEW_STATUS_PENDING,
     )
-    db.add(record)
+
+
+async def _derive_relationship_suggestion(
+    db: AsyncSession,
+    from_entity_id: int,
+    to_entity_id: int,
+    column_pairs: list[dict[str, int]],
+) -> tuple[str, str]:
+    """Derive an initial Vietnamese-readable business label for a relationship.
+
+    Uses the endpoint tables' and FK columns' business names where available,
+    falling back to physical names. Deterministic; no extra LLM call.
+    """
+    from_table = await db.get(SemanticTableModel, from_entity_id)
+    to_table = await db.get(SemanticTableModel, to_entity_id)
+    from_name = (from_table.business_name or from_table.table_name) if from_table else f"#{from_entity_id}"
+    to_name = (to_table.business_name or to_table.table_name) if to_table else f"#{to_entity_id}"
+
+    col_labels: list[str] = []
+    for pair in column_pairs or []:
+        from_col = await db.get(SemanticColumnModel, pair.get("from_column_id"))  # type: ignore[arg-type]
+        to_col = await db.get(SemanticColumnModel, pair.get("to_column_id"))  # type: ignore[arg-type]
+        fc = (from_col.business_name or from_col.column_name) if from_col else "?"
+        tc = (to_col.business_name or to_col.column_name) if to_col else "?"
+        col_labels.append(f"{fc} = {tc}")
+
+    join_text = ", ".join(col_labels)
+    business_name = f"{from_name} → {to_name}"
+    if join_text:
+        description = f"Mỗi {from_name} liên kết với {to_name} qua {join_text}"
+    else:
+        description = f"Mỗi {from_name} liên kết với {to_name}"
+    return business_name, description
 
 
 async def _relationship_column_pairs(

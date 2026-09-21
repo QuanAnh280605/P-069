@@ -71,6 +71,37 @@ async def execute_llm_request(
     return response.content
 
 
+async def execute_llm_request_with_retry(
+    prompt: str,
+    sem: asyncio.Semaphore,
+    config: EnrichmentConfig | None = None,
+) -> Any | None:
+    """Call LLM with bounded retry/backoff/timeout; return parsed JSON or None.
+
+    Mirrors the retry/backoff/timeout semantics of ``enrich_cluster_with_retry`` but
+    without the matched-table threshold gate, so it is suitable for single-table
+    ultra-wide chunk enrichment. The network semaphore is held only around the I/O
+    call, never during the backoff sleep. Returns ``None`` after exhausting retries.
+    """
+    if config is None:
+        config = DEFAULT_CONFIG
+    for attempt in range(config.retry_max_attempts + 1):
+        try:
+            raw = await execute_llm_request(prompt, sem, config.llm_call_timeout_sec)
+            return parse_llm_json(raw)
+        except Exception as exc:
+            logger.warning(
+                "LLM chunk call failed (attempt %d/%d): %s",
+                attempt + 1,
+                config.retry_max_attempts + 1,
+                exc,
+            )
+        if attempt < config.retry_max_attempts:
+            await asyncio.sleep(config.retry_backoff_base_sec * (attempt + 1))
+    logger.warning("LLM chunk call exhausted after %d attempts", config.retry_max_attempts + 1)
+    return None
+
+
 async def enrich_cluster_with_retry(
     cluster_prompt_builder: Callable[..., str],
     cluster: list[dict],

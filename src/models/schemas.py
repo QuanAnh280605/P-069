@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator, model_validator
 
 from src.models.metric_definition import FilterOperator, MetricDefinition, MetricStatus
 from src.models.raw_schema import RawSchema
@@ -667,7 +667,11 @@ class DashboardLayoutResponse(BaseModel):
 
 
 class CanonicalRelationshipResponse(BaseModel):
-    """Response for a canonical relationship between two semantic tables."""
+    """Response for a canonical relationship between two semantic tables.
+
+    Only relationships that are both technically valid and human-approved reach
+    Flow 2 consumers; the governance fields are surfaced for transparency.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -677,6 +681,10 @@ class CanonicalRelationshipResponse(BaseModel):
     to_entity_id: int
     relationship_type: str
     join_condition: str
+    business_name: str = ""
+    description: str | None = None
+    validation_status: str = "valid"
+    review_status: str = "pending_review"
     created_at: datetime
 
 
@@ -771,6 +779,15 @@ class MetricFilterColumnsResponse(BaseModel):
     columns: list[FilterColumnItem] = Field(default_factory=list)
 
 
+class JoinPathOption(BaseModel):
+    """One safe join-path candidate for a target entity from a base entity."""
+
+    relationship_ids: list[int]
+    entity_ids: list[int]
+    labels: list[str]
+    descriptions: list[str | None]
+
+
 # ---------------------------------------------------------------------------
 # Canonical Semantic Layer — Generate, Approve, Metrics List, History
 # ---------------------------------------------------------------------------
@@ -857,15 +874,27 @@ class ChatClarificationOption(BaseModel):
     id: str
     label: str
     description: str | None = None
+    dimensions: list[str] = Field(default_factory=list)
     spec: SemanticQuerySpec | None = None
     action: str | None = None
 
 
 class ChatClarificationSelection(BaseModel):
-    """Payload sent when clicking a clarification option button."""
+    """Validated resolution for exactly one clarification card (option, custom answer, or skip)."""
 
     assistant_message_id: str = Field(..., min_length=1, max_length=100)
-    option_id: str = Field(..., min_length=1, max_length=100)
+    option_id: str | None = Field(default=None, min_length=1, max_length=100)
+    custom_answer: str | None = Field(default=None, min_length=1, max_length=2000)
+    skipped: bool = False
+
+    @model_validator(mode="after")
+    def _require_exactly_one_resolution_mode(self) -> ChatClarificationSelection:
+        if self.custom_answer is not None:
+            self.custom_answer = self.custom_answer.strip()
+        active_modes = [self.option_id is not None, bool(self.custom_answer), self.skipped]
+        if sum(active_modes) != 1:
+            raise ValueError("Exactly one of option_id, custom_answer, or skipped must be provided")
+        return self
 
 
 class ChatClarificationPayload(BaseModel):
@@ -873,6 +902,16 @@ class ChatClarificationPayload(BaseModel):
 
     prompt: str
     options: list[ChatClarificationOption] = Field(default_factory=list)
+    target_metric_name: str | None = None
+
+
+class ClarificationResolution(BaseModel):
+    """Canonical resolution written by the server for a clarification card."""
+
+    status: Literal["answered", "skipped"]
+    selected_option_id: str | None = None
+    selected_label: str | None = None
+    custom_answer: str | None = None
 
 
 class ChatSemanticQueryResult(BaseModel):
@@ -931,6 +970,14 @@ class ChatMessageResponse(BaseModel):
     metadata_json: dict[str, Any] | list[Any] | None = None
     created_at: datetime
 
+    @computed_field
+    @property
+    def clarification(self) -> dict[str, Any] | None:
+        """Surface stored clarification metadata so history reload can render resolved cards."""
+        if isinstance(self.metadata_json, dict):
+            return self.metadata_json.get("clarification")
+        return None
+
 
 class ChatSessionSummaryResponse(BaseModel):
     """Summary of one owned chat session."""
@@ -986,8 +1033,9 @@ class ChatResponse(BaseModel):
     diagnostics: dict[str, Any] | None = None
     semantic_query_result: ChatSemanticQueryResult | None = None
     clarification: ChatClarificationPayload | None = None
+    clarification_resolution: ClarificationResolution | None = None
     session_id: str
-    user_message_id: str
+    user_message_id: str | None = None
     assistant_message_id: str
     session: ChatSessionSummaryResponse | None = None
 

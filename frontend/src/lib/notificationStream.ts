@@ -1,4 +1,4 @@
-import { API_BASE, AppNotification, getAuthHeader } from '@/lib/api';
+import { API_BASE, AppNotification, getAuthHeader, refreshAccessToken } from '@/lib/api';
 
 export interface NotificationStreamPayload {
   items: AppNotification[];
@@ -7,6 +7,7 @@ export interface NotificationStreamPayload {
 
 const RETRY_BASE_MS = 1000;
 const RETRY_MAX_MS = 5000;
+const RETRY_AUTH_FAILURE_MS = 10000;
 
 export function createSseDataParser(onData: (data: string) => void): (chunk: string) => void {
   let buffer = '';
@@ -70,10 +71,26 @@ export function streamNotifications(
     let retryMs = RETRY_BASE_MS;
     while (!controller.signal.aborted) {
       try {
+        const auth = getAuthHeader();
         const res = await fetch(`${API_BASE}/api/v1/notifications/stream`, {
-          headers: { Accept: 'text/event-stream', ...getAuthHeader() },
+          headers: { Accept: 'text/event-stream', ...auth },
           signal: controller.signal,
         });
+
+        if (res.status === 401) {
+          const newToken = await refreshAccessToken();
+          if (!newToken) {
+            await sleep(RETRY_AUTH_FAILURE_MS, controller.signal);
+            continue;
+          }
+          continue;
+        }
+
+        if (res.status === 403) {
+          await sleep(RETRY_AUTH_FAILURE_MS, controller.signal);
+          continue;
+        }
+
         if (!res.ok || !res.body) throw new Error(`Notification stream failed: ${res.status}`);
         retryMs = RETRY_BASE_MS;
         await consumeStream(res, parseInto(onUpdate), controller.signal);

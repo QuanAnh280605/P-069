@@ -9,7 +9,11 @@ from src.models.db import (
     SemanticTableModel,
     UserModel,
 )
+from src.models.review_mixin import REVIEW_STATUS_APPROVED
+from src.models.schemas import RecommendedDimensionItem
 from src.services.dimension_recommender import (
+    _dimension_priority,
+    _rank_and_truncate_candidates,
     get_dimensions_for_metric,
     get_filter_columns_for_metric,
     is_valid_dimension_column,
@@ -176,6 +180,8 @@ async def test_get_dimensions_for_metric_tiers(async_session: AsyncSession):
         relationship_type="many_to_one",
         join_condition="orders.customer_id = customers.id",
         relationship_key="orders:customers",
+        validation_status="valid",
+        review_status=REVIEW_STATUS_APPROVED,
     )
     # customers -> regions (many_to_one)
     r2 = CanonicalRelationshipModel(
@@ -185,6 +191,8 @@ async def test_get_dimensions_for_metric_tiers(async_session: AsyncSession):
         relationship_type="many_to_one",
         join_condition="customers.region_id = regions.id",
         relationship_key="customers:regions",
+        validation_status="valid",
+        review_status=REVIEW_STATUS_APPROVED,
     )
     # orders -> order_items (one_to_many)
     r3 = CanonicalRelationshipModel(
@@ -194,6 +202,8 @@ async def test_get_dimensions_for_metric_tiers(async_session: AsyncSession):
         relationship_type="one_to_many",
         join_condition="orders.id = order_items.order_id",
         relationship_key="orders:items",
+        validation_status="valid",
+        review_status=REVIEW_STATUS_APPROVED,
     )
     # order_items -> products (many_to_one)
     r4 = CanonicalRelationshipModel(
@@ -203,6 +213,8 @@ async def test_get_dimensions_for_metric_tiers(async_session: AsyncSession):
         relationship_type="many_to_one",
         join_condition="order_items.product_id = products.id",
         relationship_key="items:products",
+        validation_status="valid",
+        review_status=REVIEW_STATUS_APPROVED,
     )
     async_session.add_all([r1, r2, r3, r4])
     await async_session.flush()
@@ -250,6 +262,84 @@ async def test_get_dimensions_for_metric_tiers(async_session: AsyncSession):
     assert "category" not in group_map
 
 
+@pytest.mark.parametrize(
+    "validation_status,review_status",
+    [
+        ("valid", "pending_review"),
+        ("invalid", "approved"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_relationship_governance_gate_excludes_unapproved(
+    async_session: AsyncSession, validation_status: str, review_status: str
+):
+    """A relationship that is not both valid AND approved must never leak into
+    recommended dimensions or filter columns (the compiler would fail-closed)."""
+    user = UserModel(email="gate@example.com", hashed_password="pw", full_name="Gate Tester", username="gate")
+    async_session.add(user)
+    await async_session.flush()
+
+    s_db = SemanticDatabaseModel(display_name="test_gate", db_type="sqlite", conn_url_enc="enc", created_by=user.id)
+    async_session.add(s_db)
+    await async_session.flush()
+
+    t_orders = SemanticTableModel(db_id=s_db.id, table_name="orders", business_name="Đơn hàng", created_by=user.id)
+    t_customers = SemanticTableModel(
+        db_id=s_db.id, table_name="customers", business_name="Khách hàng", created_by=user.id
+    )
+    async_session.add_all([t_orders, t_customers])
+    await async_session.flush()
+
+    c_status = SemanticColumnModel(
+        table_id=t_orders.id,
+        column_name="status",
+        data_type="VARCHAR",
+        business_name="Trạng thái",
+        is_primary_key=False,
+        is_foreign_key=False,
+    )
+    c_city = SemanticColumnModel(
+        table_id=t_customers.id,
+        column_name="city",
+        data_type="VARCHAR",
+        business_name="Tỉnh / Thành phố",
+        is_primary_key=False,
+        is_foreign_key=False,
+    )
+    async_session.add_all([c_status, c_city])
+    await async_session.flush()
+
+    rel = CanonicalRelationshipModel(
+        connection_id=s_db.id,
+        from_entity_id=t_orders.id,
+        to_entity_id=t_customers.id,
+        relationship_type="many_to_one",
+        join_condition="orders.customer_id = customers.id",
+        relationship_key="orders:customers",
+        validation_status=validation_status,
+        review_status=review_status,
+    )
+    async_session.add(rel)
+    await async_session.flush()
+
+    metric = SemanticMetricModel(
+        db_id=s_db.id,
+        created_by=user.id,
+        name="Doanh thu",
+        description="Tổng doanh thu",
+        sql_template="SELECT SUM(price) FROM orders",
+        base_entity_id=t_orders.id,
+    )
+    async_session.add(metric)
+    await async_session.flush()
+
+    dims = await get_dimensions_for_metric(async_session, s_db.id, metric.id)
+    assert all(d.column_name != "city" for d in dims)
+
+    filters = await get_filter_columns_for_metric(async_session, s_db.id, metric.id)
+    assert all(c.column_name != "city" for c in filters)
+
+
 @pytest.mark.asyncio
 async def test_is_valid_filter_column():
     col_status = SemanticColumnModel(
@@ -281,3 +371,57 @@ async def test_is_valid_filter_column():
         is_foreign_key=False,
     )
     assert is_valid_filter_column(col_pass) is False
+
+
+def test_dimension_priority_ranking():
+    """Verify descriptive names are ranked ahead of boolean flags."""
+    item_bool = RecommendedDimensionItem(
+        column_id=1,
+        column_name="is_delivered",
+        business_name="Đã giao",
+        table_id=10,
+        table_name="order_header",
+        table_business_name="Đơn hàng",
+        tier="A",
+        tier_label="Trực tiếp",
+        is_safe_join=True,
+        requires_reaggregation=False,
+        data_type="BOOLEAN",
+        cardinality_hint=2,
+    )
+    item_name = RecommendedDimensionItem(
+        column_id=2,
+        column_name="name",
+        business_name="Tên cửa hàng",
+        table_id=20,
+        table_name="store",
+        table_business_name="Cửa hàng",
+        tier="B",
+        tier_label="Liên kết trực tiếp (N:1)",
+        is_safe_join=True,
+        requires_reaggregation=False,
+        data_type="VARCHAR",
+        cardinality_hint=10,
+    )
+    item_status = RecommendedDimensionItem(
+        column_id=3,
+        column_name="status",
+        business_name="Trạng thái",
+        table_id=10,
+        table_name="order_header",
+        table_business_name="Đơn hàng",
+        tier="A",
+        tier_label="Trực tiếp",
+        is_safe_join=True,
+        requires_reaggregation=False,
+        data_type="VARCHAR",
+        cardinality_hint=5,
+    )
+    assert _dimension_priority(item_name) == 0
+    assert _dimension_priority(item_status) == 1
+    assert _dimension_priority(item_bool) == 4
+
+    ranked = _rank_and_truncate_candidates([item_bool, item_name, item_status], limit=2)
+    assert len(ranked) == 2
+    assert ranked[0].column_name == "name"
+    assert ranked[1].column_name == "status"

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlglot import exp
 
 from src.models.db import (
+    CanonicalRelationshipModel,
     ImportedSchemaModel,
     LiveTargetDbModel,
     SemanticColumnModel,
@@ -16,6 +17,7 @@ from src.models.db import (
 from src.models.metric_definition import MetricDefinition, MetricStatus
 from src.models.review_mixin import REVIEW_STATUS_PENDING
 from src.models.schema_metadata import RawSchemaMetadata
+from src.services.join_path_service import enumerate_join_paths
 
 _NUMERIC_TYPES = (
     "INT",
@@ -45,7 +47,41 @@ async def validate_metric_definition(
     column_map = {column.column_name: column for column in columns}
     _validate_expression_columns(definition, column_map)
     _validate_filter_columns(definition, column_map)
+    await _validate_preferred_join_paths(db, db_id, table.id, definition.metric.preferred_join_paths)
     return table
+
+
+async def _load_relationships(db: AsyncSession, db_id: int) -> list[CanonicalRelationshipModel]:
+    """Load all canonical relationships belonging to the semantic database."""
+    result = await db.execute(
+        select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.connection_id == db_id)
+    )
+    return list(result.scalars().all())
+
+
+async def _validate_preferred_join_paths(
+    db: AsyncSession,
+    db_id: int,
+    base_entity_id: int,
+    preferred_join_paths: dict[int, list[int]],
+) -> None:
+    """Reject persisted join paths that are not current shortest safe candidates.
+
+    Each entry must map a target entity id to an ordered relationship-id path that
+    exactly matches one of the equal-shortest child->parent many_to_one candidates
+    reachable from ``base_entity_id`` through governed, approved, technically-valid
+    relationships. Stale, partial, or fabricated paths are rejected before persist.
+    """
+    if not preferred_join_paths:
+        return
+    relationships = await _load_relationships(db, db_id)
+    for target_id, path in preferred_join_paths.items():
+        candidates = enumerate_join_paths(relationships, base_entity_id, target_id)
+        if tuple(path) not in {candidate.relationship_ids for candidate in candidates}:
+            raise ValueError(
+                f"preferred_join_paths for target entity {target_id} does not match any "
+                "current safe join path from the base entity"
+            )
 
 
 def with_metric_status(definition: MetricDefinition, status: MetricStatus) -> MetricDefinition:

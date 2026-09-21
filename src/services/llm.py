@@ -2,10 +2,11 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 from urllib.parse import urlparse
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
 
 from src.config import Settings, get_settings, reload_settings
@@ -63,6 +64,7 @@ class LLMConfig(NamedTuple):
     base_url: str
     model: str
     temperature: float
+    fallback_model: str = ""
 
 
 def _provider_api_keys(settings: Settings) -> dict[str, str]:
@@ -187,6 +189,7 @@ def _resolve_judge_config(settings: Settings) -> LLMConfig:
         base_url=base_url,
         model=model,
         temperature=0.0,
+        fallback_model="",
     )
     _validate_judge_isolation(_resolve_llm_config(settings), judge)
     return judge
@@ -213,6 +216,7 @@ def _resolve_llm_config(settings: Settings, role: str | None = None) -> LLMConfi
             )
         api_key = _NO_KEY_PLACEHOLDER
 
+    fallback_model = settings.llm_fallback_model.strip() if role != "judge" else ""
     return LLMConfig(
         provider=provider,
         protocol=_resolve_protocol(settings, provider),
@@ -220,17 +224,54 @@ def _resolve_llm_config(settings: Settings, role: str | None = None) -> LLMConfi
         base_url=base_url,
         model=_resolve_model(settings, provider, role),
         temperature=settings.llm_temperature,
+        fallback_model=fallback_model,
     )
 
 
-def _build_openai_client(config: LLMConfig) -> BaseChatModel:
-    """Client for OpenAI and every OpenAI-compatible endpoint."""
-    return ChatOpenAI(
+def _can_disable_reasoning(model_name: str) -> bool:
+    """Check whether a model allows disabling reasoning on OpenRouter."""
+    normalized = (model_name or "").lower()
+    mandatory_prefixes = ("google/gemini", "z-ai/glm", "openai/o1", "openai/o3", "openai/o4")
+    return not any(prefix in normalized for prefix in mandatory_prefixes)
+
+
+def _build_openai_client(config: LLMConfig) -> BaseChatModel | Runnable:
+    """Client for OpenAI and every OpenAI-compatible endpoint with optional fallback."""
+    is_openrouter = urlparse(config.base_url).hostname == "openrouter.ai"
+    extra_body: dict[str, Any] = {}
+    if is_openrouter:
+        if _can_disable_reasoning(config.model):
+            extra_body["reasoning"] = {"enabled": False}
+        if config.fallback_model and config.fallback_model != config.model:
+            extra_body["models"] = [config.model, config.fallback_model]
+
+    primary = ChatOpenAI(
         model=config.model,
         api_key=config.api_key,  # type: ignore[arg-type]
         base_url=config.base_url,
         temperature=config.temperature,
+        extra_body=extra_body or None,
+        timeout=None,
+        max_retries=1,
     )
+
+    if not config.fallback_model or config.fallback_model == config.model:
+        return primary
+
+    fallback_extra: dict[str, Any] | None = None
+    if is_openrouter and _can_disable_reasoning(config.fallback_model):
+        fallback_extra = {"reasoning": {"enabled": False}}
+
+    fallback = ChatOpenAI(
+        model=config.fallback_model,
+        api_key=config.api_key,  # type: ignore[arg-type]
+        base_url=config.base_url,
+        temperature=config.temperature,
+        extra_body=fallback_extra,
+        timeout=None,
+        max_retries=2,
+    )
+    return primary.with_fallbacks([fallback])
 
 
 def _build_anthropic_client(config: LLMConfig) -> BaseChatModel:
@@ -252,13 +293,13 @@ def _build_anthropic_client(config: LLMConfig) -> BaseChatModel:
 
 
 # Protocol -> client factory. Add an entry here to support a new wire protocol.
-_CLIENT_BUILDERS: dict[str, Callable[[LLMConfig], BaseChatModel]] = {
+_CLIENT_BUILDERS: dict[str, Callable[[LLMConfig], BaseChatModel | Runnable]] = {
     "openai": _build_openai_client,
     "anthropic": _build_anthropic_client,
 }
 
 # Cached clients keyed by resolved config, so repeated node calls reuse one client
-_client_cache: dict[LLMConfig, BaseChatModel] = {}
+_client_cache: dict[LLMConfig, BaseChatModel | Runnable] = {}
 _env_mtime: float | None = None
 
 
@@ -293,7 +334,7 @@ def _settings_with_hot_reload() -> Settings:
     return get_settings()
 
 
-def get_llm(role: str | None = None) -> BaseChatModel:
+def get_llm(role: str | None = None) -> BaseChatModel | Runnable:
     """Return a chat model client for the given role, reusing cached clients.
 
     Args:
@@ -309,10 +350,11 @@ def get_llm(role: str | None = None) -> BaseChatModel:
         return cached
 
     logger.info(
-        "Instantiating LLM client (provider=%s, protocol=%s, model=%s, base_url=%s, api_key_set=%s, role=%s)",
+        "Instantiating LLM client (provider=%s, protocol=%s, model=%s, fallback=%s, base_url=%s, api_key_set=%s, role=%s)",
         config.provider,
         config.protocol,
         config.model,
+        config.fallback_model or "none",
         config.base_url,
         config.api_key != _NO_KEY_PLACEHOLDER,
         role or "-",

@@ -22,11 +22,12 @@ async def test_lifespan_does_not_create_schema_at_runtime() -> None:
     begin_cm.__aexit__.return_value = False
     mock_engine.begin.return_value = begin_cm
 
-    with patch("src.main.get_settings", return_value=dev_settings), patch(
-        "src.services.database.get_async_engine", return_value=mock_engine
-    ) as mock_get_engine, patch("src.main.start_schema_cron_scheduler") as mock_start, patch(
-        "src.main.stop_schema_cron_scheduler"
-    ) as mock_stop:
+    with (
+        patch("src.main.get_settings", return_value=dev_settings),
+        patch("src.services.database.get_async_engine", return_value=mock_engine) as mock_get_engine,
+        patch("src.main.start_schema_cron_scheduler") as mock_start,
+        patch("src.main.stop_schema_cron_scheduler") as mock_stop,
+    ):
         async with lifespan(app):
             pass
 

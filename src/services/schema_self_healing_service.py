@@ -411,15 +411,30 @@ async def _handle_added_items(
         if t_meta.foreign_keys:
             for fk in t_meta.foreign_keys:
                 target_table = fk.referred_table.raw_name
+                target_tbl = (
+                    await db.execute(
+                        select(SemanticTableModel).where(
+                            SemanticTableModel.db_id == semantic_db_id,
+                            SemanticTableModel.table_name == target_table,
+                        )
+                    )
+                ).scalar_one_or_none()
+                target_id = target_tbl.id if target_tbl else None
                 for l_col, r_col in zip(fk.constrained_columns, fk.referred_columns, strict=False):
                     fk_map[l_col.raw_name] = (target_table, r_col.raw_name)
+                    if target_id is None:
+                        continue
                     db.add(
                         CanonicalRelationshipModel(
                             connection_id=semantic_db_id,
-                            from_entity=t_name,
-                            to_entity=target_table,
-                            join_condition=f"{t_name}.{l_col.raw_name} = {target_table}.{r_col.raw_name}",
+                            from_entity_id=new_tbl.id,
+                            to_entity_id=target_id,
                             relationship_type="many_to_one",
+                            join_condition=f"{t_name}.{l_col.raw_name} = {target_table}.{r_col.raw_name}",
+                            business_name=f"{t_name} → {target_table}",
+                            description=f"Mỗi {t_name} liên kết với {target_table}",
+                            review_status=REVIEW_STATUS_PENDING,
+                            validation_status="valid",
                         )
                     )
 

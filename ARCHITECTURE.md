@@ -162,6 +162,10 @@ flowchart TD
     FORMAT --> RES(["✅ Render Data Table & Visualization trên UI"])
 ```
 
+**Biên dịch Join được quản trị (Governed Join Resolution):** Khi một metric cần JOIN qua nhiều bảng, compiler chỉ duyệt các `CanonicalRelationshipModel` thỏa mãn CẢ HAI điều kiện: `validation_status == 'valid'` VÀ `review_status == 'approved'` (và chiều `many_to_one`). Quan hệ chỉ hợp lệ về kỹ thuật nhưng chưa được duyệt (`review_status != approved`) sẽ KHÔNG được biên dịch và fail-closed (`UNREACHABLE_DIMENSION` / `UNSAFE_FANOUT`).
+
+**Preferred Paths (đường dẫn được duyệt sẵn):** Với các bảng đích có nhiều hơn một đường JOIN an toàn, người dùng (Data Lead) phải chọn một `preferred_join_paths` (map `target_entity_id → chuỗi relationship_id theo thứ tự`) trong quá trình review; compiler sử dụng chính xác đường dẫn đã lưu và KHÔNG bao giờ yêu cầu người dùng cuối chọn lại tại thời điểm query. Các trường hợp lỗi đều fail-closed (không sinh SQL): nhiều đường bằng nhau không có preferred → `AMBIGUOUS_JOIN_PATH`; preferred path lỗi thời/không khớp → `INVALID_PREFERRED_JOIN_PATH`; xung đột giữa các metric cùng (base, target) → `CONFLICTING_JOIN_PATH`.
+
 ---
 
 ### 3.3. Conversational Multi-Agent & Query Clarifier Graphs
@@ -452,7 +456,10 @@ erDiagram
         string relationship_key UK
         string constraint_name
         json column_pairs
-        string validation_status "valid | invalid"
+        string business_name "Tên nghiệp vụ (Data Lead đặt / LLM gợi ý tiếng Việt)"
+        text description "Mô tả ngữ cảnh quan hệ (role/label)"
+        string validation_status "valid | invalid (tính hợp lệ kỹ thuật)"
+        string review_status "pending_review | approved (kiểm duyệt HITL)"
         datetime created_at
     }
 
@@ -476,8 +483,11 @@ erDiagram
 2. **Deterministic Query Compilation:** Không để LLM tự viết SQL lúc truy vấn dữ liệu thực tế nhằm loại bỏ hoàn toàn các rủi ro bảo mật và sai sót công thức.
 3. **Double Guardrails on Execution:** Mọi câu truy vấn gửi tới Live DB đều được bọc kiểm tra AST với `sqlglot`, gán cứng trần `LIMIT 100` và `timeout = 15s`.
 4. **Credential Isolation:** Toàn bộ chuỗi kết nối Target DB được mã hóa Fernet đối xứng trước khi ghi vào Database và chỉ giải mã trong RAM khi thực thi tác vụ.
-5. **Workspace-scoped RBAC:** `admin` chỉ quản trị thành viên và invitation trong Workspace hiện tại, không phải quản trị viên toàn nền tảng. `data_lead` quản trị schema và metric; `member` chỉ gửi metric mới. Cả ba vai trò được xem catalog đã duyệt, query Live DB và dùng chat/data assistant.
+5. **Workspace-scoped RBAC & Metric Permissions:** `admin` chỉ quản trị thành viên và invitation, **KHÔNG tạo hay gửi metric** (nhưng vẫn dùng chat/query thông thường). `data_lead` quản trị schema, tạo/gửi metric và thực hiện bulk bootstrap (chỉ Data Lead hoặc người tạo cá nhân). `member` chỉ gửi metric ở trạng thái `unverified` và không tự phê duyệt. Quyền tạo/gửi metric được kiểm soát bởi `can_generate_metrics` (thay thế khái niệm `can_use_metric_studio` cũ); quyền query/chat là `can_query`. Cả ba vai trò đều xem được catalog đã duyệt.
 6. **Last-admin Invariant:** Workspace luôn phải còn ít nhất một `admin`; mọi thao tác hạ vai trò hoặc xóa admin cuối cùng đều bị từ chối, kể cả tự hạ vai trò hoặc tự rời Workspace.
 7. **Invitation Safety:** Chỉ Workspace Admin tạo/thu hồi URL mời. Link chứa vai trò `admin|data_lead|member`, token chỉ lưu dưới dạng hash, dùng một lần và hết hạn sau 7 ngày.
 8. **Metric Review Boundary:** Submission của Member được server ép thành `unverified`, bất biến đối với Member, và trước khi duyệt chỉ hiển thị cho người tạo cùng Data Lead. Data Lead có thể sửa, xóa hoặc chuyển `unverified` thành `approved`; Admin chỉ xem catalog `approved`. Query compiler chỉ chấp nhận metric `approved`.
 9. **Shared Dashboard Governance:** Dashboard là tài sản chung của Workspace, mọi vai trò có `can_query` đều được sửa (không phân biệt admin/data_lead/member). Truy vấn chỉ chạy trên Live DB đã duyệt (`query_supported`); SQL Dump không phát sinh query. Xung đột ghi đồng thời được phát hiện qua `expected_version` và trả `409 dashboard_version_conflict` với `current_version` để người dùng phục hồi, không ghi đè thầm lặng.
+10. **Compiler Join Gate (valid + approved):** Query compiler chỉ duyệt một quan hệ khi `validation_status == 'valid'` VÀ `review_status == 'approved'` (chiều `many_to_one`). Quan hệ chưa duyệt hoặc không hợp lệ sẽ fail-closed (`UNREACHABLE_DIMENSION` / `UNSAFE_FANOUT`), không bao giờ tie-break theo ID quan hệ.
+11. **No Query-Time Clarification:** Đường dẫn JOIN được quyết định trước khi duyệt (Data Lead chọn `preferred_join_paths`); runtime người dùng cuối KHÔNG bao giờ bị hỏi chọn đường dẫn. Preferred path lỗi thời/không khớp → `INVALID_PREFERRED_JOIN_PATH`; nhiều đường bằng nhau không có preferred → `AMBIGUOUS_JOIN_PATH`; xung đột giữa các metric → `CONFLICTING_JOIN_PATH`. Mọi lỗi fail-closed, không sinh SQL.
+12. **Governed Bulk Bootstrap (Data Lead only):** Endpoint `POST /semantic/{db_id}/metrics/bootstrap` chỉ dành cho Data Lead (hoặc người tạo cá nhân), tối đa 20 metric, best-effort, **KHÔNG tự động duyệt** — candidate có trạng thái `pending_approval` hoặc `needs_review`. Chế độ dry-run chỉ xem trước, không persist. Luồng on-demand vẫn giữ nguyên một metric mỗi lần.

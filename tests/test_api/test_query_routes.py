@@ -19,6 +19,7 @@ from src.models.db import (
     SemanticTableModel,
     UserModel,
 )
+from src.models.review_mixin import REVIEW_STATUS_APPROVED
 from src.services.query_compiler import CompiledQuery
 
 CATALOG_ENDPOINT = "/api/v1/semantic/{db_id}/catalog"
@@ -618,6 +619,7 @@ async def test_catalog_returns_relationships_for_live_db(
         relationship_key="orders:self_fk",
         column_pairs=[{"from_column_id": data["col_order_id"], "to_column_id": data["col_order_id"]}],
         validation_status="valid",
+        review_status=REVIEW_STATUS_APPROVED,
     )
     async_session.add(rel)
     await async_session.commit()
@@ -628,3 +630,35 @@ async def test_catalog_returns_relationships_for_live_db(
     assert len(payload["relationships"]) == 1
     assert payload["relationships"][0]["relationship_type"] == "many_to_one"
     assert payload["relationships"][0]["join_condition"] == "orders.order_id = orders.order_id"
+    assert payload["relationships"][0]["review_status"] == REVIEW_STATUS_APPROVED
+
+
+@pytest.mark.asyncio
+async def test_catalog_excludes_pending_relationship(
+    client: Any,
+    async_session: AsyncSession,
+) -> None:
+    """GET catalog hides pending relationships from Flow 2 consumers."""
+    data = await _seed_live_db_with_semantic(async_session)
+    pending = CanonicalRelationshipModel(
+        connection_id=data["sem_db_id"],
+        from_entity_id=data["table_id"],
+        to_entity_id=data["table_id"],
+        relationship_type="many_to_one",
+        join_condition="orders.order_id = orders.order_id",
+        relationship_key="orders:self_fk_pending",
+        column_pairs=[{"from_column_id": data["col_order_id"], "to_column_id": data["col_order_id"]}],
+        validation_status="valid",
+        review_status="pending_review",
+    )
+    async_session.add(pending)
+    await async_session.commit()
+
+    response = await client.get(CATALOG_ENDPOINT.format(db_id=data["sem_db_id"]), headers=_token_headers())
+    assert response.status_code == 200
+    assert payload_relationships(response) == 0
+
+
+def payload_relationships(response: Any) -> int:
+    """Return the number of relationships in a catalog response."""
+    return len(response.json()["relationships"])

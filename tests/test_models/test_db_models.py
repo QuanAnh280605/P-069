@@ -532,6 +532,160 @@ async def test_canonical_relationship_database_relationship(seed_user_and_db):
     assert fetched_db.relationships[0].relationship_type == "one_to_one"
 
 
+@pytest.mark.asyncio
+async def test_canonical_relationship_governance_fields(seed_user_and_db):
+    """Governance fields persist and default review_status stays pending_review."""
+    async_db_session, _, db_rec = seed_user_and_db
+
+    t1 = SemanticTableModel(db_id=db_rec.id, table_name="customers", business_name="Khách hàng")
+    t2 = SemanticTableModel(db_id=db_rec.id, table_name="orders", business_name="Đơn hàng")
+    async_db_session.add_all([t1, t2])
+    await async_db_session.flush()
+
+    rel = CanonicalRelationshipModel(
+        connection_id=db_rec.id,
+        from_entity_id=t1.id,
+        to_entity_id=t2.id,
+        relationship_type="one_to_many",
+        join_condition="orders.customer_id = customers.id",
+        business_name="Khách hàng đặt Đơn hàng",
+        description="Mỗi khách hàng có nhiều đơn hàng",
+        review_status="approved",
+    )
+    async_db_session.add(rel)
+    await async_db_session.commit()
+
+    result = await async_db_session.execute(
+        select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.id == rel.id)
+    )
+    fetched = result.scalar_one()
+    assert fetched.business_name == "Khách hàng đặt Đơn hàng"
+    assert fetched.description == "Mỗi khách hàng có nhiều đơn hàng"
+    assert fetched.review_status == "approved"
+    assert fetched.is_pending_review is False
+
+
+@pytest.mark.asyncio
+async def test_canonical_relationship_default_review_status_pending(seed_user_and_db):
+    """Newly ingested relationships default to pending_review, not approved."""
+    async_db_session, _, db_rec = seed_user_and_db
+
+    t1 = SemanticTableModel(db_id=db_rec.id, table_name="a", business_name="A")
+    t2 = SemanticTableModel(db_id=db_rec.id, table_name="b", business_name="B")
+    async_db_session.add_all([t1, t2])
+    await async_db_session.flush()
+
+    rel = CanonicalRelationshipModel(
+        connection_id=db_rec.id,
+        from_entity_id=t1.id,
+        to_entity_id=t2.id,
+        relationship_type="one_to_one",
+        join_condition="b.a_id = a.id",
+        business_name="A thuộc B",
+    )
+    async_db_session.add(rel)
+    await async_db_session.commit()
+
+    result = await async_db_session.execute(
+        select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.id == rel.id)
+    )
+    fetched = result.scalar_one()
+    assert fetched.review_status == "pending_review"
+    assert fetched.is_pending_review is True
+    assert fetched.validation_status == "valid"
+    assert fetched.validation_status != fetched.review_status
+
+
+@pytest.mark.asyncio
+async def test_canonical_relationship_business_name_required_default(seed_user_and_db):
+    """business_name is required but falls back to an empty default when omitted."""
+    async_db_session, _, db_rec = seed_user_and_db
+
+    t1 = SemanticTableModel(db_id=db_rec.id, table_name="a", business_name="A")
+    t2 = SemanticTableModel(db_id=db_rec.id, table_name="b", business_name="B")
+    async_db_session.add_all([t1, t2])
+    await async_db_session.flush()
+
+    rel = CanonicalRelationshipModel(
+        connection_id=db_rec.id,
+        from_entity_id=t1.id,
+        to_entity_id=t2.id,
+        relationship_type="one_to_one",
+        join_condition="b.a_id = a.id",
+    )
+    async_db_session.add(rel)
+    await async_db_session.commit()
+
+    result = await async_db_session.execute(
+        select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.id == rel.id)
+    )
+    fetched = result.scalar_one()
+    assert fetched.business_name == ""
+    assert fetched.review_status == "pending_review"
+
+
+@pytest.mark.asyncio
+async def test_canonical_relationship_reviewer_relationship(seed_user_and_db):
+    """Test CanonicalRelationshipModel.reviewer resolves via reviewed_by FK."""
+    async_db_session, user, db_rec = seed_user_and_db
+
+    t1 = SemanticTableModel(db_id=db_rec.id, table_name="customers", business_name="Khách hàng")
+    t2 = SemanticTableModel(db_id=db_rec.id, table_name="orders", business_name="Đơn hàng")
+    async_db_session.add_all([t1, t2])
+    await async_db_session.flush()
+
+    rel = CanonicalRelationshipModel(
+        connection_id=db_rec.id,
+        from_entity_id=t1.id,
+        to_entity_id=t2.id,
+        relationship_type="one_to_many",
+        join_condition="orders.customer_id = customers.id",
+        reviewed_by=user.id,
+    )
+    async_db_session.add(rel)
+    await async_db_session.commit()
+
+    result = await async_db_session.execute(
+        select(CanonicalRelationshipModel)
+        .where(CanonicalRelationshipModel.id == rel.id)
+        .options(selectinload(CanonicalRelationshipModel.reviewer))
+    )
+    fetched = result.scalar_one()
+    assert fetched.reviewer is not None
+    assert fetched.reviewer.username == "creator"
+
+
+@pytest.mark.asyncio
+async def test_canonical_relationship_editor_relationship(seed_user_and_db):
+    """Test CanonicalRelationshipModel.editor resolves via updated_by FK."""
+    async_db_session, user, db_rec = seed_user_and_db
+
+    t1 = SemanticTableModel(db_id=db_rec.id, table_name="customers", business_name="Khách hàng")
+    t2 = SemanticTableModel(db_id=db_rec.id, table_name="orders", business_name="Đơn hàng")
+    async_db_session.add_all([t1, t2])
+    await async_db_session.flush()
+
+    rel = CanonicalRelationshipModel(
+        connection_id=db_rec.id,
+        from_entity_id=t1.id,
+        to_entity_id=t2.id,
+        relationship_type="one_to_many",
+        join_condition="orders.customer_id = customers.id",
+        updated_by=user.id,
+    )
+    async_db_session.add(rel)
+    await async_db_session.commit()
+
+    result = await async_db_session.execute(
+        select(CanonicalRelationshipModel)
+        .where(CanonicalRelationshipModel.id == rel.id)
+        .options(selectinload(CanonicalRelationshipModel.editor))
+    )
+    fetched = result.scalar_one()
+    assert fetched.editor is not None
+    assert fetched.editor.username == "creator"
+
+
 # --- Tests for new MetricVersionModel ---
 
 

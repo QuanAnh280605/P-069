@@ -45,6 +45,7 @@ describe('MetricExplorerView', () => {
         },
       ],
     });
+    vi.spyOn(apiModule, 'getMetricJoinPathOptionsApi').mockResolvedValue({});
   });
 
 
@@ -77,6 +78,7 @@ describe('MetricExplorerView', () => {
             base_entity: 'orders',
             base_entity_id: 10,
             grain: { column_ids: [101] },
+            dimensions: ['status', 'city'],
             formula: { function: 'SUM', expression: 'price' },
             filters: [],
             status: 'approved',
@@ -149,7 +151,7 @@ describe('MetricExplorerView', () => {
     );
 
     // Verify initial empty guidance prompt
-    expect(screen.getByText(/Chọn ít nhất 1 Chỉ số ở mục 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Chọn một chỉ số ở mục 1/)).toBeInTheDocument();
 
     // Select metric
     const metricCheckbox = screen.getByRole('checkbox', { name: /Doanh thu thuần/i });
@@ -157,8 +159,8 @@ describe('MetricExplorerView', () => {
 
     // Scoped dimensions from backend appear
     await waitFor(() => {
-      expect(screen.getByText('Trạng thái đơn')).toBeInTheDocument();
-      expect(screen.getByText('Tỉnh / Thành phố')).toBeInTheDocument();
+      expect(screen.getAllByText('Trạng thái đơn').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Tỉnh / Thành phố').length).toBeGreaterThan(0);
     });
   });
 
@@ -287,7 +289,7 @@ describe('MetricExplorerView', () => {
     fireEvent.click(monthButton);
   });
 
-  it('allows clicking dimension pill to toggle selection', async () => {
+  it('automatically applies metric-defined dimensions upon selection', async () => {
     const mockMetrics: MetricRecord[] = [
       {
         metric_id: 1,
@@ -303,6 +305,7 @@ describe('MetricExplorerView', () => {
             base_entity: 'orders',
             base_entity_id: 10,
             grain: { column_ids: [101] },
+            dimensions: ['status'],
             formula: { function: 'SUM', expression: 'price' },
             filters: [],
             status: 'approved',
@@ -351,15 +354,8 @@ describe('MetricExplorerView', () => {
     fireEvent.click(metricCheckbox);
 
     await waitFor(() => {
-      expect(screen.getByText('Trạng thái đơn')).toBeInTheDocument();
+      expect(screen.getAllByText('Trạng thái đơn').length).toBeGreaterThan(0);
     });
-
-    // Click the dimension pill button
-    const pillBtn = screen.getByRole('button', { name: /Trạng thái đơn/i });
-    fireEvent.click(pillBtn);
-
-    // It should now appear in the selected tray
-    expect(screen.getByText(/Đang chọn/)).toBeInTheDocument();
   });
 
   it('renders interactive chart studio with Bar, Line, Area, and Pie chart types without errors', async () => {
@@ -969,5 +965,199 @@ describe('MetricExplorerView', () => {
 
     expect(screen.getByText(/Biểu đồ trực quan/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Cột/i })).toBeInTheDocument();
+  });
+
+  function buildMetric(preferredJoinPaths: Record<string, number[]> | undefined) {
+    return {
+      metric_id: 1,
+      name: 'Doanh thu thuần',
+      source: 'ai' as const,
+      version: 1,
+      status: 'approved' as const,
+      created_at: '2026-01-01',
+      definition: {
+        schema_version: 2 as const,
+        metric: {
+          name: 'Doanh thu thuần',
+          base_entity: 'orders',
+          base_entity_id: 10,
+          grain: { column_ids: [101] },
+          formula: { function: 'SUM' as const, expression: 'price' },
+          filters: [],
+          status: 'approved' as const,
+          confidence: 'high' as const,
+          excluded_notes: '',
+          preferred_join_paths: preferredJoinPaths,
+        },
+      },
+    };
+  }
+
+  const explorerCatalog = {
+    db_id: 3,
+    source_type: 'live' as const,
+    query_supported: true,
+    tables: [
+      {
+        table_id: 10,
+        table_name: 'orders',
+        business_name: 'Đơn hàng',
+        columns: [
+          {
+            column_id: 101,
+            column_name: 'created_at',
+            business_name: 'Ngày tạo đơn',
+            data_type: 'TIMESTAMP',
+            is_time_dimension: true,
+            allowed_values: null,
+          },
+          {
+            column_id: 102,
+            column_name: 'status',
+            business_name: 'Trạng thái đơn',
+            data_type: 'VARCHAR',
+            is_time_dimension: false,
+            allowed_values: null,
+          },
+        ],
+      },
+      {
+        table_id: 20,
+        table_name: 'customers',
+        business_name: 'Khách hàng',
+        columns: [
+          {
+            column_id: 201,
+            column_name: 'city',
+            business_name: 'Tỉnh / Thành phố',
+            data_type: 'VARCHAR',
+            is_time_dimension: false,
+            allowed_values: null,
+          },
+        ],
+      },
+    ],
+    relationships: [],
+  };
+
+  it('automatically displays metric-defined dimensions and attaches them to query', async () => {
+    const executeSpy = vi.spyOn(apiModule, 'executeSemanticQueryApi').mockResolvedValue({
+      sql: 'SELECT city, SUM(price) FROM orders GROUP BY city',
+      parameters: {},
+      columns: ['city', 'total_price'],
+      rows: [['Hà Nội', 1000000]],
+      row_count: 1,
+      execution_time_ms: 10,
+    });
+
+    const metricWithDims: MetricRecord = {
+      metric_id: 1,
+      name: 'Doanh thu thuần',
+      source: 'ai',
+      version: 1,
+      status: 'approved',
+      created_at: '2026-01-01',
+      definition: {
+        schema_version: 2,
+        metric: {
+          name: 'Doanh thu thuần',
+          base_entity: 'orders',
+          base_entity_id: 10,
+          grain: { column_ids: [101] },
+          dimensions: ['city'],
+          formula: { function: 'SUM', expression: 'price' },
+          filters: [],
+          status: 'approved',
+          confidence: 'high',
+          excluded_notes: '',
+        },
+      },
+    };
+
+    render(
+      <MetricExplorerView
+        dbId={3}
+        metrics={[metricWithDims]}
+        catalog={explorerCatalog}
+        theme="light"
+      />,
+    );
+
+    const metricCheckbox = await screen.findByRole('checkbox', { name: /Doanh thu thuần/i });
+    fireEvent.click(metricCheckbox);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Tỉnh / Thành phố').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Thực thi/i }));
+    await waitFor(() => {
+      expect(executeSpy).toHaveBeenCalledTimes(1);
+      const req = executeSpy.mock.calls[0][1] as apiModule.SemanticQueryRequest;
+      expect(req.dimensions).toEqual(expect.arrayContaining([{ column_id: 201, time_grain: undefined }]));
+    });
+  });
+
+  it('maps foreign key dimension (store_id) to entity descriptive dimension (store.name)', async () => {
+    vi.spyOn(apiModule, 'getMetricRecommendedDimensionsApi').mockResolvedValue({
+      metric_id: 1,
+      metric_name: 'Doanh thu thuần',
+      base_table: 'orders',
+      dimensions: [
+        {
+          column_id: 301,
+          column_name: 'name',
+          business_name: 'Tên cửa hàng',
+          table_id: 30,
+          table_name: 'store',
+          table_business_name: 'Cửa hàng',
+          tier: 'B',
+          tier_label: 'Liên kết trực tiếp (N:1)',
+          is_safe_join: true,
+          requires_reaggregation: false,
+          data_type: 'VARCHAR',
+        },
+      ],
+    });
+
+    const metricWithFkDim: MetricRecord = {
+      metric_id: 1,
+      name: 'Doanh thu thuần',
+      source: 'ai',
+      version: 1,
+      status: 'approved',
+      created_at: '2026-01-01',
+      definition: {
+        schema_version: 2,
+        metric: {
+          name: 'Doanh thu thuần',
+          base_entity: 'orders',
+          base_entity_id: 10,
+          grain: { column_ids: [101] },
+          dimensions: ['store_id'],
+          formula: { function: 'SUM', expression: 'price' },
+          filters: [],
+          status: 'approved',
+          confidence: 'high',
+          excluded_notes: '',
+        },
+      },
+    };
+
+    render(
+      <MetricExplorerView
+        dbId={3}
+        metrics={[metricWithFkDim]}
+        catalog={explorerCatalog}
+        theme="light"
+      />,
+    );
+
+    const metricCheckbox = await screen.findByRole('checkbox', { name: /Doanh thu thuần/i });
+    fireEvent.click(metricCheckbox);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Tên cửa hàng').length).toBeGreaterThan(0);
+    });
   });
 });

@@ -237,6 +237,8 @@ cp .env.example .env
 | | `LLM_API_BASE` | `http://localhost:8000/v1` | Tùy chọn | Base URL cho endpoint OpenAI-compatible (vLLM, Ollama, proxy) |
 | | `LLM_MODEL_ENRICH` | `llama-3.1-8b-instant` | Tùy chọn | Mô hình riêng cho bước Schema Enrichment |
 | | `LLM_MODEL_METRIC` | `llama-3.3-70b-versatile` | Tùy chọn | Mô hình riêng cho bước Business Metric Suggestion |
+| | `LLM_METRIC_TIMEOUT_SECONDS` | `45` | Không | Thời hạn cho một lần sinh Metric; hết hạn sẽ dừng, không retry LLM |
+| | `LLM_METRIC_MAX_OUTPUT_TOKENS` | `1200` | Không | Giới hạn output token riêng cho Metric Definition |
 | **Observability** | `LANGCHAIN_API_KEY` | `lsv2_pt_...` | Không | Khóa API LangSmith để theo dõi trace AI Agent |
 | | `LANGCHAIN_PROJECT` | `ai20k-agent` | Không | Tên dự án trace trên LangSmith |
 | | `LANGCHAIN_TRACING_V2` | `true` | Không | Bật chế độ trace chi tiết cho LangGraph |

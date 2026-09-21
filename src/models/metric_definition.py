@@ -158,10 +158,66 @@ class MetricSpec(BaseModel):
     base_entity: str = Field(..., min_length=1, max_length=200)
     base_entity_id: int | None = None
     grain: MetricGrain = Field(default_factory=MetricGrain)
+    dimensions: list[str] = Field(default_factory=list)
     filters: list[MetricFilter] = Field(default_factory=list)
     status: MetricStatus = "pending_approval"
     confidence: MetricConfidence | None = None
     excluded_notes: str = Field(default="", max_length=2000)
+    preferred_join_paths: dict[int, list[int]] = Field(default_factory=dict)
+
+    @field_validator("dimensions", mode="before")
+    @classmethod
+    def normalize_dimensions(cls, value: Any) -> list[str]:
+        if not value:
+            return []
+        if isinstance(value, str):
+            return [value.strip()] if value.strip() else []
+        if isinstance(value, list):
+            res: list[str] = []
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    res.append(item.strip())
+                elif isinstance(item, dict):
+                    name = item.get("name") or item.get("column_name") or item.get("business_name")
+                    if name:
+                        res.append(str(name).strip())
+            return res
+        return []
+
+    @field_validator("preferred_join_paths", mode="before")
+    @classmethod
+    def coerce_preferred_join_paths(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        cleaned: dict[Any, Any] = {}
+        for k, v in value.items():
+            if isinstance(k, str) and not k.isdigit() and not (k.startswith("-") and k[1:].isdigit()):
+                continue
+            cleaned[k] = v
+        return cleaned
+
+    @field_validator("preferred_join_paths")
+    @classmethod
+    def validate_preferred_join_paths(cls, value: dict[int, list[int]]) -> dict[int, list[int]]:
+        """Reject malformed preferred join-path maps before persistence.
+
+        Keys are target entity ids and values are ordered relationship-id paths
+        from the metric base entity. Every id must be a positive integer, each
+        path must be non-empty, and a path must not repeat a relationship id.
+        """
+        for target_id, path in value.items():
+            if not isinstance(target_id, int) or isinstance(target_id, bool) or target_id <= 0:
+                raise ValueError("preferred_join_paths keys must be positive integers")
+            if not isinstance(path, list) or not path:
+                raise ValueError("preferred_join_paths values must be non-empty lists")
+            seen: set[int] = set()
+            for rel_id in path:
+                if not isinstance(rel_id, int) or isinstance(rel_id, bool) or rel_id <= 0:
+                    raise ValueError("preferred_join_paths relationship ids must be positive integers")
+                if rel_id in seen:
+                    raise ValueError("preferred_join_paths must not repeat a relationship id")
+                seen.add(rel_id)
+        return value
 
     @field_validator("filters", mode="before")
     @classmethod
@@ -227,4 +283,8 @@ class MetricDefinition(BaseModel):
         payload = self.model_dump(mode="json", exclude_none=True)
         if not payload["metric"].get("filters"):
             payload["metric"].pop("filters", None)
+        if not payload["metric"].get("preferred_join_paths"):
+            payload["metric"].pop("preferred_join_paths", None)
+        if not payload["metric"].get("dimensions"):
+            payload["metric"].pop("dimensions", None)
         return yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)

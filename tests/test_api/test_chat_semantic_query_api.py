@@ -40,8 +40,7 @@ def chat_mocks():
         patch("src.api.routes.get_recent_chat_history", new_callable=AsyncMock) as mock_hist,
         patch("src.api.routes.save_chat_message", new_callable=AsyncMock) as mock_save,
         patch("src.api.routes.get_chat_session_with_messages", new_callable=AsyncMock) as mock_refresh,
-        patch("src.api.routes.build_data_context", new_callable=AsyncMock) as mock_data_ctx,
-        patch("src.api.routes.build_metric_context", new_callable=AsyncMock) as mock_metric_ctx,
+        patch("src.api.routes._build_chat_context", new_callable=AsyncMock) as mock_context,
         patch("src.api.routes._require_resource_permission", new_callable=AsyncMock),
         patch("src.api.routes._query_target", new_callable=AsyncMock) as mock_target,
         patch("src.api.routes.build_parser_catalog", new_callable=AsyncMock) as mock_catalog,
@@ -59,8 +58,7 @@ def chat_mocks():
             metadata_json=kwargs.get("metadata_json"),
         )
         mock_refresh.return_value = refreshed
-        mock_data_ctx.return_value = MetricContextResult(schema={}, diagnostic={"status": "ready"})
-        mock_metric_ctx.return_value = MetricContextResult(schema={}, diagnostic={"status": "ready"})
+        mock_context.return_value = MetricContextResult(schema={}, diagnostic={"status": "ready"})
         mock_target.return_value = (
             SimpleNamespace(id=101),
             SimpleNamespace(id=1, dialect="sqlite", conn_url_enc="enc"),
@@ -108,23 +106,19 @@ def chat_mocks():
 @pytest.mark.asyncio
 @patch("src.agents.nodes.orchestrator_node.orchestrator_node", new_callable=AsyncMock)
 @patch("src.agents.chat_graph.chat_agent", new_callable=AsyncMock)
-async def test_resolved_nl_query_for_data_lead_includes_sql(
+async def test_resolved_nl_query_for_data_lead_guides_to_metric_explorer(
     mock_agent: AsyncMock,
     mock_orch: AsyncMock,
     client: AsyncClient,
     auth_headers: dict[str, str],
     chat_mocks: SimpleNamespace,
 ) -> None:
-    """Data Lead receives the result table and compiled SQL preview."""
+    """Resolved query in chat does not execute SQL directly, but guides user to Metric Explorer."""
     chat_mocks.mock_can.return_value = True
     mock_orch.return_value = {"intent": "semantic_query"}
     mock_agent.ainvoke.return_value = {
-        "intent": "semantic_query",
-        "interpretation": {
-            "status": "resolved",
-            "spec": {"metric_ids": [1], "dimensions": [{"column_id": 10}], "filters": [], "limit": 100},
-            "time_ranges": [],
-        },
+        "intent": "data_question",
+        "chat_response": "Hệ thống hỗ trợ tra cứu và phân tích số liệu trực tiếp tại tab **Metric Explorer**.",
     }
 
     res = await client.post(
@@ -134,34 +128,26 @@ async def test_resolved_nl_query_for_data_lead_includes_sql(
     )
     assert res.status_code == 200
     body = res.json()
-    assert body["intent"] == "semantic_query"
-    assert body["semantic_query_result"] is not None
-    assert body["semantic_query_result"]["columns"] == ["customer_id", "revenue"]
-    assert body["semantic_query_result"]["row_count"] == 2
-    assert body["semantic_query_result"]["sql"] is not None
-    assert "SELECT customer_id" in body["semantic_query_result"]["sql"]
+    assert "Metric Explorer" in body["chat_response"]
+    assert body.get("semantic_query_result") is None
 
 
 @pytest.mark.asyncio
 @patch("src.agents.nodes.orchestrator_node.orchestrator_node", new_callable=AsyncMock)
 @patch("src.agents.chat_graph.chat_agent", new_callable=AsyncMock)
-async def test_resolved_nl_query_for_member_redacts_sql(
+async def test_resolved_nl_query_for_member_guides_to_metric_explorer(
     mock_agent: AsyncMock,
     mock_orch: AsyncMock,
     client: AsyncClient,
     member_headers: dict[str, str],
     chat_mocks: SimpleNamespace,
 ) -> None:
-    """Member receives query result snapshot but SQL is redacted."""
+    """Member also receives guidance to Metric Explorer without direct query execution in chat."""
     chat_mocks.mock_can.return_value = False  # Member role
     mock_orch.return_value = {"intent": "semantic_query"}
     mock_agent.ainvoke.return_value = {
-        "intent": "semantic_query",
-        "interpretation": {
-            "status": "resolved",
-            "spec": {"metric_ids": [1], "dimensions": [{"column_id": 10}], "filters": [], "limit": 100},
-            "time_ranges": [],
-        },
+        "intent": "data_question",
+        "chat_response": "Hệ thống hỗ trợ tra cứu và phân tích số liệu trực tiếp tại tab **Metric Explorer**.",
     }
 
     res = await client.post(
@@ -171,21 +157,23 @@ async def test_resolved_nl_query_for_member_redacts_sql(
     )
     assert res.status_code == 200
     body = res.json()
-    assert body["intent"] == "semantic_query"
-    assert body["semantic_query_result"] is not None
-    assert body["semantic_query_result"]["columns"] == ["customer_id", "revenue"]
-    assert body["semantic_query_result"]["sql"] is None  # REDACTED for Member!
+    assert "Metric Explorer" in body["chat_response"]
+    assert body.get("semantic_query_result") is None
 
 
 @pytest.mark.asyncio
+@patch("src.agents.chat_graph.chat_agent", new_callable=AsyncMock)
+@patch("src.agents.nodes.orchestrator_node.orchestrator_node", new_callable=AsyncMock)
 @patch("src.api.routes.get_chat_message", new_callable=AsyncMock)
-async def test_clarification_selection_click_executes_spec(
+async def test_clarification_selection_click_delegates_to_agent(
     mock_get_msg: AsyncMock,
+    mock_orch: AsyncMock,
+    mock_agent: AsyncMock,
     client: AsyncClient,
     auth_headers: dict[str, str],
     chat_mocks: SimpleNamespace,
 ) -> None:
-    """Clicking a clarification option executes the pre-validated spec without LLM parsing."""
+    """Clicking a clarification option delegates to standard chat to trigger agent flow."""
     prev_msg = SimpleNamespace(
         id="msg-prev-clar",
         session_id="sess-nl-1",
@@ -203,6 +191,11 @@ async def test_clarification_selection_click_executes_spec(
         },
     )
     mock_get_msg.return_value = prev_msg
+    mock_orch.return_value = {"intent": "data_question"}
+    mock_agent.ainvoke.return_value = {
+        "intent": "data_question",
+        "chat_response": "Đã ghi nhận lựa chọn.",
+    }
 
     res = await client.post(
         "/api/v1/semantic/101/chat",
@@ -218,9 +211,7 @@ async def test_clarification_selection_click_executes_spec(
     )
     assert res.status_code == 200
     body = res.json()
-    assert body["intent"] == "semantic_query"
-    assert body["semantic_query_result"] is not None
-    assert body["semantic_query_result"]["columns"] == ["customer_id", "revenue"]
+    assert body["intent"] == "data_question"
 
 
 @pytest.mark.asyncio

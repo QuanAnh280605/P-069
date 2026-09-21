@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
@@ -21,6 +20,15 @@ from src.models.db import (
 )
 from src.models.metric_definition import MetricDefinition, MetricExpressionNode, MetricFilter
 from src.models.schemas import DimensionSelection, SemanticQueryFilter, SemanticQuerySpec
+from src.services.join_path_service import (
+    JoinPathCandidate,
+    _ambiguous_error,
+    _conflicting_join_path_error,
+    _fanout_error,
+    _invalid_preferred_error,
+    _unreachable_error,
+    enumerate_join_paths,
+)
 from src.services.semantic_compile_error import SemanticCompileError
 
 
@@ -116,9 +124,12 @@ class SemanticQueryCompiler:
             raise ValueError(f"Unknown base entity: {base_name}")
         dimensions = await self._load_dimensions(connection_id, [item.column_id for item in spec.dimensions])
         base_columns = await self._load_base_columns(base.id)
-        _apply_time_grains(dimensions, spec.dimensions)
+        if spec.dimensions:
+            _apply_time_grains(dimensions, spec.dimensions)
         runtime_filters = await self._load_runtime_filters(connection_id, spec.filters)
-        joins = await self._resolve_joins(connection_id, base, dimensions + runtime_filters, table_by_id)
+        joins = await self._resolve_joins(
+            connection_id, base, metrics, definitions, dimensions + runtime_filters, table_by_id
+        )
         return self._build_query(
             dialect, metrics, definitions, base, base_columns, dimensions, joins, runtime_filters, spec.limit
         )
@@ -189,30 +200,59 @@ class SemanticQueryCompiler:
         self,
         db_id: int,
         base: SemanticTableModel,
+        metrics: list[SemanticMetricModel],
+        definitions: list[MetricDefinition],
         dimensions: list[dict[str, Any]],
         tables: dict[int, SemanticTableModel],
     ) -> list[dict[str, Any]]:
         result = await self._db.execute(
             select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.connection_id == db_id)
         )
-        relationships = [item for item in result.scalars().all() if item.validation_status in {"valid", None}]
+        relationships = list(result.scalars().all())
         column_names = await self._relationship_columns(relationships)
+        rel_by_id = {rel.id: rel for rel in relationships}
+        preferred_by_target = _collect_preferred_paths(metrics, definitions, base.id)
         joins: list[dict[str, str]] = []
-        joined = {base.id}
-        for table_id in {item["table_id"] for item in dimensions} - joined:
-            for relationship in _safe_join_path(relationships, base.id, table_id, tables, column_names):
-                target_id = relationship.to_entity_id
-                if target_id not in joined:
-                    joins.append(
-                        {
-                            "relationship_id": relationship.id,
-                            "table_name": tables[target_id].table_name,
-                            "physical_schema": tables[target_id].physical_schema,
-                            "condition": _relationship_condition(relationship, column_names),
-                        }
-                    )
-                    joined.add(target_id)
+        joined: set[int] = {base.id}
+        target_ids = sorted({item["table_id"] for item in dimensions} - joined)
+        for table_id in target_ids:
+            candidate = self._resolve_target_path(relationships, base.id, table_id, preferred_by_target)
+            _append_resolved_joins(joins, joined, candidate, rel_by_id, tables, column_names)
         return joins
+
+    def _resolve_target_path(
+        self,
+        relationships: list[CanonicalRelationshipModel],
+        base_id: int,
+        target_id: int,
+        preferred_by_target: dict[int, list[tuple[int, tuple[int, ...]]]],
+    ) -> JoinPathCandidate:
+        """Resolve the join path for one target, honoring persisted preferred paths.
+
+        - no preferred entries and a single safe candidate -> use it
+        - no preferred entries and multiple candidates -> ``AMBIGUOUS_JOIN_PATH``
+        - preferred entries that all agree -> use that path if it is still a current
+          safe candidate, else ``INVALID_PREFERRED_JOIN_PATH``
+        - preferred entries that disagree across selected metrics ->
+          ``CONFLICTING_JOIN_PATH``
+        """
+        candidates = enumerate_join_paths(relationships, base_id, target_id)
+        preferred_entries = preferred_by_target.get(target_id, [])
+        if preferred_entries:
+            distinct_paths = {path for _, path in preferred_entries}
+            if len(distinct_paths) > 1:
+                raise _conflicting_join_path_error(base_id, target_id, preferred_entries)
+            chosen = next(iter(distinct_paths))
+            if tuple(chosen) not in {candidate.relationship_ids for candidate in candidates}:
+                raise _invalid_preferred_error(base_id, target_id, chosen, candidates)
+            return JoinPathCandidate(relationship_ids=tuple(chosen), entity_sequence=tuple())
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise _ambiguous_error(base_id, target_id, candidates)
+        if enumerate_join_paths(relationships, target_id, base_id):
+            raise _fanout_error(target_id)
+        raise _unreachable_error(target_id)
 
     async def _relationship_columns(
         self,
@@ -258,12 +298,57 @@ class SemanticQueryCompiler:
         return CompiledQuery(sql=sql, parameters=parameters, metadata=metadata)
 
 
+def _append_resolved_joins(
+    joins: list[dict[str, str]],
+    joined: set[int],
+    candidate: JoinPathCandidate,
+    rel_by_id: dict[int, CanonicalRelationshipModel],
+    tables: dict[int, SemanticTableModel],
+    column_names: dict[int, tuple[str, str]],
+) -> None:
+    """Append each relationship in the resolved path as a join, tracking targets."""
+    for rel_id in candidate.relationship_ids:
+        relationship = rel_by_id[rel_id]
+        target_id = relationship.to_entity_id
+        if target_id not in joined:
+            joins.append(
+                {
+                    "relationship_id": relationship.id,
+                    "table_name": tables[target_id].table_name,
+                    "physical_schema": tables[target_id].physical_schema,
+                    "condition": _relationship_condition(relationship, column_names),
+                }
+            )
+            joined.add(target_id)
+
+
 def _canonical_definitions(metrics: list[SemanticMetricModel]) -> list[MetricDefinition]:
     definitions = [MetricDefinition.model_validate(item.definition) for item in metrics]
     invalid = (item.schema_version != 2 or item.diagnostics or not item.metric.grain.column_ids for item in definitions)
     if any(invalid):
         raise SemanticCompileError("METRIC_NEEDS_REVIEW", "Metric definition is not canonical v2")
     return definitions
+
+
+def _collect_preferred_paths(
+    metrics: list[SemanticMetricModel],
+    definitions: list[MetricDefinition],
+    base_id: int,
+) -> dict[int, list[tuple[int, tuple[int, ...]]]]:
+    """Map each target entity to the preferred path(s) selected by selected metrics.
+
+    Only entries whose base entity matches ``base_id`` are considered, so a metric
+    whose base differs (already rejected earlier) cannot inject a conflicting path.
+    The value is a list of ``(metric_id, relationship_id_sequence)`` pairs so the
+    compiler can detect and report conflicts across multiple selected metrics.
+    """
+    by_target: dict[int, list[tuple[int, tuple[int, ...]]]] = {}
+    for metric, definition in zip(metrics, definitions, strict=True):
+        if definition.metric.base_entity_id != base_id:
+            continue
+        for target_id, path in (definition.metric.preferred_join_paths or {}).items():
+            by_target.setdefault(target_id, []).append((metric.id, tuple(path)))
+    return by_target
 
 
 def _apply_time_grains(dimensions: list[dict[str, Any]], selections: list[DimensionSelection]) -> None:
@@ -275,37 +360,6 @@ def _apply_time_grains(dimensions: list[dict[str, Any]], selections: list[Dimens
                 f"Column {selection.column_id} is not a time dimension",
                 {"column_id": selection.column_id},
             )
-
-
-def _safe_join_path(
-    relationships: list[CanonicalRelationshipModel],
-    base_id: int,
-    table_id: int,
-    tables: dict[int, SemanticTableModel] | None = None,
-    column_names: dict[int, tuple[str, str]] | None = None,
-) -> list[CanonicalRelationshipModel]:
-    paths = _many_to_one_paths(relationships, base_id, table_id)
-    if len(paths) > 1:
-        if tables and column_names and table_id in tables:
-            target_table = tables[table_id].table_name.lower().rstrip("s")
-
-            def _path_score(p: list[CanonicalRelationshipModel]) -> tuple[int, int, int]:
-                hop_len = len(p)
-                match_name = 0
-                if hop_len == 1 and p[0].column_pairs:
-                    from_col_id = p[0].column_pairs[0].get("from_column_id")
-                    if from_col_id in column_names:
-                        col_name = column_names[from_col_id][1].lower()
-                        if col_name in {f"{target_table}_id", f"{target_table}id", target_table}:
-                            match_name = -1
-                return (hop_len, match_name, p[0].id if p else 0)
-
-            ranked = sorted(paths, key=_path_score)
-            return ranked[0]
-        raise SemanticCompileError("AMBIGUOUS_JOIN_PATH", "Multiple safe join paths exist", {"table_id": table_id})
-    if not paths:
-        _raise_unreachable(relationships, base_id, table_id)
-    return paths[0]
 
 
 def _dimension_expressions(dimensions: list[dict[str, Any]], dialect: str) -> tuple[list[str], list[str]]:
@@ -387,50 +441,6 @@ def _column_info(column: SemanticColumnModel, table: SemanticTableModel) -> dict
         "table_id": table.id,
         "table_name": table.table_name,
     }
-
-
-def _many_to_one_paths(
-    relationships: list[CanonicalRelationshipModel], start: int, target: int
-) -> list[list[CanonicalRelationshipModel]]:
-    graph: dict[int, list[CanonicalRelationshipModel]] = {}
-    for rel in relationships:
-        if rel.relationship_type in {"many_to_one", "many-to-one"}:
-            graph.setdefault(rel.from_entity_id, []).append(rel)
-    queue: deque[tuple[int, list[CanonicalRelationshipModel], set[int]]] = deque([(start, [], {start})])
-    matches: list[list[CanonicalRelationshipModel]] = []
-    shortest: int | None = None
-    while queue:
-        current, path, visited = queue.popleft()
-        if current == target:
-            shortest = len(path) if shortest is None else shortest
-            if len(path) == shortest:
-                matches.append(path)
-            continue
-        if shortest is not None and len(path) >= shortest:
-            continue
-        for relationship in graph.get(current, []):
-            if relationship.to_entity_id not in visited:
-                queue.append(
-                    (
-                        relationship.to_entity_id,
-                        [*path, relationship],
-                        {*visited, relationship.to_entity_id},
-                    )
-                )
-    return matches
-
-
-def _raise_unreachable(
-    relationships: list[CanonicalRelationshipModel],
-    base_id: int,
-    target_id: int,
-) -> None:
-    reverse_paths = _many_to_one_paths(relationships, target_id, base_id)
-    if reverse_paths:
-        raise SemanticCompileError("UNSAFE_FANOUT", "Dimension requires a one-to-many join", {"table_id": target_id})
-    raise SemanticCompileError(
-        "UNREACHABLE_DIMENSION", "Dimension is not reachable through a safe path", {"table_id": target_id}
-    )
 
 
 def _relationship_condition(

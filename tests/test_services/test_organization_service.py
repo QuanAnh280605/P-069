@@ -63,6 +63,7 @@ def test_admin_permissions_match_matrix():
         "can_use_chat": True,
         "can_use_data_assistant": True,
         "can_use_metric_studio": False,
+        "can_generate_metrics": False,
         "can_view_pending_metrics": False,
         "can_export": False,
     }
@@ -80,6 +81,7 @@ def test_data_lead_permissions_match_matrix():
         "can_use_chat": True,
         "can_use_data_assistant": True,
         "can_use_metric_studio": True,
+        "can_generate_metrics": True,
         "can_view_pending_metrics": True,
         "can_export": True,
     }
@@ -97,6 +99,7 @@ def test_member_permissions_match_matrix():
         "can_use_chat": True,
         "can_use_data_assistant": True,
         "can_use_metric_studio": False,
+        "can_generate_metrics": False,
         "can_view_pending_metrics": False,
         "can_export": False,
     }
@@ -107,9 +110,52 @@ def test_can_create_metrics_removed_from_matrix():
         assert "can_create_metrics" not in role_perms
 
 
-def test_each_role_has_exactly_12_permissions():
+def test_each_role_has_exactly_13_permissions():
     for role, perms in ROLE_PERMISSIONS.items():
-        assert len(perms) == 12, f"{role} has {len(perms)} permissions, expected 12"
+        assert len(perms) == 13, f"{role} has {len(perms)} permissions, expected 13"
+
+
+def test_can_generate_metrics_only_for_data_lead():
+    """Metric-authoring capability is a Data Lead-only capability, never inferred from chat/query access."""
+    assert ROLE_PERMISSIONS["admin"]["can_generate_metrics"] is False
+    assert ROLE_PERMISSIONS["data_lead"]["can_generate_metrics"] is True
+    assert ROLE_PERMISSIONS["member"]["can_generate_metrics"] is False
+    # The capability must not be coupled to generic chat/query access.
+    for role in ("admin", "member"):
+        assert ROLE_PERMISSIONS[role]["can_use_chat"] is True
+        assert ROLE_PERMISSIONS[role]["can_use_data_assistant"] is True
+        assert ROLE_PERMISSIONS[role]["can_generate_metrics"] is False
+
+
+@pytest.mark.asyncio
+async def test_chat_can_generate_metrics_derives_from_data_lead_only():
+    """Route state injection must derive can_generate_metrics from the Data Lead capability only."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from src.api.routes import _chat_can_generate_metrics
+
+    db = AsyncMock()
+    for role, expected in [("data_lead", True), ("member", False), ("admin", False)]:
+        database = MagicMock()
+        database.org_id = 7
+        membership = MagicMock()
+        membership.role = role
+        with patch("src.api.routes.get_membership", new=AsyncMock(return_value=membership)):
+            result = await _chat_can_generate_metrics(db, database, 99)
+        assert result is expected, f"role={role} expected {expected}, got {result}"
+
+
+@pytest.mark.asyncio
+async def test_chat_can_generate_metrics_true_for_personal_db_without_org():
+    """Personal (org-less) databases keep the legacy allow-all behavior."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.api.routes import _chat_can_generate_metrics
+
+    db = AsyncMock()
+    database = MagicMock()
+    database.org_id = None
+    assert await _chat_can_generate_metrics(db, database, 99) is True
 
 
 # ---------------------------------------------------------------------------
@@ -407,11 +453,15 @@ async def test_provision_personal_workspace_idempotent(async_session):
 
     assert first.org_id == second.org_id
     memberships = list(
-        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id))).scalars().all()
+        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id)))
+        .scalars()
+        .all()
     )
     assert len(memberships) == 1
     orgs = list(
-        (await async_session.execute(select(OrganizationModel).where(OrganizationModel.id == memberships[0].org_id))).scalars().all()
+        (await async_session.execute(select(OrganizationModel).where(OrganizationModel.id == memberships[0].org_id)))
+        .scalars()
+        .all()
     )
     assert len(orgs) == 1
 
@@ -426,7 +476,9 @@ async def test_provision_personal_workspace_returns_existing_membership(async_se
 
     assert membership.org_id == organization.id
     memberships = list(
-        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id))).scalars().all()
+        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id)))
+        .scalars()
+        .all()
     )
     assert len(memberships) == 1
 

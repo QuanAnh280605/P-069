@@ -4,13 +4,13 @@ from src.agents.chat_graph import _route_by_intent
 
 
 def test_metric_query_reaches_metric_generator_for_member() -> None:
-    """Metric requests never fall through to data guidance."""
-    assert _route_by_intent({"intent": "metric_query", "can_generate_metrics": False}) == "metric_query"
+    """Metric requests route through semantic_parse to clarify or propose."""
+    assert _route_by_intent({"intent": "metric_query", "can_generate_metrics": False}) == "semantic_parse"
 
 
 def test_metric_query_reaches_metric_generator_for_data_lead() -> None:
-    """Data Leads use the same metric-generation route."""
-    assert _route_by_intent({"intent": "metric_query", "can_generate_metrics": True}) == "metric_query"
+    """Data Leads use the same unified semantic_parse route."""
+    assert _route_by_intent({"intent": "metric_query", "can_generate_metrics": True}) == "semantic_parse"
 
 
 def test_data_question_reaches_data_assistant() -> None:
@@ -20,7 +20,7 @@ def test_data_question_reaches_data_assistant() -> None:
 
 def test_semantic_query_reaches_semantic_parse() -> None:
     """Live query questions route to the semantic parser node."""
-    assert _route_by_intent({"intent": "semantic_query"}) == "semantic_query"
+    assert _route_by_intent({"intent": "semantic_query"}) == "semantic_parse"
 
 
 def test_out_of_scope_routes_to_done() -> None:

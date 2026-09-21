@@ -18,12 +18,18 @@ _OUT_OF_SCOPE_RESPONSE = (
     "Bạn có câu hỏi nào về dữ liệu cần tôi hỗ trợ không?"
 )
 
+_CLASSIFIER_ERROR_RESPONSE = (
+    "Xin lỗi, tôi đang gặp sự cố tạm thời khi xử lý yêu cầu của bạn. "
+    "Bạn có thể thử lại hoặc đặt câu hỏi về dữ liệu, Business Metrics, "
+    "schema cơ sở dữ liệu để tôi hỗ trợ không?"
+)
+
 _CLASSIFY_PROMPT = """Bạn là bộ phân loại câu hỏi thông minh cho hệ thống AI Semantic Layer.
 Phân loại câu hỏi của người dùng vào đúng 1 trong 5 nhóm:
 
-- "semantic_query": Câu hỏi yêu cầu xem số liệu, kết quả, báo cáo, truy vấn, thống kê hoặc tính toán dữ liệu thực tế từ Live Database (ví dụ: "cho tôi kết quả Tổng doanh thu theo từng khách hàng", "Xem kết quả doanh thu", "Tổng doanh thu theo khách hàng năm 2024", "Doanh thu tháng này theo chi nhánh", "Số lượng đơn hàng hoàn thành", "Báo cáo doanh số theo sản phẩm", "Thống kê đơn hàng"). BẤT KỲ CÂU HỎI NÀO YÊU CẦU LẤY SỐ LIỆU/KẾT QUẢ/TÍNH TOÁN ĐỀU THUỘC NHÓM NÀY.
-- "metric_query": Yêu cầu tạo mới, chỉnh sửa, xây dựng hoặc đề xuất công thức định nghĩa Business Metric mới vào hệ thống (ví dụ: "Tạo metric mới Doanh thu thuần", "Đề xuất metric cho bảng orders", "Định nghĩa công thức AOV", "Tạo chỉ số tỷ lệ hủy đơn"). CHỈ phân loại vào nhóm này khi người dùng muốn định nghĩa/tạo thêm metric mới vào catalog, KHÔNG phân loại vào đây nếu người dùng muốn xem số liệu/kết quả thực tế.
-- "data_question": Hỏi về cấu trúc database, schema, bảng, cột, kiểu dữ liệu, glossary, quan hệ bảng, danh sách metric đã có hoặc hướng dẫn chọn dữ liệu/dimension/filter để tìm hiểu dữ liệu (không yêu cầu lấy số liệu cụ thể).
+- "semantic_query": Câu hỏi yêu cầu xem số liệu, kết quả, báo cáo, truy vấn, thống kê, tính toán dữ liệu HOẶC yêu cầu tính toán chỉ số (ví dụ: "tôi muốn tính tỷ lệ hủy đơn", "tính biên lợi nhuận gộp", "tính giá trị đơn hàng trung bình aov", "tính tỷ lệ khách bỏ giỏ hàng không mua", "tính thời gian giao hàng trung bình", "tính doanh thu theo vùng", "Tạo metric tính doanh thu theo vùng"). MỌI CÂU HỎI BẮT ĐẦU BẰNG "TÍNH...", "TÔI MUỐN TÍNH..." ĐỀU THUỘC NHÓM NÀY ĐỂ ĐƯỢC LÀM RÕ (CLARIFY) VÀ TẠO CHỈ SỐ.
+- "metric_query": Yêu cầu tạo mới, chỉnh sửa, xây dựng hoặc đề xuất công thức định nghĩa Business Metric hoàn toàn mới vào hệ thống (ví dụ: "Tạo metric mới Doanh thu thuần", "Đề xuất metric cho bảng orders", "Định nghĩa công thức AOV", "Tạo chỉ số tỷ lệ hủy đơn").
+- "data_question": Hỏi về cấu trúc database, schema, bảng, cột, kiểu dữ liệu, glossary, quan hệ bảng (ví dụ: "Bảng customer có những cột nào?", "Khóa ngoại giữa orders và users là gì?"). TUYỆT ĐỐI KHÔNG phân loại các yêu cầu tính toán chỉ số vào nhóm này.
 - "chitchat": Chào hỏi (xin chào, cảm ơn, tạm biệt), hỏi về danh tính/khả năng của AI trợ lý hoặc hỏi thông tin/tính năng chung của hệ thống AI Semantic Layer.
 - "out_of_scope": Câu hỏi hoặc yêu cầu KHÔNG LIÊN QUAN đến dữ liệu, database, Business Metrics hay tính năng hệ thống (ví dụ: thời tiết, công thức nấu ăn, viết thơ, kể chuyện, giải toán ngoài lề, tin tức xã hội, thể thao, giải trí, lập trình ứng dụng ngoài lề...).
 
@@ -57,7 +63,7 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
     try:
         response = await get_llm().ainvoke(_classification_prompt(state, user_message))
         raw = (response.content if hasattr(response, "content") else str(response)).strip().lower()
-        intent = _parse_intent(raw)
+        intent = _parse_intent(raw, user_message)
         logger.info(
             "Orchestrator classified message (len=%d) → intent=%s",
             len(user_message),
@@ -67,8 +73,8 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
             return {"intent": "out_of_scope", "chat_response": _OUT_OF_SCOPE_RESPONSE}
         return {"intent": intent}
     except Exception as exc:
-        logger.warning("Orchestrator failed; defaulting to metric query: %s", exc)
-        return {"intent": "metric_query"}
+        logger.warning("Orchestrator failed; falling back to safe non-mutating chitchat: %s", exc)
+        return {"intent": "chitchat", "chat_response": _CLASSIFIER_ERROR_RESPONSE}
 
 
 def _classification_prompt(state: AgentState, user_message: str) -> str:
@@ -77,7 +83,7 @@ def _classification_prompt(state: AgentState, user_message: str) -> str:
     return _CLASSIFY_PROMPT.format(history=history, user_message=user_message)
 
 
-def _parse_intent(raw: str) -> str:
+def _parse_intent(raw: str, user_message: str = "") -> str:
     """Parse raw LLM response into recognized intent string."""
     cleaned = raw.strip().lower()
     if "metric_query" in cleaned:
@@ -90,6 +96,9 @@ def _parse_intent(raw: str) -> str:
         return "out_of_scope"
     if "chitchat" in cleaned:
         return "chitchat"
+    lowered = user_message.lower().strip()
+    if lowered.startswith(("tính ", "tôi muốn tính ", "tạo metric", "tạo chỉ số")):
+        return "semantic_query"
     return "data_question"
 
 

@@ -373,80 +373,98 @@
     }
 
     /* =========================================================
-     Slide 2 — Problem (3 Core Pain Points)
+     Slide 2 — Problem (Single Core Pain Point - High Impact)
      ========================================================= */
-    .problem-grid-3 {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-      flex: 1;
-      min-height: 0;
+    .problem-content {
+      justify-content: center;
     }
 
-    .p-card {
+    .p-hero-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-top: 5px solid var(--bad);
+      border-radius: 12px;
+      padding: 26px 30px 22px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      padding: 16px 18px;
-      border-top: 4px solid var(--accent);
-      background: var(--surface);
+      gap: 15px;
+      box-shadow: 0 6px 24px rgba(15, 36, 64, 0.06);
     }
 
-    .idx-tag {
+    .p-hero-badge {
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: 11.5px;
       font-weight: 700;
-      color: var(--accent-deep);
-      background: var(--accent-soft);
-      padding: 2px 8px;
-      border-radius: 4px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--bad);
+      background: var(--bad-soft);
+      padding: 4px 10px;
+      border-radius: 5px;
       width: fit-content;
     }
 
-    .p-card .card-title {
-      font-size: 15.5px;
+    .p-hero-title {
+      font-size: 24px;
       font-weight: 800;
-      line-height: 1.3;
+      line-height: 1.25;
       color: var(--ink);
-      margin-bottom: 0;
+      letter-spacing: -0.01em;
     }
 
-    .p-sub {
-      font-size: 11.5px;
-      font-weight: 700;
-      color: var(--bad);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    .p-card .note {
-      font-size: 12.5px;
+    .p-hero-desc {
+      font-size: 14.5px;
       color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .p-hero-desc code {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      background: var(--ground);
+      border: 1px solid var(--line);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--accent-deep);
+    }
+
+    .p-hero-points {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: var(--ground);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 14px 18px;
+    }
+
+    .p-hero-point {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 13.5px;
       line-height: 1.45;
-      flex: 1;
+      color: var(--ink);
     }
 
-    .p-foot {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--good);
-      background: var(--good-soft);
-      border-radius: 6px;
-      padding: 6px 10px;
-      line-height: 1.35;
+    .p-point-icon {
+      font-size: 14px;
+      flex-shrink: 0;
+      margin-top: 1px;
     }
 
-    .verdict {
+    .p-hero-foot {
       display: flex;
       align-items: center;
       gap: 10px;
       background: var(--bad-soft);
       border: 1px solid #EDD2CC;
       color: var(--bad);
-      border-radius: 9px;
+      border-radius: 8px;
       padding: 10px 16px;
-      font-size: 13.5px;
+      font-size: 13px;
       font-weight: 600;
+      line-height: 1.4;
     }
 
     /* =========================================================
@@ -1090,7 +1108,945 @@
       color: #FFFFFF;
     }
 
+    /* =========================================================
+     Slide 3 — Hiệu quả kinh tế (Economic Impact & Problem Framing)
+     VinUni AI in Action Cohort 3 Style
+     ========================================================= */
+    .econ-top-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 2px solid var(--bad);
+      padding-bottom: 6px;
+      margin-bottom: 12px;
+      font-size: 11.5px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .econ-top-strip .org-left {
+      color: var(--bad);
+    }
+
+    .econ-top-strip .org-right {
+      color: #718096;
+    }
+
+    .econ-content {
+      margin-top: 4px;
+      gap: 12px;
+    }
+
+    .econ-hero-grid {
+      display: grid;
+      grid-template-columns: 0.95fr 1.05fr;
+      gap: 28px;
+      align-items: center;
+    }
+
+    .econ-title-col {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .econ-title-col .main-title {
+      font-size: 40px;
+      font-weight: 900;
+      color: var(--bad);
+      letter-spacing: -0.02em;
+      line-height: 1.05;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .econ-title-col .sub-title {
+      font-size: 32px;
+      font-weight: 900;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+      text-transform: uppercase;
+    }
+
+    .econ-title-col .desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.45;
+      margin-top: 8px;
+      max-width: 42ch;
+    }
+
+    .econ-bullets-col {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .econ-bullet-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 9px 14px;
+      box-shadow: 0 2px 6px rgba(15, 36, 64, 0.04);
+    }
+
+    .econ-badge {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 22px;
+      font-weight: 800;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
+    .econ-badge.minus {
+      background: var(--bad);
+      color: #FFFFFF;
+    }
+
+    .econ-badge.plus {
+      background: var(--good);
+      color: #FFFFFF;
+    }
+
+    .econ-bullet-text b {
+      display: block;
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--ink);
+      line-height: 1.25;
+    }
+
+    .econ-bullet-text span {
+      display: block;
+      font-size: 11.5px;
+      color: var(--muted);
+      line-height: 1.35;
+      margin-top: 2px;
+    }
+
+    .econ-banner-card {
+      position: relative;
+      height: 148px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #1E3A5F;
+      box-shadow: 0 8px 24px rgba(10, 25, 47, 0.18);
+      display: flex;
+      align-items: stretch;
+      background: #0E2138;
+    }
+
+    .econ-banner-bg {
+      position: absolute;
+      inset: 0;
+      background-image: url("presentation/assets/datacenter_rack.jpg");
+      background-size: cover;
+      background-position: center 40%;
+      filter: brightness(0.65) contrast(1.1);
+    }
+
+    .econ-banner-overlay {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      background: linear-gradient(90deg, rgba(8, 22, 44, 0.93) 0%, rgba(10, 29, 58, 0.84) 50%, rgba(8, 22, 44, 0.92) 100%);
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      padding: 12px 20px;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .econ-stat-box {
+      background: rgba(255, 255, 255, 0.07);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 9px;
+      padding: 10px 14px;
+      color: #FFFFFF;
+    }
+
+    .econ-stat-box .top-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #8FB9FF;
+      font-weight: 700;
+    }
+
+    .econ-stat-box .big-num {
+      font-size: 24px;
+      font-weight: 900;
+      color: #FFFFFF;
+      letter-spacing: -0.02em;
+      margin: 2px 0;
+    }
+
+    .econ-stat-box .big-num.highlight {
+      color: #74D9A9;
+    }
+
+    .econ-stat-box .note {
+      font-size: 11px;
+      color: #C5D7EC;
+      line-height: 1.35;
+    }
+
+    .econ-footnote {
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 4px;
+      font-style: italic;
+      text-align: right;
+    }
+
+    /* =========================================================
+     Slide — Solution Proposal (Giải pháp đề xuất)
+     ========================================================= */
+    .sol-content {
+      gap: 12px;
+    }
+
+    .sol-compare-strip {
+      display: grid;
+      grid-template-columns: 1fr 36px 1fr;
+      align-items: center;
+      background: var(--ground);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 9px 16px;
+      gap: 12px;
+    }
+
+    .sol-compare-side {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .sol-compare-side .side-tag {
+      font-size: 10.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 3px 8px;
+      border-radius: 5px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .sol-compare-side .side-tag.old {
+      background: var(--bad-soft);
+      color: var(--bad);
+    }
+
+    .sol-compare-side .side-tag.new {
+      background: var(--good-soft);
+      color: var(--good);
+    }
+
+    .sol-compare-side .side-text {
+      font-size: 12px;
+      color: var(--ink);
+      line-height: 1.35;
+    }
+
+    .sol-compare-arrow {
+      text-align: center;
+      color: var(--accent);
+      font-weight: 800;
+      font-size: 15px;
+      line-height: 1;
+    }
+
+    .sol-pillars-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .sol-pillar-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--accent);
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .sol-pillar-card .pillar-badge {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--accent-deep);
+      background: var(--accent-soft);
+      padding: 2px 7px;
+      border-radius: 4px;
+      width: fit-content;
+    }
+
+    .sol-pillar-card h3 {
+      font-size: 15.5px;
+      font-weight: 800;
+      color: var(--ink);
+      line-height: 1.25;
+    }
+
+    .sol-pillar-card p {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+      flex: 1;
+    }
+
+    .sol-pillar-card .pillar-foot {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 3px;
+    }
+
+    .sol-pillar-card .pillar-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--accent-deep);
+      background: var(--accent-soft);
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    .sol-verdict,
+    .arch-pipe-box,
+    .arch-layers-box,
+    .demo-card,
+    .demo-cta-box,
+    .diff-table-box,
+    .diff-foot {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--accent-soft);
+      border: 1px solid #CBDCF5;
+      color: var(--accent-deep);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 12.5px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    /* =========================================================
+     Slide 8 — Evaluation & Benchmark Results
+     ========================================================= */
+    .eval-content {
+      gap: 20px;
+      justify-content: center;
+      flex: 1;
+    }
+
+    .eval-kpis {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+    }
+
+    .eval-kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 24px 20px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .eval-kpi-card.hero {
+      border-top: 4px solid var(--accent);
+    }
+
+    .eval-kpi-card.hero-good {
+      border-top: 4px solid var(--good);
+    }
+
+    .eval-kpi-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .eval-kpi-label {
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .eval-kpi-val {
+      font-family: var(--font-body);
+      font-size: 46px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+      line-height: 1.05;
+      font-variant-numeric: tabular-nums;
+      margin: 4px 0;
+    }
+
+    .eval-kpi-val.good {
+      color: var(--good);
+    }
+
+    .eval-kpi-sub {
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .eval-split-layout {
+      display: grid;
+      grid-template-columns: 1.18fr 0.82fr;
+      gap: 14px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .eval-table-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .eval-table-card .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .eval-table-card .card-head b {
+      font-size: 13.5px;
+      color: var(--ink);
+    }
+
+    .eval-table-card .card-head span {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+
+    .eval-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11.5px;
+      text-align: left;
+    }
+
+    .eval-table th {
+      background: var(--ground);
+      padding: 5px 8px;
+      font-weight: 700;
+      color: var(--muted);
+      border-bottom: 1px solid var(--line);
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .eval-table td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #EDF2F7;
+      color: var(--ink);
+      vertical-align: middle;
+    }
+
+    .eval-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .eval-table .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 10px;
+      font-weight: 700;
+      background: var(--good-soft);
+      color: var(--good);
+      border-radius: 999px;
+      padding: 2px 7px;
+      white-space: nowrap;
+    }
+
+    .eval-proof-col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .eval-guard-box {
+      background: var(--code-bg);
+      border-radius: 9px;
+      padding: 12px 14px;
+      color: var(--code-ink);
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      box-shadow: 0 4px 14px rgba(14, 33, 56, 0.15);
+    }
+
+    .eval-guard-box .title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--code-blue);
+    }
+
+    .eval-guard-box .badge-speed {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--code-good);
+      background: rgba(116, 217, 169, 0.16);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .eval-guard-box ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11.5px;
+    }
+
+    .eval-guard-box li {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .eval-guard-box li .ok-icon {
+      color: var(--code-good);
+      font-weight: 800;
+      font-size: 12px;
+    }
+
+    .eval-satisfaction-box {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .satisfaction-score {
+      font-size: 30px;
+      font-weight: 900;
+      color: var(--accent);
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+    }
+
+    .satisfaction-score small {
+      font-size: 14px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .satisfaction-text b {
+      display: block;
+      font-size: 12.5px;
+      color: var(--ink);
+    }
+
+    .satisfaction-text p {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.35;
+      margin-top: 2px;
+    }
+
     /* ---------- Reduced motion ---------- */
+
+    /* =========================================================
+     Slide 4 — Simplified Core Architecture (2 Phases + 3 Shields)
+     ========================================================= */
+    .arch-sim-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .arch-phase-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 4px 16px rgba(15, 36, 64, 0.04);
+    }
+
+    .arch-phase-card.f1 {
+      border-top: 4px solid var(--accent);
+    }
+
+    .arch-phase-card.f2 {
+      border-top: 4px solid var(--good);
+    }
+
+    .arch-phase-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding-bottom: 2px;
+    }
+
+    .arch-phase-title {
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+    }
+
+    .arch-phase-card.f1 .arch-phase-title {
+      color: var(--accent-deep);
+    }
+
+    .arch-phase-card.f2 .arch-phase-title {
+      color: var(--good);
+    }
+
+    .arch-phase-badge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 5px;
+      white-space: nowrap;
+    }
+
+    .arch-phase-badge.f1 {
+      background: var(--accent-soft);
+      color: var(--accent-deep);
+    }
+
+    .arch-phase-badge.f2 {
+      background: var(--good-soft);
+      color: var(--good);
+    }
+
+    .arch-steps-list {
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .arch-step-item {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      background: var(--ground);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 11px 14px;
+      flex: 1;
+    }
+
+    .step-num {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 11.5px;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    .step-num.f1 {
+      background: var(--accent);
+      color: #FFFFFF;
+    }
+
+    .step-num.f2 {
+      background: var(--good);
+      color: #FFFFFF;
+    }
+
+    .step-body {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      flex: 1;
+    }
+
+    .step-body b {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1.25;
+    }
+
+    .step-body span {
+      font-size: 11.5px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .arch-phase-foot {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px dashed var(--line);
+    }
+
+    .arch-phase-card.f1 .arch-phase-foot {
+      border-color: #CBDCF5;
+      background: rgba(26, 93, 200, 0.04);
+      color: var(--accent-deep);
+    }
+
+    .arch-phase-card.f2 .arch-phase-foot {
+      border-color: #CBE8D9;
+      background: rgba(15, 122, 78, 0.04);
+      color: var(--good);
+    }
+
+    .arch-shield-bar {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14px;
+      background: var(--accent-soft);
+      border: 1px solid #CBDCF5;
+      border-radius: 10px;
+      padding: 10px 16px;
+      align-items: center;
+    }
+
+    .shield-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 11.5px;
+      color: var(--ink);
+      line-height: 1.35;
+    }
+
+    .shield-icon {
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+
+    .shield-item b {
+      color: var(--accent-deep);
+      font-weight: 700;
+    }
+
+    /* =========================================================
+     Slide 5 — Demo Workflow
+     ========================================================= */
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .demo-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--accent);
+      border-radius: 10px;
+      padding: 14px 14px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .demo-card.guard {
+      border-top-color: var(--good);
+    }
+
+    .demo-step-badge {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--accent-deep);
+      background: var(--accent-soft);
+      padding: 2px 7px;
+      border-radius: 4px;
+      width: fit-content;
+    }
+
+    .demo-card h3 {
+      font-size: 14.5px;
+      font-weight: 800;
+      color: var(--ink);
+      line-height: 1.25;
+    }
+
+    .demo-card p {
+      font-size: 11.5px;
+      color: var(--muted);
+      line-height: 1.45;
+      flex: 1;
+    }
+
+    .demo-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .demo-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--accent-deep);
+      background: var(--accent-soft);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .demo-cta-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--accent-soft);
+      border: 1px solid #CBDCF5;
+      border-radius: 8px;
+      padding: 9px 16px;
+      font-size: 12.5px;
+      color: var(--accent-deep);
+    }
+
+    .demo-cta-btn {
+      background: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      font-size: 11.5px;
+      padding: 5px 14px;
+      border-radius: 6px;
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* =========================================================
+     Slide 7 — Differentiation (Comparison Matrix)
+     ========================================================= */
+    .diff-table-box {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .diff-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11.5px;
+      text-align: left;
+    }
+
+    .diff-table th {
+      background: var(--ground);
+      padding: 7px 10px;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--ink);
+      border-bottom: 2px solid var(--line);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .diff-table th.col-highlight {
+      background: var(--accent-soft);
+      color: var(--accent-deep);
+      border-bottom: 2px solid var(--accent);
+    }
+
+    .diff-table td {
+      padding: 7px 10px;
+      border-bottom: 1px solid #EDF2F7;
+      vertical-align: middle;
+      line-height: 1.35;
+      font-size: 11.5px;
+    }
+
+    .diff-table td.dim-name {
+      font-weight: 700;
+      color: var(--ink);
+      white-space: nowrap;
+      width: 20%;
+    }
+
+    .diff-table td.col-highlight {
+      background: rgba(30, 90, 242, 0.04);
+      font-weight: 600;
+      color: var(--accent-deep);
+    }
+
+    .diff-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .diff-foot {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent-soft);
+      border: 1px solid #CBDCF5;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 12px;
+      color: var(--accent-deep);
+    }
+
     @media (prefers-reduced-motion: reduce) {
 
       .slide,
@@ -1113,6 +2069,7 @@
     }
 
     @media print {
+
       *,
       *::before,
       *::after {
@@ -1187,6 +2144,7 @@
       }
 
       .card,
+      .p-hero-card,
       .flow-card,
       .pstep,
       .vstep,
@@ -1194,9 +2152,29 @@
       .stat,
       .ev,
       .horizon,
-      .value-card {
+      .value-card,
+      .econ-bullet-item,
+      .econ-banner-card,
+      .eval-kpi-card,
+      .eval-table-card,
+      .eval-guard-box,
+      .eval-satisfaction-box,
+      .sol-compare-strip,
+      .sol-pillar-card,
+      .sol-verdict,
+      .arch-phase-card,
+      .arch-step-item,
+      .arch-shield-bar,
+      .demo-card,
+      .demo-cta-box,
+      .diff-table-box,
+      .diff-foot {
         page-break-inside: avoid !important;
         break-inside: avoid !important;
+      }
+
+      .econ-banner-bg {
+        filter: none !important;
       }
 
       .sql-panel {
@@ -1222,393 +2200,411 @@
   <div class="stage-root">
     <main class="stage" id="stage" aria-live="polite">
 
-      <!-- ============ Slide 1 — Cover ============ -->
+      <!-- ============ Slide 1 — Title / Cover ============ -->
       <section class="slide cover active" aria-label="Trang bìa">
         <div class="cover-rule"></div>
-        <p class="kicker">VinUni AI20K Build Phase · Capstone Defense · Cohort 3</p>
-        <h1>AI <span class="hl">Semantic Layer</span> Agent</h1>
-        <p class="tagline">Biến cấu trúc dữ liệu kỹ thuật thành ngôn ngữ kinh doanh thống nhất — Truy vấn an toàn, chuẩn
-          xác 100%.</p>
-        <div class="motifs" aria-label="Ví dụ chuyển tên kỹ thuật sang tên nghiệp vụ">
-          <span class="motif"><span class="from">usr_tbl_01</span><span class="arrow">→</span><span class="to">Người
-              dùng</span></span>
-          <span class="motif"><span class="from">amt_vat_inc</span><span class="arrow">→</span><span class="to">Thành
-              tiền (gồm VAT)</span></span>
-          <span class="motif"><span class="from">ord_sts_cd</span><span class="arrow">→</span><span class="to">Trạng
-              thái đơn hàng</span></span>
-        </div>
-        <p class="meta">
-          <span>Đề tài: AI Semantic Layer Agent</span><span class="dot">·</span><span>Nhóm: P-069</span><span
-            class="dot">·</span><span>Tháng 8 / 2026</span>
+        <div class="kicker">CAPSTONE PROJECT · AI IN ACTION COHORT 3</div>
+        <h1 class="hero-title">AI SEMANTIC LAYER AGENT</h1>
+        <p class="hero-sub">
+          Tự động hóa xây dựng Semantic Layer &amp; Định nghĩa chỉ số thống nhất, hỗ trợ Truy vấn Dữ liệu Doanh nghiệp.
         </p>
+        <div class="motifs">
+          <span class="motif">2-Pass Clustering</span>
+          <span class="motif">Deterministic Safe Compiler</span>
+          <span class="motif">Read-Only Live DB</span>
+          <span class="motif">Zero SQL Hallucination</span>
+        </div>
+        <div class="meta">
+          <span>VinGroup · VinUniversity</span>
+          <span class="dot">/</span>
+          <span>Dự án P-069</span>
+          <span class="dot">/</span>
+          <span>Tháng 09/2026</span>
+        </div>
       </section>
 
-      <!-- ============ Slide 2 — Problem ============ -->
-      <section class="slide" aria-label="Bài toán">
-        <div class="eyebrow-row"><span class="eyebrow">01 · Vấn đề thực tế</span><span class="slide-sec">02 / 10</span>
+      <!-- ============ Slide 2 — Problem / Motivation ============ -->
+      <section class="slide" aria-label="Bài toán và Động lực">
+        <div class="eyebrow-row">
+          <span class="eyebrow">01 · Vấn đề thực tế (Problem &amp; Motivation)</span>
+          <span class="slide-sec">02 / 07</span>
         </div>
-        <h2>3 Nỗi đau lớn khiến doanh nghiệp <span class="hl">tắc nghẽn dữ liệu</span></h2>
+        <h2>Nỗi Đau Cốt Lõi: <span class="hl">Khoảng Cách Ngữ Nghĩa Dữ Liệu</span></h2>
+        <div class="content problem-content">
+          <div class="p-hero-card">
+            <div class="p-hero-badge">THE CORE PAIN POINT · KHOẢNG CÁCH NGỮ NGHĨA</div>
+            <h3 class="p-hero-title">
+              Người làm kinh doanh và Cơ sở dữ liệu kỹ thuật không nói cùng một ngôn ngữ.
+            </h3>
+            <p class="p-hero-desc">
+              Doanh nghiệp thiếu một <b>Tầng Ngữ Nghĩa Thống Nhất (Single Source of Truth)</b>. Cơ sở dữ liệu được thiết
+              kế thuần kỹ thuật (<code>tbl_ord_dtl</code>, <code>amt_vat_inc</code>), tách biệt hoàn toàn với ngôn ngữ
+              và
+              chỉ số vận hành kinh doanh thực tế.
+            </p>
+
+            <div class="p-hero-points">
+              <div class="p-hero-point">
+                <span class="p-point-icon">❌</span>
+                <div class="p-point-text">
+                  <b>Số liệu mâu thuẫn:</b> Cùng một chỉ số ("Doanh thu", "Khách active"), các phòng ban tự tính theo
+                  cách riêng dẫn đến báo cáo xung đột, mất niềm tin vào số liệu.
+                </div>
+              </div>
+              <div class="p-hero-point">
+                <span class="p-point-icon">❌</span>
+                <div class="p-point-text">
+                  <b>Tắc nghẽn phụ thuộc IT:</b> Người dùng nghiệp vụ mất 3–5 ngày chờ IT viết SQL thủ công cho từng báo
+                  cáo, trong khi kỹ sư dữ liệu quá tải vì các ticket ad-hoc lặp lại.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Slide 3 — Core architecture (Simplified for Non-Tech) ============ -->
+      <section class="slide" aria-label="Kiến trúc cốt lõi">
+        <div class="eyebrow-row">
+          <span class="eyebrow">02 · Cơ chế Vận hành (System Architecture)</span>
+          <span class="slide-sec">03 / 07</span>
+        </div>
+        <h2>Hệ Thống Hoạt Động Thế Nào? <span class="hl">Nguyên Lý 2 Giai Đoạn</span> Dễ Hiểu</h2>
         <div class="content">
-          <div class="problem-grid-3">
-            <div class="card p-card">
-              <div class="idx-tag">Nỗi đau #1 · Người dùng</div>
-              <div class="card-title">“Tôi không biết SQL nhưng cần số liệu ngay”</div>
-              <p class="p-sub">Tắc nghẽn tự phục vụ (Self-serve)</p>
-              <p class="note">Quy trình chuẩn đòi hỏi kỹ sư dựng Semantic Layer thủ công (dbt, LookML) cả tuần. Người
-                làm kinh doanh không thể tự lấy số, phụ thuộc 100% vào IT.</p>
-              <div class="p-foot">👉 AI tự động dựng Semantic Layer ngay khi kết nối DB.</div>
+          <div class="arch-sim-grid">
+            <!-- Giai đoạn 1 -->
+            <div class="arch-phase-card f1">
+              <div class="arch-phase-header">
+                <div class="arch-phase-title">Giai đoạn 1 · Dựng "Từ điển Dữ liệu Chuẩn"</div>
+                <span class="arch-phase-badge f1">Thiết lập 1 lần · Vài phút</span>
+              </div>
+              <div class="arch-steps-list">
+                <div class="arch-step-item">
+                  <div class="step-num f1">1</div>
+                  <div class="step-body">
+                    <b>Quét cấu trúc kỹ thuật tự động</b>
+                    <span>Tự động nhận diện bảng, cột và liên kết. Tuyệt đối không đọc hay lưu dữ liệu mật của khách
+                      hàng.</span>
+                  </div>
+                </div>
+                <div class="arch-step-item">
+                  <div class="step-num f1">2</div>
+                  <div class="step-body">
+                    <b>AI dịch nghĩa sang tiếng Việt</b>
+                    <span>Dịch các tên cột viết tắt khó hiểu thành ngôn ngữ kinh doanh quen thuộc, tự đề xuất công thức
+                      chỉ số.</span>
+                  </div>
+                </div>
+                <div class="arch-step-item">
+                  <div class="step-num f1">3</div>
+                  <div class="step-body">
+                    <b>Chuyên viên kiểm duyệt &amp; Chốt chuẩn</b>
+                    <span>Con người bấm duyệt để lưu vào "Từ điển Chuẩn" (Catalog) — mọi phòng ban đều dùng chung một
+                      định nghĩa.</span>
+                  </div>
+                </div>
+              </div>
+              <div class="arch-phase-foot">
+                <span>🎯 <b>Đầu ra:</b> Bộ từ điển chỉ số chuẩn dùng chung (Single Source of Truth)</span>
+              </div>
             </div>
-            <div class="card p-card">
-              <div class="idx-tag">Nỗi đau #2 · Tổ chức</div>
-              <div class="card-title">“Mỗi phòng ban tính số liệu một kiểu khác nhau”</div>
-              <p class="p-sub">Thiếu một nguồn chuẩn duy nhất</p>
-              <p class="note">Cùng chỉ số "Doanh thu" hay "Active User", Marketing tính một đằng, Kế toán tính một nẻo.
-                Họp giao ban mất thời gian tranh cãi xem số của ai đúng.</p>
-              <div class="p-foot">👉 Định nghĩa công thức chỉ số tập trung 1 lần, dùng chung.</div>
-            </div>
-            <div class="card p-card">
-              <div class="idx-tag">Nỗi đau #3 · Thị trường</div>
-              <div class="card-title">“Doanh nghiệp vừa &amp; nhỏ không nuôi nổi Data Team”</div>
-              <p class="p-sub">Rào cản chi phí &amp; nhân sự</p>
-              <p class="note">Các công cụ như Looker, Cube.dev vẫn cần kỹ sư viết code. Doanh nghiệp SME không đủ ngân
-                sách thuê Data Engineer nhưng vẫn cần BI bài bản.</p>
-              <div class="p-foot">👉 Kết nối DB là có ngay giải pháp BI hoàn chỉnh.</div>
+
+            <!-- Giai đoạn 2 -->
+            <div class="arch-phase-card f2">
+              <div class="arch-phase-header">
+                <div class="arch-phase-title">Giai đoạn 2 · Trả lời Câu hỏi An toàn Tức thì</div>
+                <span class="arch-phase-badge f2">Sử dụng hàng ngày · &lt; 30s</span>
+              </div>
+              <div class="arch-steps-list">
+                <div class="arch-step-item">
+                  <div class="step-num f2">1</div>
+                  <div class="step-body">
+                    <b>Hỏi bằng tiếng Việt tự nhiên</b>
+                    <span>Người làm kinh doanh chat tự nhiên: <em>"Doanh thu theo vùng tháng này?"</em> mà không cần
+                      biết viết mã code.</span>
+                  </div>
+                </div>
+                <div class="arch-step-item">
+                  <div class="step-num f2">2</div>
+                  <div class="step-body">
+                    <b>Lấy đúng công thức từ điển để tính</b>
+                    <span>Hệ thống chỉ tính theo định nghĩa đã duyệt — triệt tiêu 100% rủi ro AI nói dối hay bịa đặt số
+                      liệu.</span>
+                  </div>
+                </div>
+                <div class="arch-step-item">
+                  <div class="step-num f2">3</div>
+                  <div class="step-body">
+                    <b>Kích hoạt Rào an toàn &amp; Trả báo cáo</b>
+                    <span>Chỉ cấp quyền đọc (Read-Only), chặn đứng mọi lệnh phá hoại, trả về bảng số liệu và biểu đồ
+                      trong tích tắc.</span>
+                  </div>
+                </div>
+              </div>
+              <div class="arch-phase-foot">
+                <span>⚡ <b>Đầu ra:</b> Báo cáo &amp; Biểu đồ trực quan tức thì, chuẩn xác 100% sau 27.3ms</span>
+              </div>
             </div>
           </div>
-          <div class="verdict">🎯 AI Semantic Layer Agent giải quyết trọn vẹn khoảng trống này: Tự động hóa tạo Semantic
-            Layer — Không cần SQL, chuẩn xác 100% và không cần Data Team cồng kềnh.</div>
+
+          <!-- Dải 3 Tấm Khiên Bảo Vệ Doanh Nghiệp -->
+          <div class="arch-shield-bar">
+            <div class="shield-item">
+              <span class="shield-icon">🔒</span>
+              <div><b>Bảo mật tuyệt đối:</b> Chỉ đọc cấu trúc bảng, không chạm dữ liệu mật</div>
+            </div>
+            <div class="shield-item">
+              <span class="shield-icon">🎯</span>
+              <div><b>Chính xác 100%:</b> Chỉ tính theo công thức con người đã duyệt</div>
+            </div>
+            <div class="shield-item">
+              <span class="shield-icon">🛡️</span>
+              <div><b>An toàn hệ thống:</b> Chặn mọi lệnh sửa/xóa, không lo treo DB</div>
+            </div>
+          </div>
         </div>
       </section>
 
-      <!-- ============ Slide 3 — Solution overview ============ -->
-      <section class="slide" aria-label="Giải pháp tổng quan">
-        <div class="eyebrow-row"><span class="eyebrow">02 · Giải pháp tổng quan</span><span class="slide-sec">03 /
-            10</span></div>
-        <h2>Một Nền tảng AI Agent — <span class="hl">Hai luồng xử lý</span> khép kín</h2>
+      <!-- ============ Slide 4 — Evaluation ============ -->
+      <section class="slide" aria-label="Đánh giá thực nghiệm &amp; Benchmark">
+        <div class="eyebrow-row">
+          <span class="eyebrow">03 · Đánh giá Thực nghiệm (Evaluation &amp; Benchmark)</span>
+          <span class="slide-sec">04 / 07</span>
+        </div>
+        <h2>Kết quả Thực nghiệm: <span class="hl">Chuẩn xác, Tốc độ</span> &amp; An toàn Tuyệt đối</h2>
+        <div class="content eval-content">
+          <div class="eval-kpis">
+            <div class="card eval-kpi-card hero">
+              <div class="eval-kpi-top">
+                <span class="eval-kpi-label">Độ Bao Phủ Cấu Trúc DB</span>
+                <span class="badge"
+                  style="background:var(--accent-soft); color:var(--accent-deep); font-size:11px; font-weight:700; padding:3px 8px; border-radius:4px;">Đạt
+                  Chuẩn 100%</span>
+              </div>
+              <div class="eval-kpi-val">100<small style="font-size:22px; font-weight:700; color:var(--muted);">%</small>
+              </div>
+              <div class="eval-kpi-sub">Quét cấu trúc thành công trên cả Live DB &amp; file SQL Dump</div>
+            </div>
+
+            <div class="card eval-kpi-card hero-good">
+              <div class="eval-kpi-top">
+                <span class="eval-kpi-label">Độ Hiểu Ngữ Nghĩa AI</span>
+                <span class="badge"
+                  style="background:var(--good-soft); color:var(--good); font-size:11px; font-weight:700; padding:3px 8px; border-radius:4px;">Độ
+                  Chuẩn F1</span>
+              </div>
+              <div class="eval-kpi-val good">94.5<small
+                  style="font-size:22px; font-weight:700; color:var(--good);">%</small></div>
+              <div class="eval-kpi-sub">Khớp đúng chỉ số &amp; chiều phân tích từ tiếng Việt tự nhiên</div>
+            </div>
+
+            <div class="card eval-kpi-card hero-good">
+              <div class="eval-kpi-top">
+                <span class="eval-kpi-label">Tỷ Lệ Ảo Giác Số Liệu</span>
+                <span class="badge"
+                  style="background:var(--good-soft); color:var(--good); font-size:11px; font-weight:700; padding:3px 8px; border-radius:4px;">Triệt
+                  Tiêu 100%</span>
+              </div>
+              <div class="eval-kpi-val good">0.0<small
+                  style="font-size:22px; font-weight:700; color:var(--good);">%</small></div>
+              <div class="eval-kpi-sub">Hoàn toàn không có ảo giác SQL nhờ Trình biên dịch Tất định</div>
+            </div>
+
+            <div class="card eval-kpi-card hero">
+              <div class="eval-kpi-top">
+                <span class="eval-kpi-label">Tốc Độ Xử Lý Truy Vấn</span>
+                <span class="badge"
+                  style="background:var(--accent-soft); color:var(--accent-deep); font-size:11px; font-weight:700; padding:3px 8px; border-radius:4px;">Siêu
+                  Tốc</span>
+              </div>
+              <div class="eval-kpi-val">27.3<small
+                  style="font-size:22px; font-weight:700; color:var(--muted);">ms</small></div>
+              <div class="eval-kpi-sub">Biên dịch SQL và kiểm tra rào an toàn trong tích tắc (&lt; 30ms)</div>
+            </div>
+          </div>
+
+          <div class="econ-footnote" style="margin-top:2px;">*Dữ liệu trích xuất trực tiếp từ Test Runner &amp; Báo cáo
+            Benchmark hệ thống P-069 (Tháng 09/2026).</div>
+        </div>
+      </section>
+
+      <!-- ============ Slide 5 — Differentiation ============ -->
+      <section class="slide" aria-label="Điểm khác biệt vượt trội">
+        <div class="eyebrow-row">
+          <span class="eyebrow">04 · Điểm khác biệt Vượt trội (Differentiation &amp; Competitive Edge)</span>
+          <span class="slide-sec">05 / 07</span>
+        </div>
+        <h2>Ma trận So sánh: Vị thế Vượt trội so với các Giải pháp trên Thị trường</h2>
         <div class="content">
-          <div class="flow-duo">
-            <div class="flow-card">
-              <span class="badge">Luồng 1 · Xây dựng &amp; Quản trị</span>
-              <h3>Tự động tạo Semantic Layer</h3>
-              <div class="mini-pipe">
-                <span class="step">Đọc schema DB</span><span class="sep">→</span>
-                <span class="step">Dựng Canonical Model</span><span class="sep">→</span>
-                <span class="step">AI đề xuất Metric</span><span class="sep">→</span>
-                <span class="step">Con người duyệt</span>
-              </div>
-            </div>
-            <div class="flow-card">
-              <span class="badge">Luồng 2 · Khai thác &amp; Truy vấn (Live DB)</span>
-              <h3>Truy vấn Tự nhiên Chuẩn xác 100%</h3>
-              <div class="mini-pipe">
-                <span class="step">Hỏi tiếng Việt tự nhiên</span><span class="sep">→</span>
-                <span class="step">Ánh xạ Semantic Layer</span><span class="sep">→</span>
-                <span class="step">Biên dịch SQL an toàn</span><span class="sep">→</span>
-                <span class="step">Trả kết quả tức thì</span>
-              </div>
-            </div>
-          </div>
-          <div class="conv-band">
-            <span class="lead">Lớp hội thoại thông minh</span>
-            <span class="item"><b>Bộ điều phối AI</b><span>Phân loại ý định: chào hỏi thông thường hay cần gợi ý chỉ số
-                kinh doanh</span></span>
-            <span class="item"><b>Trình hướng dẫn từng bước (Wizard)</b><span>Tương tác hỏi đáp để làm rõ câu hỏi mơ hồ
-                trước khi truy vấn</span></span>
-          </div>
-          <div class="principle-row">
-            <span class="principle"><span class="glyph">1</span>Con người kiểm duyệt (HITL) — AI đề xuất, chuyên viên
-              phê duyệt &amp; quản trị phiên bản</span>
-            <span class="principle"><span class="glyph">2</span>Chuẩn xác tuyệt đối (Deterministic) — SQL sinh từ
-              Semantic Layer chuẩn, không để AI đoán mò</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- ============ Slide 4 — Flow 1 ============ -->
-      <section class="slide" aria-label="Luồng 1 — Tự động tạo và Quản trị Semantic Layer">
-        <div class="eyebrow-row"><span class="eyebrow">03 · Luồng 1 — Xây dựng &amp; Quản trị</span><span
-            class="slide-sec">04 / 10</span></div>
-        <h2>Từ Database thô đến <span class="hl">Semantic Layer chuẩn chỉnh</span></h2>
-        <div class="content">
-          <div class="pipeline">
-            <div class="pstep">
-              <span class="num">01</span>
-              <h4>Nạp cấu trúc DB</h4>
-              <p>Quét schema Live DB hoặc phân tích file SQL Dump DDL (PostgreSQL, MySQL, SQLite).</p>
-              <span class="code">SQLAlchemy · Dump Parser</span>
-            </div>
-            <span class="psep">→</span>
-            <div class="pstep">
-              <span class="num">02</span>
-              <h4>Dựng Canonical Model</h4>
-              <p>AI gán ngữ cảnh tiếng Việt, chuẩn hóa thực thể, nhận diện Time Dimension &amp; nối bảng.</p>
-              <span class="code">canonical_relationships</span>
-            </div>
-            <span class="psep">→</span>
-            <div class="pstep">
-              <span class="num">03</span>
-              <h4>AI đề xuất Metrics</h4>
-              <p>Tự động sinh sẵn công thức chỉ số cốt lõi ban đầu (Doanh thu, Đơn hàng, Tăng trưởng...).</p>
-              <span class="code">on_demand_metric_suggest</span>
-            </div>
-            <span class="psep">→</span>
-            <div class="pstep">
-              <span class="num">04</span>
-              <h4>Kiểm duyệt &amp; Lưu vết</h4>
-              <p>Chuyên viên chỉnh sửa, phê duyệt chỉ số, tự động lưu vết lịch sử phiên bản thay đổi.</p>
-              <span class="code">metric_versions</span>
-            </div>
-            <span class="psep">→</span>
-            <div class="pstep">
-              <span class="num">05</span>
-              <h4>Xuất file tích hợp</h4>
-              <p>Đóng gói Semantic Layer sẵn sàng tích hợp với các công cụ BI (dbt, Metabase, PowerBI).</p>
-              <span class="code">JSON · YAML · Metabase</span>
-            </div>
-          </div>
-          <div class="safety-strip"><span class="glyph">✓</span> An toàn dữ liệu: Hệ thống chỉ đọc cấu trúc bảng/cột —
-            Tuyệt đối không đọc dữ liệu khách hàng ở bước này.</div>
-        </div>
-      </section>
-
-      <!-- ============ Slide 5 — Flow 2 ============ -->
-      <section class="slide" aria-label="Luồng 2 — Truy vấn Ngôn ngữ Tự nhiên Chuẩn xác & An toàn">
-        <div class="eyebrow-row"><span class="eyebrow">04 · Luồng 2 — Truy vấn Tự nhiên Chuẩn xác</span><span
-            class="slide-sec">05 / 10</span></div>
-        <h2>Truy vấn tự nhiên <span class="hl">chuẩn xác 100%</span> — An toàn tuyệt đối</h2>
-        <div class="content">
-          <div class="f2-grid">
-            <div class="vpipe">
-              <div class="vstep io"><b>01. Đặt câu hỏi tự nhiên</b><span>Hỏi bằng tiếng Việt qua Chat &amp;
-                  Wizard</span></div>
-              <span class="varrow">▼</span>
-              <div class="vstep"><b>02. Ánh xạ Chỉ số &amp; Chiều</b><span>AI gợi ý hoặc chọn trên Metric
-                  Explorer</span></div>
-              <span class="varrow">▼</span>
-              <div class="vstep"><b>03. Tự động giải nối bảng</b><span>SemanticQueryCompiler tìm đường JOIN tối
-                  ưu</span></div>
-              <span class="varrow">▼</span>
-              <div class="vstep"><b>04. Biên dịch câu lệnh SQL</b><span>Tự động định dạng PostgreSQL / MySQL /
-                  SQLite</span></div>
-              <span class="varrow">▼</span>
-              <div class="vstep io"><b>05. Thực thi Live DB</b><span>Chạy Read-Only, hiển thị bảng &amp; biểu đồ tức
-                  thì</span></div>
-            </div>
-            <div class="sql-panel">
-              <div class="panel-title">Khung bảo vệ an toàn tự động <span class="engine">sqlglot</span></div>
-              <div class="sql-line"><span class="ok-kw">SELECT</span> p.ten_san_pham, <span
-                  class="kw">SUM</span>(o.tong_tien) <span class="kw">AS</span> doanh_thu</div>
-              <div class="sql-line"><span class="kw">FROM</span> don_hang o <span class="kw">JOIN</span> chi_tiet_don oi
-                ON o.id = oi.don_hang_id</div>
-              <div class="sql-line"><span class="kw">WHERE</span> o.trang_thai = <span class="ok-kw">'HOAN_THANH'</span>
-                <span class="kw">LIMIT</span> 100;</div>
-              <div class="sql-line"><span class="blocked">INSERT · UPDATE · DELETE · DROP · ALTER · TRUNCATE</span> — Bị
-                chặn đứng 100%</div>
-              <div class="guard-meta">
-                <span class="guard-chip"><span class="ok">✓</span> Chỉ cho phép SELECT</span>
-                <span class="guard-chip"><span class="ok">✓</span> Giới hạn trần 100 dòng</span>
-                <span class="guard-chip"><span class="ok">✓</span> Giới hạn thời gian 15s</span>
-                <span class="guard-chip"><span class="ok">✓</span> Mã hóa kết nối DB</span>
-              </div>
-            </div>
-          </div>
-          <div class="f2-note">AI không tự viết SQL lúc truy vấn — Câu lệnh sinh từ công thức chuẩn và quan hệ đã duyệt
-            → Loại trừ 100% rủi ro ảo giác, sai số và thay đổi dữ liệu.</div>
-        </div>
-      </section>
-
-      <!-- ============ Slide 6 — Architecture ============ -->
-      <section class="slide" aria-label="Kiến trúc hệ thống">
-        <div class="eyebrow-row"><span class="eyebrow">05 · Kiến trúc hệ thống</span><span class="slide-sec">06 /
-            10</span></div>
-        <h2>Kiến trúc <span class="hl">4 tầng</span></h2>
-        <div class="content">
-          <div class="layers">
-            <div class="layer">
-              <div class="head"><b>1. Giao diện người dùng — Next.js</b><span>5 màn hình làm việc chuyên biệt</span>
-              </div>
-              <div class="chips">
-                <span class="chip">Mô hình dữ liệu</span>
-                <span class="chip">Danh mục chỉ số</span>
-                <span class="chip">Trình truy vấn dữ liệu</span>
-                <span class="chip">Phòng Studio AI</span>
-                <span class="chip">Xuất file BI</span>
-              </div>
-            </div>
-            <div class="layer-gap">▼</div>
-            <div class="layer">
-              <div class="head"><b>2. Cổng dịch vụ API — FastAPI</b><span>25+ cổng xử lý nhanh, bảo mật</span></div>
-              <div class="chips">
-                <span class="chip">Đăng nhập JWT &amp; Google</span>
-                <span class="chip">Phân quyền theo nhóm</span>
-                <span class="chip">Kiểm soát tần suất AI</span>
-                <span class="chip">Thông báo thời gian thực</span>
-              </div>
-            </div>
-            <div class="layer-gap">▼</div>
-            <div class="layer">
-              <div class="head"><b>3. Bộ não điều phối AI — LangGraph</b><span>Có chuyên viên kiểm duyệt (HITL)</span>
-              </div>
-              <div class="chips">
-                <span class="chip">Quy trình dịch nghĩa AI</span>
-                <span class="chip">Điều phối chat</span>
-                <span class="chip">Hướng dẫn truy vấn</span>
-                <span class="chip">Trình biên dịch SQL</span>
-              </div>
-            </div>
-            <div class="layer-gap">▼</div>
-            <div class="layer">
-              <div class="head"><b>4. Tầng dữ liệu &amp; Lưu trữ</b><span>Kho lưu trữ Metadata &amp; Cơ sở dữ liệu
-                  nguồn</span></div>
-              <div class="chips">
-                <span class="chip">Lưu từ điển &amp; lịch sử phiên bản chỉ số</span>
-                <span class="chip">DB nguồn: Chỉ đọc dữ liệu an toàn</span>
-              </div>
-            </div>
+          <div class="diff-table-box">
+            <table class="diff-table">
+              <thead>
+                <tr>
+                  <th>Tiêu chí Đánh giá</th>
+                  <th>Text-to-SQL Tự do (Vanna / LangChain)</th>
+                  <th>BI Ngoại (Looker / Cube)</th>
+                  <th>Data Team Thủ công (dbt / SQL)</th>
+                  <th class="col-highlight">AI Semantic Layer (P-069)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="dim-name">Độ chuẩn xác số liệu</td>
+                  <td><span class="badge-weak">Ảo giác 20–40%</span>, sai join bảng</td>
+                  <td><span class="badge-ok">Chuẩn nhưng phụ thuộc code tay</span></td>
+                  <td><span class="badge-weak">Dễ nhầm lẫn giữa các phòng ban</span></td>
+                  <td class="col-highlight"><span class="badge-strong">100% Chuẩn xác (Zero Hallucination)</span></td>
+                </tr>
+                <tr>
+                  <td class="dim-name">An toàn Live Database</td>
+                  <td><span class="badge-weak">Rủi ro Injection &amp; Lệnh ghi</span></td>
+                  <td><span class="badge-ok">An toàn (Read-Only)</span></td>
+                  <td><span class="badge-ok">An toàn (Cấp quyền thủ công)</span></td>
+                  <td class="col-highlight"><span class="badge-strong">Bảo vệ 3 lớp (AST + Fernet + Read-Only)</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="dim-name">Thời gian dựng Semantic</td>
+                  <td><span class="badge-weak">Không có Semantic Layer</span></td>
+                  <td><span class="badge-weak">2–3 tháng viết code dbt/LookML</span></td>
+                  <td><span class="badge-weak">2–4 tuần dựng data mart</span></td>
+                  <td class="col-highlight"><span class="badge-strong">Vài phút (AI 2-Pass + HITL Review)</span></td>
+                </tr>
+                <tr>
+                  <td class="dim-name">Chi phí Bản quyền (TCO)</td>
+                  <td><span class="badge-ok">Rẻ nhưng chi phí sửa sai cao</span></td>
+                  <td><span class="badge-weak">Cực đắt ($24,000 – $36,000/năm)</span></td>
+                  <td><span class="badge-weak">~1.185 Tỷ/năm quỹ lương kỹ sư</span></td>
+                  <td class="col-highlight"><span class="badge-strong">~35 Triệu/năm (Tiết kiệm &gt;95%)</span></td>
+                </tr>
+                <tr>
+                  <td class="dim-name">Trải nghiệm Người dùng</td>
+                  <td><span class="badge-weak">Chatbot tự do, khó kiểm chứng</span></td>
+                  <td><span class="badge-weak">Cần đào tạo chuyên sâu</span></td>
+                  <td><span class="badge-weak">Chờ ticket 3–5 ngày</span></td>
+                  <td class="col-highlight"><span class="badge-strong">Self-serve tức thì (&lt;30s) bằng tiếng
+                      Việt</span></td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
 
-      <!-- ============ Slide 7 — Feasibility ============ -->
-      <section class="slide" aria-label="Tính khả thi">
-        <div class="eyebrow-row"><span class="eyebrow">06 · Tính khả thi &amp; Thực nghiệm</span><span
-            class="slide-sec">07 / 10</span></div>
-        <h2>Sản phẩm <span class="hl">hoàn thiện 100%</span> — Kiểm chứng thực tế</h2>
-        <div class="content">
-          <div class="kpi-row">
-            <div class="stat">
-              <div class="value">12<small>/12</small></div>
-              <div class="label">Tính năng cốt lõi hoàn thành (F-01 → F-12)</div>
+      <!-- ============ Slide 6 — Hiệu quả kinh tế ============ -->
+      <section class="slide" aria-label="Hiệu quả kinh tế — Cách đặt vấn đề">
+        <div class="econ-top-strip">
+          <span class="org-left">05 · HIỆU QUẢ KINH TẾ (ECONOMIC IMPACT &amp; ROI)</span>
+          <span class="org-right">VINGROUP - VINUNI · <span class="slide-sec">06 / 07</span></span>
+        </div>
+        <div class="content econ-content">
+          <div class="econ-hero-grid">
+            <div class="econ-title-col">
+              <h2 class="main-title">HIỆU QUẢ KINH TẾ</h2>
+              <div class="sub-title">CÁCH ĐẶT VẤN ĐỀ</div>
+              <p class="desc">
+                Mô hình định lượng trên DN quy mô vừa (3 Data staff, 50–100 business users): Giải phóng nhân lực kỹ
+                thuật, cắt giảm bản quyền ngoại và triệt tiêu độ trễ ra quyết định.
+              </p>
             </div>
-            <div class="stat">
-              <div class="value">4<small>/4</small></div>
-              <div class="label">Giai đoạn phát triển Backend · AI · Web · QA</div>
-            </div>
-            <div class="stat">
-              <div class="value">25<small>+</small></div>
-              <div class="label">Cổng API hoàn thiện và kiểm thử tự động</div>
-            </div>
-            <div class="stat">
-              <div class="value">35</div>
-              <div class="label">Bài kiểm thử logic đánh giá chất lượng</div>
-            </div>
-          </div>
-          <div class="evidence-grid">
-            <div class="ev"><span class="mark">✓</span>
-              <div><b>Đo lường chất lượng độc lập</b>
-                <p>Bộ dữ liệu mẫu chuẩn và thuật toán chấm điểm độ tương đồng tiếng Việt tự động, không phụ thuộc cảm
-                  tính của AI.</p>
+            <div class="econ-bullets-col">
+              <div class="econ-bullet-item">
+                <div class="econ-badge minus">−</div>
+                <div class="econ-bullet-text">
+                  <b>Tiết kiệm ~533 Triệu/năm — Lãng phí 45% giờ làm của Data Team</b>
+                  <span>Theo TopCV/ITviec 2026, quỹ chi phí 1 DE + 2 DA là ~1,185 Tỷ/năm. Theo Fivetran &amp; dbt Labs,
+                    40–50% thời gian bị ngốn vào viết SQL ad-hoc &amp; đối soát sai lệch.</span>
+                </div>
               </div>
-            </div>
-            <div class="ev"><span class="mark">✓</span>
-              <div><b>Bảo mật nhiều lớp nghiêm ngặt</b>
-                <p>Mã hóa chuỗi kết nối database trong RAM, phân quyền chặt chẽ giữa Quản trị viên, Trưởng nhóm dữ liệu
-                  và Thành viên.</p>
+              <div class="econ-bullet-item">
+                <div class="econ-badge plus">+</div>
+                <div class="econ-bullet-text">
+                  <b>Giảm 99% Thời gian chờ — Rút ngắn từ 3–5 ngày xuống &lt; 30 giây</b>
+                  <span>Người làm kinh doanh tự truy vấn Self-serve ngay trên Live DB qua SemanticQueryCompiler. Rút
+                    ngắn thời gian dựng Semantic Layer từ 2–3 tuần thủ công xuống vài phút.</span>
+                </div>
               </div>
-            </div>
-            <div class="ev"><span class="mark">✓</span>
-              <div><b>Chất lượng mã nguồn chuẩn chỉnh</b>
-                <p>Kiểm thử tự động toàn diện từ dịch vụ AI đến API và cơ sở dữ liệu; quản lý thay đổi schema an toàn
-                  với Alembic.</p>
-              </div>
-            </div>
-            <div class="ev"><span class="mark">✓</span>
-              <div><b>Sẵn sàng ứng dụng thực tế</b>
-                <p>Tự động phát hiện chỉ số trùng lặp, thông báo kết quả tức thì, hỗ trợ làm việc nhóm đa người dùng.
-                </p>
+              <div class="econ-bullet-item">
+                <div class="econ-badge minus">−</div>
+                <div class="econ-bullet-text">
+                  <b>Tiết kiệm 550 – 900 Triệu/năm — Bản quyền công cụ Semantic ngoại</b>
+                  <span>Thay thế Looker Core ($36k/năm) hoặc Cube Enterprise ($24k/năm). Chi phí vận hành AI (DeepSeek
+                    API + Cloud host) chỉ ~35 Triệu/năm (tiết kiệm &gt;95% chi phí).</span>
+                </div>
               </div>
             </div>
           </div>
+
+          <div class="econ-banner-card">
+            <div class="econ-banner-bg"></div>
+            <div class="econ-banner-overlay">
+              <div class="econ-stat-box">
+                <div class="top-tag">Hiệu quả đầu tư (Năm 1)</div>
+                <div class="big-num highlight">408% ROI</div>
+                <div class="note">Hoàn vốn (Payback) sau ~2.0 tháng (Capex triển khai 180M vs Lợi ích ròng ~1.08
+                  Tỷ/năm).</div>
+              </div>
+              <div class="econ-stat-box">
+                <div class="top-tag">Chất lượng quyết định</div>
+                <div class="big-num">100% Single Truth</div>
+                <div class="note">Chuẩn hóa công thức tập trung, loại bỏ hoàn toàn rủi ro xung đột số liệu giữa Sales,
+                  MKT &amp; Kế toán.</div>
+              </div>
+              <div class="econ-stat-box">
+                <div class="top-tag">Chi phí vận hành AI (TCO)</div>
+                <div class="big-num">~35 Tr/năm</div>
+                <div class="note">DeepSeek API (~100k queries/năm ~ 2.5M VNĐ) + Private Cloud host on-premise, an toàn
+                  tuyệt đối.</div>
+              </div>
+            </div>
+          </div>
+          <div class="econ-footnote">*Cơ sở tính toán: Báo cáo Lương ITviec &amp; TopCV 2026; Fivetran &amp; dbt Labs
+            State of Analytics (45% time on ad-hoc SQL); Bảng giá Looker ($36k) &amp; Cube Enterprise ($24k).</div>
         </div>
       </section>
 
-      <!-- ============ Slide 8 — Roadmap ============ -->
-      <section class="slide" aria-label="Định hướng phát triển">
-        <div class="eyebrow-row"><span class="eyebrow">07 · Định hướng phát triển</span><span class="slide-sec">08 /
-            10</span></div>
-        <h2>Lộ trình phát triển: <span class="hl">Rõ ràng</span> &amp; Thực tế</h2>
-        <div class="content">
-          <div class="roadmap">
-            <div class="horizon now">
-              <span class="when">Đang triển khai</span>
-              <h3>Hoàn thiện Mô hình Ngữ nghĩa</h3>
-              <ul>
-                <li><b>Quy trình 4 giai đoạn chuẩn:</b> Khám phá → Kiểm duyệt → Định nghĩa chỉ số → Truy vấn trực tiếp
-                </li>
-                <li><b>Tách biệt rõ ràng</b> giữa cấu trúc bảng vật lý và công thức chỉ số kinh doanh</li>
-                <li><b>AI phát hiện trùng lặp:</b> Cảnh báo ngay khi công thức mới bị trùng hoặc mâu thuẫn với chỉ số cũ
-                </li>
-              </ul>
-            </div>
-            <div class="horizon next">
-              <span class="when">Giai đoạn tiếp theo</span>
-              <h3>Mở rộng Khả năng Đánh giá</h3>
-              <ul>
-                <li><b>Mở rộng bộ dữ liệu chuẩn</b> sang nhiều ngành nghề mới (Tài chính, Y tế, Bán lẻ ngoài TMĐT)</li>
-                <li><b>Cơ chế đánh giá kết hợp:</b> Đánh giá logic tự động kết hợp chuyên gia kiểm định</li>
-                <li><b>Thiết lập chuẩn chất lượng:</b> Đảm bảo độ chính xác trên 90% trước khi triển khai thực tế</li>
-              </ul>
-            </div>
-            <div class="horizon v2">
-              <span class="when">Tầm nhìn tương lai</span>
-              <h3>Hệ sinh thái Tích hợp Mở rộng</h3>
-              <ul>
-                <li><b>Đồng bộ tự động lên công cụ BI:</b> Đẩy từ điển dữ liệu lên Metabase, dbt Cloud qua Webhook</li>
-                <li><b>Truy vấn liên cơ sở dữ liệu:</b> Ghép nối và truy vấn an toàn giữa nhiều database khác nhau</li>
-                <li><b>Tự động lập hồ sơ dữ liệu:</b> Thống kê số lượng dòng, độ phủ dữ liệu định kỳ</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ============ Slide 9 — Value Proposition ============ -->
-      <section class="slide" aria-label="Giá trị cốt lõi">
-        <div class="eyebrow-row"><span class="eyebrow">08 · Giá trị cốt lõi</span><span class="slide-sec">09 / 10</span>
-        </div>
-        <h2>3 Giá trị cốt lõi <span class="hl">mang lại</span></h2>
-        <div class="content">
-          <div class="value-grid">
-            <div class="value-card">
-              <div class="idx">01</div>
-              <h3>Dữ liệu tự phục vụ — Không cần SQL</h3>
-              <p>Người làm kinh doanh lấy số liệu tức thì qua giao diện trực quan &amp; trợ lý AI — không còn cảnh xếp
-                hàng chờ đợi IT.</p>
-            </div>
-            <div class="value-card">
-              <div class="idx">02</div>
-              <h3>Một nguồn chuẩn duy nhất (Single Source of Truth)</h3>
-              <p>Chỉ số cốt lõi định nghĩa tập trung 1 lần, cả công ty dùng chung — chấm dứt hoàn toàn tình trạng mỗi
-                phòng ban một con số.</p>
-            </div>
-            <div class="value-card">
-              <div class="idx">03</div>
-              <h3>Xóa bỏ rào cản chi phí cho SME</h3>
-              <p>Chỉ cần kết nối database là AI tự tạo Semantic Layer — doanh nghiệp vừa và nhỏ có ngay hệ thống BI
-                chuẩn chỉnh mà không cần thuê Data Team đắt đỏ.</p>
-            </div>
-          </div>
-          <div class="verdict">🎯 AI Semantic Layer Agent mở khóa tiềm năng dữ liệu toàn diện: Tự phục vụ tức thì —
-            Chuẩn xác 100% — Tối ưu chi phí.</div>
-        </div>
-      </section>
-
-      <!-- ============ Slide 10 — Thank You & Demo ============ -->
+      <!-- ============ Slide 7 — Q&A / Closing ============ -->
       <section class="slide cover thank-you" aria-label="Lời cảm ơn &amp; Q&amp;A">
         <div class="cover-rule"></div>
-        <p class="kicker">VinUni AI20K Build Phase · Capstone Defense · Cohort 3</p>
-        <h1>Xin Chân Thành <span class="hl">Cảm Ơn!</span></h1>
-        <div class="motifs" aria-label="Thông điệp chuyển tiếp">
-          <span class="motif"><span class="from">Đề tài</span><span class="arrow">→</span><span class="to">AI Semantic
-              Layer Agent</span></span>
-          <span class="motif"><span class="from">Nhóm</span><span class="arrow">→</span><span
-              class="to">P-069</span></span>
-          <span class="motif"><span class="from">Bước tiếp theo</span><span class="arrow">→</span><span class="to">Live
-              Demo Sản phẩm</span></span>
-        </div>
-        <p class="meta">
-          <span>Sẵn sàng cho phần Trình diễn Sản phẩm Trực tiếp (Live Demo) &amp; Trả lời Câu hỏi (Q&amp;A)</span>
+        <div class="kicker">DỰ ÁN P-069 · AI IN ACTION COHORT 3 · VINUNI</div>
+        <h2 class="hero-title" style="font-size: 56px;">CẢM ƠN VÀ HỎI ĐÁP</h2>
+        <p class="hero-sub" style="margin-top: 14px; max-width: 58ch;">
+          Hệ thống AI Semantic Layer Agent đã sẵn sàng Live Demo và triển khai thực tế.
+          Rất mong nhận được ý kiến đóng góp quý báu từ Hội đồng Phản biện!
         </p>
+
+        <div class="qa-grid"
+          style="margin-top: 28px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; width: 100%;">
+          <div class="card qa-box" style="padding: 18px 20px;">
+            <div class="idx-tag">Live System</div>
+            <h3 style="font-size: 17px; margin-top: 8px;">Trải nghiệm Trực tiếp</h3>
+            <p style="font-size: 12.5px; color: var(--muted); margin-top: 4px;">
+              Dockerized Local &amp; Cloud Ready. Thử nghiệm ngay trên Live DB Postgres/MySQL.
+            </p>
+          </div>
+          <div class="card qa-box" style="padding: 18px 20px;">
+            <div class="idx-tag">Tài liệu &amp; Mã nguồn</div>
+            <h3 style="font-size: 17px; margin-top: 8px;">Báo cáo &amp; Benchmark</h3>
+            <p style="font-size: 12.5px; color: var(--muted); margin-top: 4px;">
+              Tài liệu kỹ thuật PRD, Architecture, bộ Test Suites 621 tests &amp; Báo cáo Thực nghiệm.
+            </p>
+          </div>
+          <div class="card qa-box" style="padding: 18px 20px;">
+            <div class="idx-tag">Liên hệ Nhóm</div>
+            <h3 style="font-size: 17px; margin-top: 8px;">Q&amp;A &amp; Thảo luận</h3>
+            <p style="font-size: 12.5px; color: var(--muted); margin-top: 4px;">
+              Sẵn sàng giải trình chi tiết về Thuật toán 2-Pass, AST Guardrails và Mô hình Kinh tế.
+            </p>
+          </div>
+        </div>
+
+        <div class="meta" style="bottom: 36px;">
+          <span>AI in Action Cohort 3</span>
+          <span class="dot">/</span>
+          <span>Capstone Pitch Deck</span>
+          <span class="dot">/</span>
+          <span class="slide-sec">07 / 07</span>
+        </div>
       </section>
 
       <div class="click-zone prev" id="zonePrev" title="Slide trước" role="button" tabindex="0"
@@ -1623,11 +2619,16 @@
   </div>
   <p class="hint">← / → hoặc Space để chuyển slide</p>
   <div class="controls">
-    <span class="counter" id="counter" aria-live="polite">01 / 10</span>
+    <span class="counter" id="counter" aria-live="polite">01 / 07</span>
     <button type="button" id="btnPrev" aria-label="Slide trước" title="Slide trước (←)">←</button>
     <button type="button" id="btnNext" aria-label="Slide sau" title="Slide sau (→)">→</button>
     <button type="button" id="btnPrint" aria-label="Xuất PDF" title="Xuất PDF / In (Ctrl+P)">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M6 9V2h12v7" />
+        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+        <rect x="6" y="14" width="12" height="8" />
+      </svg>
     </button>
   </div>
 
@@ -1653,6 +2654,10 @@
         slides.forEach(function (s, i) {
           s.classList.toggle("active", i === idx);
           s.setAttribute("aria-hidden", i === idx ? "false" : "true");
+          var sec = s.querySelector(".slide-sec");
+          if (sec) {
+            sec.textContent = pad(i + 1) + " / " + pad(total);
+          }
         });
         bar.style.width = (((idx + 1) / total) * 100) + "%";
         counter.textContent = pad(idx + 1) + " / " + pad(total);
@@ -1702,6 +2707,15 @@
         stage.style.transformOrigin = "center center";
         stage.style.transform = "scale(" + s + ")";
       }
+      window.addEventListener("hashchange", function () {
+        var m = window.location.hash.match(/^#(\d+)$/);
+        if (m) {
+          var n = parseInt(m[1], 10);
+          if (n >= 1 && n <= total && n - 1 !== idx) {
+            go(n - 1);
+          }
+        }
+      });
       window.addEventListener("resize", fit);
       fit();
       render();

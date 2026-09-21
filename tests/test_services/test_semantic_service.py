@@ -17,6 +17,7 @@ from src.models.db import (
     SemanticMetricModel,
     SemanticTableModel,
 )
+from src.models.review_mixin import REVIEW_STATUS_APPROVED, REVIEW_STATUS_PENDING
 from src.models.schema_metadata import (
     ColumnMetadata,
     ForeignKeyMetadata,
@@ -29,7 +30,9 @@ from src.models.schema_metadata import (
 )
 from src.services.metric_rollback import rollback_metric
 from src.services.semantic_service import (
+    _derive_relationship_suggestion,
     _pydantic_tables_to_typeddict,
+    _upsert_relationship,
     approve_metric,
     create_metric,
     delete_semantic_database,
@@ -1270,3 +1273,98 @@ async def test_rollback_metric_compile_failure_leaves_state_unchanged(async_sess
     assert refreshed.approved_by is None
     remaining = await _fetch_versions(async_session, metric_id)
     assert [v.version for v in remaining] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_upsert_relationship_derives_suggestion_and_preserves_edits(async_session: AsyncSession):
+    """New relationships get a Vietnamese suggestion; existing ones keep human edits."""
+    db_id = await ensure_semantic_database(
+        db=async_session, source_type="live_target", source_id=1, user_id=1, display_name="T", dialect="postgresql"
+    )
+    orders = SemanticTableModel(
+        db_id=db_id, table_name="orders", business_name="Đơn hàng", review_status=REVIEW_STATUS_PENDING
+    )
+    customers = SemanticTableModel(
+        db_id=db_id, table_name="customers", business_name="Khách hàng", review_status=REVIEW_STATUS_PENDING
+    )
+    async_session.add_all([orders, customers])
+    await async_session.flush()
+    order_id_col = SemanticColumnModel(
+        table_id=orders.id, column_name="customer_id", business_name="Mã khách hàng", data_type="INTEGER"
+    )
+    cust_id_col = SemanticColumnModel(table_id=customers.id, column_name="id", business_name="Mã", data_type="INTEGER")
+    async_session.add_all([order_id_col, cust_id_col])
+    await async_session.flush()
+
+    column_pairs = [{"from_column_id": order_id_col.id, "to_column_id": cust_id_col.id}]
+    key = "orders:orders.customer_id = customers.id:customers"
+
+    await _upsert_relationship(
+        async_session,
+        db_id,
+        orders.id,
+        customers.id,
+        "orders.customer_id = customers.id",
+        key,
+        None,
+        column_pairs,
+    )
+    await async_session.flush()
+
+    rel = (
+        (
+            await async_session.execute(
+                select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.connection_id == db_id)
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert rel.business_name == "Đơn hàng → Khách hàng"
+    assert "Mã khách hàng" in rel.description
+    assert rel.ai_business_name == rel.business_name
+    assert rel.review_status == REVIEW_STATUS_PENDING
+
+    # Human edits the label and approves it.
+    rel.business_name = "Đơn hàng thuộc về Khách hàng"
+    rel.review_status = REVIEW_STATUS_APPROVED
+    await async_session.flush()
+
+    # Re-run upsert (same key) — must refresh technical metadata only, not clobber the label.
+    await _upsert_relationship(
+        async_session,
+        db_id,
+        orders.id,
+        customers.id,
+        "orders.customer_id = customers.id",
+        key,
+        None,
+        column_pairs,
+    )
+    await async_session.flush()
+    await async_session.refresh(rel)
+    assert rel.business_name == "Đơn hàng thuộc về Khách hàng"
+    assert rel.review_status == REVIEW_STATUS_APPROVED
+    assert rel.validation_status == "valid"
+
+
+@pytest.mark.asyncio
+async def test_derive_relationship_suggestion_falls_back_to_physical(async_session: AsyncSession):
+    """Suggestion uses physical names when business names are empty."""
+    db_id = await ensure_semantic_database(
+        db=async_session, source_type="live_target", source_id=2, user_id=1, display_name="T", dialect="postgresql"
+    )
+    a = SemanticTableModel(db_id=db_id, table_name="a", business_name="", review_status=REVIEW_STATUS_PENDING)
+    b = SemanticTableModel(db_id=db_id, table_name="b", business_name="", review_status=REVIEW_STATUS_PENDING)
+    async_session.add_all([a, b])
+    await async_session.flush()
+    ca = SemanticColumnModel(table_id=a.id, column_name="b_id", business_name="", data_type="INTEGER")
+    cb = SemanticColumnModel(table_id=b.id, column_name="id", business_name="", data_type="INTEGER")
+    async_session.add_all([ca, cb])
+    await async_session.flush()
+
+    name, description = await _derive_relationship_suggestion(
+        async_session, a.id, b.id, [{"from_column_id": ca.id, "to_column_id": cb.id}]
+    )
+    assert name == "a → b"
+    assert "a liên kết với b" in description

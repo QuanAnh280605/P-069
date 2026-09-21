@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     # Per-role model override (empty = use LLM_MODEL / MODEL_NAME for every role)
     llm_model_enrich: str = ""  # LLM_MODEL_ENRICH — schema enrichment nodes
     llm_model_metric: str = ""  # LLM_MODEL_METRIC — metric suggestion nodes
+    llm_fallback_model: str = ""  # LLM_FALLBACK_MODEL — optional fallback model ID
 
     # LLM per-provider keys (used when LLM_API_KEY is empty)
     openai_api_key: str = ""
@@ -55,6 +56,8 @@ class Settings(BaseSettings):
     model_name: str = ""  # empty -> per-provider default in services/llm.py
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 0.0 for deterministic output
     metric_context_token_budget: int = Field(default=32000, ge=2000, le=1000000)
+    llm_metric_timeout_seconds: float = Field(default=0.0, ge=0.0)
+    llm_metric_max_output_tokens: int = Field(default=1200, ge=256, le=4096)
 
     # AI Judge identity is mandatory and isolated when role="judge" is requested.
     judge_llm_provider: str = ""

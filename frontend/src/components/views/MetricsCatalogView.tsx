@@ -8,7 +8,6 @@ import {
   Plus,
   RotateCcw,
   Search,
-  Send,
   Sigma,
   Sparkles,
   Trash2,
@@ -17,6 +16,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { MetricCard } from '@/components/metrics/MetricCard';
 import { MetricHistoryDialog } from '@/components/metrics/MetricHistoryDialog';
+import { PendingApprovalSection } from '@/components/metrics/PendingApprovalSection';
+import { MetricModal } from '@/components/modals/MetricModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -43,15 +44,17 @@ interface MetricsCatalogViewProps {
   onEmptyTrash?: () => Promise<void> | void;
   onRestoreMetric?: (id: number) => Promise<void> | void;
   onEditMetric?: (metric: MetricRecord) => void;
+  onEditRequest?: (request: MetricRequest) => void;
   onOpenStudio?: () => void;
   onApproveAll?: () => Promise<void>;
   onApproveMetric?: (id: number) => Promise<void> | void;
-  onSubmitMetric?: () => void;
   onMetricsChanged?: () => Promise<void> | void;
   canSubmitMetric?: boolean;
   refreshKey?: number;
   canManageMetrics?: boolean;
   canApproveMetrics?: boolean;
+  /** Data Lead / personal creator capability. */
+  canGenerateMetrics?: boolean;
   database?: WorkspaceDatabase | null;
   onOpenSyncLogs?: () => void;
   hasHealedLogs?: boolean;
@@ -64,8 +67,7 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [requests, setRequests] = useState<MetricRequest[]>([]);
-  const [editingRequestId, setEditingRequestId] = useState<number | null>(null);
-  const [editedDefinition, setEditedDefinition] = useState('');
+  const [fallbackEditingRequest, setFallbackEditingRequest] = useState<MetricRequest | null>(null);
   const [filterTab, setFilterTab] = useState<'all' | 'pending' | 'submitted' | 'approved' | 'trash'>('all');
   const canManage = Boolean(props.canManageMetrics);
   const canApprove = Boolean(props.canApproveMetrics);
@@ -80,9 +82,9 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
   );
 
   useEffect(() => {
-    if (!canManage || !props.dbId) return;
+    if ((!canManage && !canApprove) || !props.dbId) return;
     void listMetricRequestsApi(String(props.dbId)).then(setRequests).catch(() => setRequests([]));
-  }, [canManage, props.dbId, props.refreshKey]);
+  }, [canManage, canApprove, props.dbId, props.refreshKey]);
 
   const resolveRequest = async (
     request: MetricRequest,
@@ -97,12 +99,11 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
     await props.onMetricsChanged?.();
   };
 
-  const approveEditedRequest = async (request: MetricRequest) => {
-    try {
-      await resolveRequest(request, true, JSON.parse(editedDefinition) as MetricDefinition);
-      setEditingRequestId(null);
-    } catch {
-      window.alert('Definition JSON không hợp lệ hoặc không thể được duyệt.');
+  const handleEditRequest = (req: MetricRequest) => {
+    if (props.onEditRequest) {
+      props.onEditRequest(req);
+    } else {
+      setFallbackEditingRequest(req);
     }
   };
 
@@ -135,7 +136,7 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
   );
 
   const approvedMetrics = useMemo(
-    () => activeMetrics.filter((item) => item.status === 'approved'),
+    () => activeMetrics.filter((item) => item.status === 'approved' && !item.has_pending_version),
     [activeMetrics],
   );
 
@@ -152,6 +153,24 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
         Boolean(item.has_pending_version) ||
         (canManage && item.status === 'unverified')),
   ).length;
+
+  const pendingRequests = useMemo(
+    () =>
+      requests.filter((item) => {
+        if (item.status !== 'pending') return false;
+        if (!search.trim()) return true;
+        const name = item.definition?.metric?.name || '';
+        return name.toLowerCase().includes(search.toLowerCase());
+      }),
+    [requests, search],
+  );
+
+  const hasPending = isMemberSubmitter
+    ? submittedMetrics.length > 0
+    : pendingMetrics.length > 0 || (canManage && pendingRequests.length > 0);
+
+  const hasAnyActive =
+    activeMetrics.length > 0 || (canManage && pendingRequests.length > 0);
 
   const approveAll = async () => {
     if (!props.onApproveAll) return;
@@ -229,17 +248,12 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
             {canManage && props.onAddMetric && (
               <Button
                 size="sm"
+                variant="outline"
                 className="gap-1.5 text-xs cursor-pointer"
                 onClick={props.onAddMetric}
               >
                 <Plus className="h-3.5 w-3.5" />
                 Thêm thủ công
-              </Button>
-            )}
-            {isMemberSubmitter && props.onSubmitMetric && (
-              <Button size="sm" className="gap-1.5 text-xs cursor-pointer" onClick={props.onSubmitMetric}>
-                <Send className="h-3.5 w-3.5" />
-                Gửi metric
               </Button>
             )}
             {props.onOpenStudio && (
@@ -277,57 +291,6 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
         </div>
       )}
 
-      {canManage && requests.some((item) => item.status === 'pending') && (
-        <section className="border-b border-border bg-secondary/10 px-6 py-4">
-          <h2 className="mb-3 text-sm font-semibold text-foreground">
-            Yêu cầu metric từ Member ({requests.filter((item) => item.status === 'pending').length})
-          </h2>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {requests.filter((item) => item.status === 'pending').map((request) => (
-              <article key={request.id} className="rounded-lg border border-border bg-card p-3 text-xs">
-                <p className="font-semibold text-foreground">{request.definition.metric.name}</p>
-                <p className="mt-1 font-mono text-muted-foreground">
-                  {request.definition.metric.formula.function}({request.definition.metric.formula.expression})
-                </p>
-                {editingRequestId === request.id && (
-                  <textarea
-                    aria-label="Definition metric request"
-                    className="mt-2 min-h-36 w-full rounded border border-border bg-background p-2 font-mono text-[11px]"
-                    value={editedDefinition}
-                    onChange={(event) => setEditedDefinition(event.target.value)}
-                  />
-                )}
-                <div className="mt-3 flex gap-2">
-                  {editingRequestId === request.id ? (
-                    <Button size="sm" className="h-7 text-xs" onClick={() => void approveEditedRequest(request)}>
-                      Duyệt definition đã sửa
-                    </Button>
-                  ) : (
-                    <Button size="sm" className="h-7 text-xs" onClick={() => void resolveRequest(request, true)}>
-                      Duyệt & tạo
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-xs"
-                    onClick={() => {
-                      setEditingRequestId(request.id);
-                      setEditedDefinition(JSON.stringify(request.definition, null, 2));
-                    }}
-                  >
-                    Chỉnh sửa definition
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void resolveRequest(request, false)}>
-                    Từ chối
-                  </Button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* Filter and Search Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-3">
         <div className="relative flex-1 max-w-sm">
@@ -346,7 +309,9 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
               key: 'all' as const,
               label: 'Tất cả',
               count:
-                (isMemberSubmitter ? submittedMetrics.length : pendingMetrics.length) +
+                (isMemberSubmitter
+                  ? submittedMetrics.length
+                  : pendingMetrics.length + (canManage ? pendingRequests.length : 0)) +
                 approvedMetrics.length,
             },
             ...(canManage
@@ -354,7 +319,7 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
                 {
                   key: 'pending' as const,
                   label: 'Chờ phê duyệt',
-                  count: pendingMetrics.length,
+                  count: pendingMetrics.length + pendingRequests.length,
                 },
               ]
               : []),
@@ -517,7 +482,7 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
               </div>
             )}
           </div>
-        ) : activeMetrics.length === 0 ? (
+        ) : !hasAnyActive ? (
           <div className="flex h-full min-h-[300px] flex-col items-center justify-center gap-3 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-secondary text-muted-foreground">
               <Sigma className="h-6 w-6" />
@@ -531,16 +496,6 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {canManage && props.onAddMetric && (
-                <Button
-                  size="sm"
-                  onClick={props.onAddMetric}
-                  className="gap-1.5 text-xs cursor-pointer"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Thêm thủ công
-                </Button>
-              )}
               {props.onOpenStudio && (
                 <Button
                   size="sm"
@@ -575,27 +530,32 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
                     </div>
                   </div>
                   <span className="rounded-full border border-border bg-secondary px-2.5 py-0.5 font-mono text-[10px] text-secondary-foreground">
-                    {isMemberSubmitter ? submittedMetrics.length : pendingMetrics.length} chỉ số
+                    {isMemberSubmitter
+                      ? submittedMetrics.length
+                      : pendingMetrics.length + (canManage ? pendingRequests.length : 0)} chỉ số
                   </span>
                 </div>
 
-                {(isMemberSubmitter ? submittedMetrics : pendingMetrics).length === 0 ? (
+                {!hasPending ? (
                   <div className="rounded-lg border border-dashed border-border bg-card/50 p-6 text-center text-xs text-muted-foreground">
                     Không có metric nào đang chờ duyệt.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
-                    {(isMemberSubmitter ? submittedMetrics : pendingMetrics).map((metric) => (
-                      <MetricCard
-                        key={metric.metric_id}
-                        metric={metric}
-                        onEdit={canManage ? props.onEditMetric : undefined}
-                        onDelete={canManage ? props.onDeleteMetric : undefined}
-                        onHistory={showHistory}
-                        onApprove={canApprove ? props.onApproveMetric : undefined}
-                      />
-                    ))}
-                  </div>
+                  <PendingApprovalSection
+                    canManage={canManage}
+                    canApprove={canApprove}
+                    isMemberSubmitter={isMemberSubmitter}
+                    pendingRequests={pendingRequests}
+                    pendingMetrics={pendingMetrics}
+                    submittedMetrics={submittedMetrics}
+                    onEditRequest={handleEditRequest}
+                    onApproveRequest={(req) => void resolveRequest(req, true)}
+                    onRejectRequest={(req) => void resolveRequest(req, false)}
+                    onEditMetric={props.onEditMetric}
+                    onDeleteMetric={props.onDeleteMetric}
+                    onHistory={showHistory}
+                    onApproveMetric={props.onApproveMetric}
+                  />
                 )}
               </section>
             )}
@@ -643,13 +603,36 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
               )}
             </section>
           </div>
+        ) : filterTab === 'pending' ? (
+          !hasPending ? (
+            <div className="flex h-full min-h-[250px] flex-col items-center justify-center gap-2 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-secondary text-muted-foreground">
+                <Clock3 className="h-5 w-5" />
+              </div>
+              <p className="text-xs text-muted-foreground">Không có metric nào đang chờ duyệt.</p>
+            </div>
+          ) : (
+            <PendingApprovalSection
+              canManage={canManage}
+              canApprove={canApprove}
+              isMemberSubmitter={isMemberSubmitter}
+              pendingRequests={pendingRequests}
+              pendingMetrics={pendingMetrics}
+              submittedMetrics={submittedMetrics}
+              onEditRequest={handleEditRequest}
+              onApproveRequest={(req) => void resolveRequest(req, true)}
+              onRejectRequest={(req) => void resolveRequest(req, false)}
+              onEditMetric={props.onEditMetric}
+              onDeleteMetric={props.onDeleteMetric}
+              onHistory={showHistory}
+              onApproveMetric={props.onApproveMetric}
+            />
+          )
         ) : (
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
-            {(filterTab === 'pending'
-              ? pendingMetrics
-              : filterTab === 'submitted'
-                ? submittedMetrics
-                : approvedMetrics
+            {(filterTab === 'submitted'
+              ? submittedMetrics
+              : approvedMetrics
             ).map((metric) => (
               <MetricCard
                 key={metric.metric_id}
@@ -696,6 +679,24 @@ export function MetricsCatalogView(props: MetricsCatalogViewProps) {
             }
           }}
           onMetricsChanged={props.onMetricsChanged}
+        />
+      )}
+
+      {fallbackEditingRequest && (
+        <MetricModal
+          isOpen={Boolean(fallbackEditingRequest)}
+          onClose={() => setFallbackEditingRequest(null)}
+          onSave={async (def) => {
+            await resolveRequest(fallbackEditingRequest, true, def);
+            setFallbackEditingRequest(null);
+          }}
+          tables={[]}
+          initialDefinition={fallbackEditingRequest.definition}
+          initialName={fallbackEditingRequest.definition?.metric?.name}
+          status="pending_approval"
+          isMemberRequest={true}
+          canSave={canManage}
+          dbId={props.dbId ? String(props.dbId) : null}
         />
       )}
     </div>

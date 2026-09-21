@@ -12,6 +12,7 @@ from src.models.db import (
     SemanticMetricModel,
     SemanticTableModel,
 )
+from src.models.review_mixin import REVIEW_STATUS_APPROVED
 from src.models.schemas import FilterColumnItem, RecommendedDimensionItem
 
 JUNK_KEYWORDS = {
@@ -117,6 +118,11 @@ def _collect_tier_a(base_table: SemanticTableModel) -> list[RecommendedDimension
     return items
 
 
+def _is_governed_relationship(rel: CanonicalRelationshipModel) -> bool:
+    """Return True only for technically valid and human-approved relationships."""
+    return rel.validation_status == "valid" and rel.review_status == REVIEW_STATUS_APPROVED
+
+
 def _collect_outgoing_rel_dims(
     tables_map: dict[int, SemanticTableModel],
     relationships: list[CanonicalRelationshipModel],
@@ -126,6 +132,8 @@ def _collect_outgoing_rel_dims(
     """Collect Tier B or C dimensions via outgoing N:1 or 1:1 relations."""
     results = []
     for rel in relationships:
+        if not _is_governed_relationship(rel):
+            continue
         r_type = (rel.relationship_type or "").lower()
         is_n1 = r_type in ("many_to_one", "n:1", "one_to_one", "1:1")
         if rel.from_entity_id == source_table_id and is_n1:
@@ -139,11 +147,57 @@ def _collect_outgoing_rel_dims(
     return results
 
 
+def _dimension_priority(item: RecommendedDimensionItem) -> int:
+    """Assign priority tier for ranking: descriptive names > categories/types > codes > booleans."""
+    col = item.column_name.lower()
+    b_name = (item.business_name or "").lower()
+    if col.startswith(("is_", "has_", "flag_")) or (item.data_type or "").upper() in ("BOOL", "BOOLEAN"):
+        return 4
+    if col == "name" or col.endswith("_name") or "tên" in b_name or "name" in col:
+        return 0
+    if any(k in col for k in ("channel", "type", "category", "status", "segment", "region")) or any(
+        k in b_name for k in ("kênh", "loại", "trạng thái", "phân khúc", "khu vực", "danh mục")
+    ):
+        return 1
+    if "code" in col or "sku" in col or "mã" in b_name:
+        return 2
+    return 3
+
+
+def _collect_tier_c(
+    tables_map: dict[int, SemanticTableModel],
+    relationships: list[CanonicalRelationshipModel],
+    tier_b_target_ids: set[int],
+    base_table_id: int,
+) -> list[RecommendedDimensionItem]:
+    """Collect 2-hop outgoing dimensions from tier B targets."""
+    tier_c_items: list[RecommendedDimensionItem] = []
+    for t_id in tier_b_target_ids:
+        tier_c_raw = _collect_outgoing_rel_dims(tables_map, relationships, t_id, "C")
+        tier_c_items.extend([item for _, item in tier_c_raw if item.table_id != base_table_id])
+    return tier_c_items
+
+
+def _rank_and_truncate_candidates(
+    candidates: list[RecommendedDimensionItem],
+    limit: int,
+) -> list[RecommendedDimensionItem]:
+    """Deduplicate candidates and rank descriptive names above low-signal booleans."""
+    seen_col_ids = set()
+    deduped: list[RecommendedDimensionItem] = []
+    for item in candidates:
+        if item.column_id not in seen_col_ids:
+            seen_col_ids.add(item.column_id)
+            deduped.append(item)
+    deduped.sort(key=lambda x: (_dimension_priority(x), x.tier, x.cardinality_hint or 999))
+    return deduped[:limit]
+
+
 async def get_dimensions_for_metric(
     db: AsyncSession,
     db_id: int,
     metric_id: int,
-    limit: int = 12,
+    limit: int = 50,
 ) -> list[RecommendedDimensionItem]:
     """Recommend high-signal dimensions for a given metric across Tier A, B, and C (Safe N:1/1:1 joins)."""
     stmt_metric = select(SemanticMetricModel).where(
@@ -160,9 +214,7 @@ async def get_dimensions_for_metric(
         .where(SemanticTableModel.db_id == db_id)
         .options(selectinload(SemanticTableModel.columns))
     )
-    tables = (await db.execute(stmt_tables)).scalars().all()
-    tables_map = {t.id: t for t in tables}
-
+    tables_map = {t.id: t for t in (await db.execute(stmt_tables)).scalars().all()}
     base_table = tables_map.get(metric.base_entity_id)
     if not base_table:
         return []
@@ -170,31 +222,12 @@ async def get_dimensions_for_metric(
     stmt_rels = select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.connection_id == db_id)
     relationships = (await db.execute(stmt_rels)).scalars().all()
 
-    # 1. Tier A (Core - same base table)
-    tier_a_items = _collect_tier_a(base_table)
-
-    # 2. Tier B (1-Hop N:1 / 1:1)
+    tier_a = _collect_tier_a(base_table)
     tier_b_raw = _collect_outgoing_rel_dims(tables_map, relationships, base_table.id, "B")
-    tier_b_items = [item for _, item in tier_b_raw]
-    tier_b_target_ids = {target_id for target_id, _ in tier_b_raw}
+    tier_b = [item for _, item in tier_b_raw]
+    tier_c = _collect_tier_c(tables_map, relationships, {t_id for t_id, _ in tier_b_raw}, base_table.id)
 
-    # 3. Tier C (2-Hop N:1 / 1:1)
-    tier_c_items = []
-    for t_id in tier_b_target_ids:
-        tier_c_raw = _collect_outgoing_rel_dims(tables_map, relationships, t_id, "C")
-        tier_c_items.extend([item for _, item in tier_c_raw if item.table_id != base_table.id])
-
-    # Deduplicate via diamond path (Keep Tier A > B > C)
-    all_candidates: list[RecommendedDimensionItem] = []
-    seen_col_ids = set()
-
-    for item in tier_a_items + tier_b_items + tier_c_items:
-        if item.column_id not in seen_col_ids:
-            seen_col_ids.add(item.column_id)
-            all_candidates.append(item)
-
-    all_candidates.sort(key=lambda x: (x.tier, x.cardinality_hint or 999))
-    return all_candidates[:limit]
+    return _rank_and_truncate_candidates(tier_a + tier_b + tier_c, limit)
 
 
 def is_valid_filter_column(col: SemanticColumnModel) -> bool:
@@ -233,6 +266,8 @@ def _collect_safe_outgoing_table_ids(
     """Find target table IDs reachable via outgoing safe N:1 / 1:1 relations."""
     target_ids = set()
     for rel in relationships:
+        if not _is_governed_relationship(rel):
+            continue
         r_type = (rel.relationship_type or "").lower()
         if rel.from_entity_id == source_id and r_type in ("many_to_one", "n:1", "one_to_one", "1:1"):
             target_ids.add(rel.to_entity_id)

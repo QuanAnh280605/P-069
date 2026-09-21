@@ -54,8 +54,10 @@ import {
   compileSemanticQueryApi,
   DimensionSelection,
   executeSemanticQueryApi,
+  getMetricJoinPathOptionsApi,
   getMetricRecommendedDimensionsApi,
   MetricDimensionsResponse,
+  MetricJoinPathOptions,
   MetricRecord,
   RecommendedDimensionItem,
   SemanticApiError,
@@ -72,6 +74,7 @@ import {
   getDimensionCategory,
   getDimensionCategoryBadge,
   isBusinessDimension,
+  isTechnicalKey,
   isTimeDimension,
 } from '@/lib/dimensions';
 import { SectionLabel, StatusPill, type WorkspaceDatabase } from '@/components/workspace/shared';
@@ -273,6 +276,7 @@ export function MetricExplorerView({
   const [copiedSql, setCopiedSql] = useState(false);
   const [recommendedDims, setRecommendedDims] = useState<RecommendedDimensionItem[]>([]);
   const [loadingDims, setLoadingDims] = useState(false);
+  const [joinOptions, setJoinOptions] = useState<MetricJoinPathOptions>({});
   const [filters, setFilters] = useState<SemanticQueryFilter[]>([]);
   const [dashboardFilterActive, setDashboardFilterActive] = useState(false);
   const appliedSelectionKey = useRef<number | null>(null);
@@ -324,6 +328,149 @@ export function MetricExplorerView({
     [catalog],
   );
 
+  const metricDefinedDimensions = useMemo(() => {
+    const rawDims = selectedMetric?.definition?.metric?.dimensions || [];
+    if (!catalog || rawDims.length === 0) return [];
+    const matched: Array<{ column_id: number; name: string; business_name: string; table_name: string }> = [];
+    const matchedRaw = new Set<string>();
+
+    // Helper: Map foreign key or entity reference (e.g. 'store_id', 'store') to descriptive name column in recommendedDims
+    const resolveEntityNameDim = (dimName: string) => {
+      const lower = dimName.toLowerCase().trim();
+      const entity = lower.endsWith('_id') ? lower.replace(/_id$/, '') : lower;
+      return recommendedDims.find((rec) => {
+        const tLower = rec.table_name.toLowerCase();
+        if (tLower !== entity && tLower !== lower) return false;
+        const cLower = rec.column_name.toLowerCase();
+        const bLower = (rec.business_name || '').toLowerCase();
+        return cLower === 'name' || cLower.endsWith('_name') || bLower.includes('tên');
+      });
+    };
+
+    // 0. Check if any raw dimension is an entity or foreign key that maps directly to recommendedDims entity name
+    rawDims.forEach((d) => {
+      const lower = d.toLowerCase().trim();
+      const isFkPattern = lower.endsWith('_id') || lower === 'id' || lower === 'store';
+      if (isFkPattern && recommendedDims.length > 0) {
+        const entityDim = resolveEntityNameDim(d);
+        if (entityDim && !matched.some((m) => m.column_id === entityDim.column_id)) {
+          matchedRaw.add(d);
+          matched.push({
+            column_id: entityDim.column_id,
+            name: entityDim.column_name,
+            business_name: entityDim.business_name || entityDim.column_name,
+            table_name: entityDim.table_business_name || entityDim.table_name,
+          });
+        }
+      }
+    });
+
+    // 1. Try to find match in baseTable first (100% fanout safe), but avoid technical foreign keys if entity name exists
+    if (baseTable) {
+      baseTable.columns.forEach((c) => {
+        const matchingDim = rawDims.find(
+          (d) =>
+            !matchedRaw.has(d) &&
+            (d === c.column_name ||
+              (c.business_name && d === c.business_name) ||
+              d === `${baseTable.table_name}.${c.column_name}` ||
+              d.toLowerCase() === c.column_name.toLowerCase()),
+        );
+        if (matchingDim) {
+          const isFk = isTechnicalKey(c) || c.is_foreign_key || c.column_name.endsWith('_id');
+          const entityDim = isFk ? resolveEntityNameDim(c.column_name) : undefined;
+          if (entityDim && !matched.some((m) => m.column_id === entityDim.column_id)) {
+            matchedRaw.add(matchingDim);
+            matched.push({
+              column_id: entityDim.column_id,
+              name: entityDim.column_name,
+              business_name: entityDim.business_name || entityDim.column_name,
+              table_name: entityDim.table_business_name || entityDim.table_name,
+            });
+          } else {
+            matchedRaw.add(matchingDim);
+            matched.push({
+              column_id: c.column_id,
+              name: c.column_name,
+              business_name: c.business_name || c.column_name,
+              table_name: baseTable.business_name || baseTable.table_name,
+            });
+          }
+        }
+      });
+    }
+
+    // 2. For any remaining unmatched dimensions, search recommendedDims (safe joins)
+    if (matchedRaw.size < rawDims.length && recommendedDims.length > 0) {
+      recommendedDims.forEach((rec) => {
+        const matchingDim = rawDims.find(
+          (d) =>
+            !matchedRaw.has(d) &&
+            (d === rec.column_name ||
+              (rec.business_name && d === rec.business_name) ||
+              d === `${rec.table_name}.${rec.column_name}` ||
+              d.toLowerCase() === rec.column_name.toLowerCase() ||
+              d.toLowerCase() === `${rec.table_name}.${rec.column_name}`.toLowerCase()),
+        );
+        if (matchingDim && !matched.some((m) => m.column_id === rec.column_id)) {
+          matchedRaw.add(matchingDim);
+          matched.push({
+            column_id: rec.column_id,
+            name: rec.column_name,
+            business_name: rec.business_name || rec.column_name,
+            table_name: rec.table_business_name || rec.table_name,
+          });
+        }
+      });
+    }
+
+    // 3. For any still unmatched dimensions, check other catalog tables
+    if (matchedRaw.size < rawDims.length) {
+      catalog.tables.forEach((t) => {
+        if (baseTable && t.table_id === baseTable.table_id) return;
+        t.columns.forEach((c) => {
+          const matchingDim = rawDims.find(
+            (d) =>
+              !matchedRaw.has(d) &&
+              (d === c.column_name ||
+                (c.business_name && d === c.business_name) ||
+                d === `${t.table_name}.${c.column_name}` ||
+                (t.business_name && d === `${t.business_name}.${c.column_name}`) ||
+                d.toLowerCase() === c.column_name.toLowerCase() ||
+                d.toLowerCase() === `${t.table_name}.${c.column_name}`.toLowerCase()),
+          );
+          if (matchingDim && !matched.some((m) => m.column_id === c.column_id)) {
+            matchedRaw.add(matchingDim);
+            matched.push({
+              column_id: c.column_id,
+              name: c.column_name,
+              business_name: c.business_name || c.column_name,
+              table_name: t.business_name || t.table_name,
+            });
+          }
+        });
+      });
+    }
+
+    return matched;
+  }, [selectedMetric, catalog, baseTable, recommendedDims]);
+
+  useEffect(() => {
+    if (metricDefinedDimensions.length > 0) {
+      setDimensions((prev) => {
+        const existingIds = new Set(prev.map((d) => d.column_id));
+        const newDims = metricDefinedDimensions
+          .filter((d) => !existingIds.has(d.column_id))
+          .map((d) => {
+            const col = allColumns.find((c) => c.column_id === d.column_id);
+            const isTime = col ? isTimeDimension(col) : false;
+            return { column_id: d.column_id, time_grain: isTime ? ('month' as const) : undefined };
+          });
+        return [...prev, ...newDims];
+      });
+    }
+  }, [metricDefinedDimensions, allColumns]);
+
   // Time columns available contextually for the selected metric
   const availableTimeColumns = useMemo(() => {
     if (!catalog) return [];
@@ -362,46 +509,46 @@ export function MetricExplorerView({
     };
   }, [dbId, metricIds]);
 
+  // Fetch governed join-path options for the selected metric's base entity so we
+  // can flag ambiguous dimensions that lack a persisted preferred path. A single
+  // safe path is deterministic (compiler handles it); only multi-path targets
+  // require a stored preferred_join_paths entry to be queryable.
+  useEffect(() => {
+    const baseEntityId = selectedMetric?.definition?.metric.base_entity_id;
+    if (!dbId || !baseEntityId) {
+      setJoinOptions({});
+      return;
+    }
+    let isMounted = true;
+    getMetricJoinPathOptionsApi(dbId, baseEntityId)
+      .then((opts) => {
+        if (isMounted) setJoinOptions(opts);
+      })
+      .catch(() => {
+        if (isMounted) setJoinOptions({});
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [dbId, selectedMetric]);
+
   const displayedDimensions = useMemo(() => {
     if (!catalog || metricIds.length === 0) return [];
 
-    if (recommendedDims.length > 0 && !dimSearch.trim()) {
-      return recommendedDims;
-    }
-
-    if (dimSearch.trim()) {
+    if (recommendedDims.length > 0) {
+      if (!dimSearch.trim()) return recommendedDims;
       const q = dimSearch.toLowerCase();
-      const list: RecommendedDimensionItem[] = [];
-      catalog.tables.forEach((t) => {
-        t.columns.forEach((c) => {
-          if (isBusinessDimension(c)) {
-            const matches =
-              c.column_name.toLowerCase().includes(q) ||
-              (c.business_name && c.business_name.toLowerCase().includes(q)) ||
-              t.table_name.toLowerCase().includes(q);
-            if (matches) {
-              list.push({
-                column_id: c.column_id,
-                column_name: c.column_name,
-                business_name: c.business_name || c.column_name,
-                table_id: t.table_id,
-                table_name: t.table_name,
-                table_business_name: t.business_name || t.table_name,
-                tier: 'A',
-                tier_label: 'Tìm kiếm',
-                is_safe_join: true,
-                requires_reaggregation: false,
-                data_type: c.data_type,
-              });
-            }
-          }
-        });
-      });
-      return list;
+      return recommendedDims.filter(
+        (d) =>
+          d.column_name.toLowerCase().includes(q) ||
+          (d.business_name && d.business_name.toLowerCase().includes(q)) ||
+          d.table_name.toLowerCase().includes(q) ||
+          (d.table_business_name && d.table_business_name.toLowerCase().includes(q)),
+      );
     }
 
     if (!baseTable) return [];
-    return baseTable.columns
+    const baseDims = baseTable.columns
       .filter((c) => isBusinessDimension(c))
       .map((c) => ({
         column_id: c.column_id,
@@ -416,7 +563,32 @@ export function MetricExplorerView({
         requires_reaggregation: false,
         data_type: c.data_type,
       }));
+
+    if (!dimSearch.trim()) return baseDims;
+    const q = dimSearch.toLowerCase();
+    return baseDims.filter(
+      (d) =>
+        d.column_name.toLowerCase().includes(q) ||
+        (d.business_name && d.business_name.toLowerCase().includes(q)),
+    );
   }, [metricIds, recommendedDims, dimSearch, catalog, baseTable]);
+
+  // Ambiguous dimensions (target reachable via >1 safe governed path) that the
+  // selected metric has NOT pinned with a preferred_join_paths entry. These cannot
+  // be compiled deterministically, so we disable them and point the user to a Data
+  // Lead instead of opening any runtime clarification modal.
+  const unsupportedDimensionColumnIds = useMemo(() => {
+    const preferred = selectedMetric?.definition?.metric.preferred_join_paths || {};
+    const baseTableId = baseTable?.table_id;
+    const ids = new Set<number>();
+    for (const dim of displayedDimensions) {
+      if (baseTableId != null && dim.table_id === baseTableId) continue;
+      const opts = joinOptions[String(dim.table_id)];
+      if (!opts || opts.length <= 1) continue;
+      if (!preferred[String(dim.table_id)]) ids.add(dim.column_id);
+    }
+    return ids;
+  }, [displayedDimensions, joinOptions, selectedMetric, baseTable]);
 
   useEffect(() => {
     if (!initialSelection) return;
@@ -613,6 +785,17 @@ export function MetricExplorerView({
     setDashboardFilterActive(false);
   };
 
+  const formatApiErrorMessage = (err: unknown, fallback: string) => {
+    if (err instanceof SemanticApiError) {
+      const d = err.detail as Record<string, unknown> | null;
+      if (d && typeof d === 'object' && typeof d.message === 'string') {
+        return d.message;
+      }
+      return err.message;
+    }
+    return fallback;
+  };
+
   const runCompile = async () => {
     if (!metricIds.length || !dbId) return;
     setLoading(true);
@@ -622,7 +805,7 @@ export function MetricExplorerView({
       setOutput(res);
       setViewTab('sql');
     } catch (err) {
-      setError(err instanceof SemanticApiError ? err.message : 'Không thể compile query.');
+      setError(formatApiErrorMessage(err, 'Không thể compile query.'));
     } finally {
       setLoading(false);
     }
@@ -637,7 +820,7 @@ export function MetricExplorerView({
       setOutput(res);
       setViewTab('table');
     } catch (err) {
-      setError(err instanceof SemanticApiError ? err.message : 'Lỗi thực thi Live DB.');
+      setError(formatApiErrorMessage(err, 'Lỗi thực thi Live DB.'));
     } finally {
       setLoading(false);
     }
@@ -821,131 +1004,45 @@ export function MetricExplorerView({
             </div>
           </div>
 
-          {/* 2. Dimensions Selector */}
+          {/* 2. Chiều phân tích đã gắn trong chỉ số */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <SectionLabel>
-                  2. CHIỀU PHÂN TÍCH ({displayedDimensions.length})
+                  2. CHIỀU PHÂN TÍCH ({metricDefinedDimensions.length})
                 </SectionLabel>
-                {loadingDims && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
               </div>
-              <span className="text-[10px] text-muted-foreground font-mono">Dimensions</span>
+              <span className="text-[10px] text-primary font-medium font-mono">Tự động cấu hình bởi AI</span>
             </div>
 
-            {/* Quick Search */}
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                value={dimSearch}
-                onChange={(e) => setDimSearch(e.target.value)}
-                placeholder="Tìm nhanh chiều phân tích..."
-                className="h-8 pl-8 text-xs bg-background"
-              />
-              {dimSearch && (
-                <button
-                  onClick={() => setDimSearch('')}
-                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Selected Chips Tray */}
-            {dimensions.filter((d) => {
-              const col = allColumns.find((c) => c.column_id === d.column_id);
-              return col && !isTimeDimension(col);
-            }).length > 0 && (
-              <div className="rounded-lg border border-primary/20 bg-primary/5 p-2 space-y-1.5">
-                <span className="text-[10px] font-semibold text-primary uppercase tracking-wider block">
-                  Đang chọn ({dimensions.filter((d) => {
-                    const col = allColumns.find((c) => c.column_id === d.column_id);
-                    return col && !isTimeDimension(col);
-                  }).length}):
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {dimensions
-                    .filter((d) => {
-                      const col = allColumns.find((c) => c.column_id === d.column_id);
-                      return col && !isTimeDimension(col);
-                    })
-                    .map((dim) => {
-                      const col = allColumns.find((c) => c.column_id === dim.column_id);
-                      return (
-                        <span
-                          key={dim.column_id}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-primary bg-primary text-primary-foreground px-2.5 py-0.5 text-[11px] font-medium shadow-2xs"
-                        >
-                          <span>{col?.business_name || col?.column_name || dim.column_id}</span>
-                          <button
-                            type="button"
-                            onClick={() => toggleDimension(dim.column_id)}
-                            className="rounded-full hover:bg-primary-foreground/20 p-0.5 cursor-pointer"
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </span>
-                      );
-                    })}
-                </div>
-              </div>
-            )}
-
-            {/* Scoped Dimension Pills */}
             <div className="rounded-xl border border-border bg-card/40 p-3">
-              {metricIds.length === 0 && !dimSearch.trim() ? (
-                <div className="p-3 text-center text-xs text-muted-foreground space-y-1">
-                  <p className="font-medium text-foreground">Chọn ít nhất 1 Chỉ số ở mục 1</p>
-                  <p className="text-[11px]">
-                    Hệ thống sẽ gợi ý các chiều phân tích an toàn (Tier A/B/C) tương ứng với chỉ số.
+              {metricIds.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic text-center py-2">
+                  Chọn một chỉ số ở mục 1 để xem các chiều phân tích đã được AI gắn sẵn.
+                </p>
+              ) : metricDefinedDimensions.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    Các chiều phân tích được AI xác nhận và tự động cấu hình cho chỉ số này:
                   </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {metricDefinedDimensions.map((dim) => (
+                      <span
+                        key={dim.column_id}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary shadow-2xs"
+                      >
+                        <span>{dim.business_name}</span>
+                        <span className="rounded bg-primary/20 px-1 py-0.2 font-mono text-[9px] text-primary">
+                          {dim.table_name}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {displayedDimensions.map((item) => {
-                    const isChecked = dimensions.some((d) => d.column_id === item.column_id);
-
-                    return (
-                      <button
-                        key={item.column_id}
-                        type="button"
-                        onClick={() => toggleDimension(item.column_id)}
-                        className={cn(
-                          'group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all cursor-pointer select-none',
-                          isChecked
-                            ? 'border-primary bg-primary text-primary-foreground shadow-2xs font-semibold'
-                            : 'border-border bg-background text-foreground hover:border-primary/60 hover:bg-accent/40',
-                        )}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => {}}
-                          aria-label={item.business_name || item.column_name}
-                          className="h-3 w-3 rounded accent-primary pointer-events-none"
-                        />
-                        <span>{item.business_name || item.column_name}</span>
-                        <span
-                          className={cn(
-                            'rounded px-1 py-0.2 font-mono text-[9px]',
-                            isChecked
-                              ? 'bg-primary-foreground/20 text-primary-foreground'
-                              : 'bg-secondary text-muted-foreground',
-                          )}
-                        >
-                          {item.table_business_name}
-                        </span>
-                      </button>
-                    );
-                  })}
-
-                  {displayedDimensions.length === 0 && (
-                    <p className="p-2 text-xs text-muted-foreground italic w-full text-center">
-                      Không tìm thấy chiều phân tích phù hợp.
-                    </p>
-                  )}
-                </div>
+                <p className="text-xs text-muted-foreground italic text-center py-2">
+                  Chỉ số này tính toán tổng hợp toàn bộ dữ liệu (chưa gắn chiều phân tích phụ).
+                </p>
               )}
             </div>
           </div>

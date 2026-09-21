@@ -19,7 +19,16 @@ def _route_by_intent(state: AgentState) -> str:
     intent = state.get("intent", "chitchat")
     if intent == "out_of_scope":
         return "chitchat_done"
+    if intent in {"semantic_query", "metric_query"}:
+        return "semantic_parse"
     return intent
+
+
+def _route_after_parse(state: AgentState) -> str:
+    """Route from semantic_parse to metric_suggest only if a genuine unclarified metric proposal is needed."""
+    if state.get("intent") == "metric_query" and not state.get("clarification"):
+        return "metric_suggest"
+    return "done"
 
 
 def build_chat_graph() -> StateGraph:
@@ -37,8 +46,7 @@ def build_chat_graph() -> StateGraph:
         {
             "chitchat": "chitchat",
             "data_question": "data_assistant",
-            "metric_query": "metric_suggest",
-            "semantic_query": "semantic_parse",
+            "semantic_parse": "semantic_parse",
             "out_of_scope": END,
             "chitchat_done": END,
         },
@@ -46,7 +54,14 @@ def build_chat_graph() -> StateGraph:
     graph.add_edge("chitchat", END)
     graph.add_edge("data_assistant", END)
     graph.add_edge("metric_suggest", END)
-    graph.add_edge("semantic_parse", END)
+    graph.add_conditional_edges(
+        "semantic_parse",
+        _route_after_parse,
+        {
+            "metric_suggest": "metric_suggest",
+            "done": END,
+        },
+    )
     return graph.compile()
 
 

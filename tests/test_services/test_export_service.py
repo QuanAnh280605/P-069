@@ -13,6 +13,7 @@ from src.models.db import (
     SemanticMetricModel,
     SemanticTableModel,
 )
+from src.models.review_mixin import REVIEW_STATUS_APPROVED, REVIEW_STATUS_PENDING
 from src.services.export_service import build_semantic_layer_dict, serialize_to_json, serialize_to_yaml
 
 # ---------------------------------------------------------------------------
@@ -130,6 +131,8 @@ async def seeded_db(async_session: AsyncSession) -> int:
         to_entity_id=users_table.id,
         relationship_type="many_to_one",
         join_condition="orders.user_id = users.user_id",
+        review_status=REVIEW_STATUS_APPROVED,
+        validation_status="valid",
     )
     async_session.add(rel)
     await async_session.flush()
@@ -236,6 +239,50 @@ async def test_export_canonical_relationships(async_session: AsyncSession, seede
     assert rel["join_condition"] == "orders.user_id = users.user_id"
     assert "from_entity_id" in rel
     assert "to_entity_id" in rel
+    assert rel["review_status"] == REVIEW_STATUS_APPROVED
+    assert rel["validation_status"] == "valid"
+
+
+@pytest.mark.asyncio
+async def test_export_excludes_pending_relationship(async_session: AsyncSession, seeded_db: int):
+    """Pending relationships never reach the export payload."""
+    pending = CanonicalRelationshipModel(
+        connection_id=seeded_db,
+        from_entity_id=1,
+        to_entity_id=1,
+        relationship_type="many_to_one",
+        join_condition="orders.x = users.x",
+        review_status=REVIEW_STATUS_PENDING,
+        validation_status="valid",
+    )
+    async_session.add(pending)
+    await async_session.flush()
+
+    result = await build_semantic_layer_dict(async_session, seeded_db)
+    rels = result["canonical_relationships"]
+    assert len(rels) == 1
+    assert rels[0]["join_condition"] == "orders.user_id = users.user_id"
+
+
+@pytest.mark.asyncio
+async def test_export_excludes_invalid_relationship(async_session: AsyncSession, seeded_db: int):
+    """Technically-invalid relationships never reach the export payload."""
+    invalid = CanonicalRelationshipModel(
+        connection_id=seeded_db,
+        from_entity_id=1,
+        to_entity_id=1,
+        relationship_type="many_to_one",
+        join_condition="orders.x = users.x",
+        review_status=REVIEW_STATUS_APPROVED,
+        validation_status="invalid",
+    )
+    async_session.add(invalid)
+    await async_session.flush()
+
+    result = await build_semantic_layer_dict(async_session, seeded_db)
+    rels = result["canonical_relationships"]
+    assert len(rels) == 1
+    assert rels[0]["validation_status"] == "valid"
 
 
 # ---------------------------------------------------------------------------

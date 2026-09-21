@@ -327,6 +327,177 @@ async def test_invalid_option_spec_is_skipped(sample_catalog: dict) -> None:
 
 
 @pytest.mark.asyncio
+async def test_explicit_grouping_without_matching_dimension_forces_clarification(sample_catalog: dict) -> None:
+    """A request that explicitly asks to group 'theo/by/per <dimension>' but resolves with no
+    dimension must be forced into clarification, never executed with an empty spec."""
+    llm_payload = {
+        "status": "resolved",
+        "metric_ids": [1],
+        "dimensions": [],  # LLM silently dropped the requested grouping
+        "filters": [],
+        "time_ranges": [],
+    }
+
+    state = {
+        "user_message": "Tổng doanh thu theo vùng miền",
+        "parser_catalog": sample_catalog,
+        "can_generate_metrics": False,
+    }
+
+    with patch("src.agents.nodes.semantic_parse_node.ainvoke_json", new_callable=AsyncMock) as mock_json:
+        mock_json.return_value = llm_payload
+        result = await semantic_parse_node(state)
+
+    interp = result["interpretation"]
+    assert interp["status"] == "needs_clarification"
+    assert result["clarification"] is not None
+
+
+@pytest.mark.asyncio
+async def test_aggregate_only_request_remains_resolvable_without_dimension(sample_catalog: dict) -> None:
+    """Legitimate aggregate-only questions (e.g. total revenue) must still resolve without a dimension."""
+    llm_payload = {
+        "status": "resolved",
+        "metric_ids": [1],
+        "dimensions": [],
+        "filters": [],
+        "time_ranges": [],
+    }
+
+    state = {
+        "user_message": "Tổng doanh thu",
+        "parser_catalog": sample_catalog,
+        "can_generate_metrics": False,
+    }
+
+    with patch("src.agents.nodes.semantic_parse_node.ainvoke_json", new_callable=AsyncMock) as mock_json:
+        mock_json.return_value = llm_payload
+        result = await semantic_parse_node(state)
+
+    interp = result["interpretation"]
+    assert interp["status"] == "resolved"
+    assert interp["spec"]["metric_ids"] == [1]
+
+
+@pytest.mark.asyncio
+async def test_semantic_mismatch_outside_hardcoded_pairs_forces_clarification(sample_catalog: dict) -> None:
+    """If the LLM resolves a concept that shares no distinctive token with the requested metric
+    (and is not one of the four hardcoded pairs), conservatively force clarification."""
+    llm_payload = {
+        "status": "resolved",
+        "metric_ids": [2],  # Số lượng đơn hàng
+        "dimensions": [],
+        "filters": [],
+        "time_ranges": [],
+    }
+
+    state = {
+        "user_message": "Xem tỷ lệ hoàn tiền",
+        "parser_catalog": sample_catalog,
+        "can_generate_metrics": False,
+    }
+
+    with patch("src.agents.nodes.semantic_parse_node.ainvoke_json", new_callable=AsyncMock) as mock_json:
+        mock_json.return_value = llm_payload
+        result = await semantic_parse_node(state)
+
+    interp = result["interpretation"]
+    assert interp["status"] == "needs_clarification"
+    assert result["clarification"] is not None
+
+
+@pytest.mark.asyncio
+async def test_missing_metric_data_lead_gets_create_option(sample_catalog: dict) -> None:
+    """Data Lead (role) gets a create/save Business Metric option for a missing metric."""
+    llm_payload = {
+        "status": "needs_clarification",
+        "clarification": {
+            "prompt": "Hệ thống hiện chưa có chỉ số 'Tỷ lệ hủy đơn'. Bạn có muốn tạo không?",
+            "options": [],
+        },
+        "rationale": "Chưa có chỉ số trong catalog",
+    }
+
+    state = {
+        "user_message": "Xem tỷ lệ hủy đơn",
+        "parser_catalog": sample_catalog,
+        "can_generate_metrics": True,
+        "role": "data_lead",
+    }
+
+    with patch("src.agents.nodes.semantic_parse_node.ainvoke_json", new_callable=AsyncMock) as mock_json:
+        mock_json.return_value = llm_payload
+        result = await semantic_parse_node(state)
+
+    interp = result["interpretation"]
+    assert interp["status"] == "needs_clarification"
+    assert result["clarification"] is not None
+    assert "Tạo Business Metric" in result["clarification"]["options"][0]["label"]
+    assert result["clarification"]["options"][0]["action"] == "create_metric"
+
+
+@pytest.mark.asyncio
+async def test_missing_metric_member_gets_submit_option(sample_catalog: dict) -> None:
+    """Member (role) gets a submit-to-Data-Lead option for a missing metric."""
+    llm_payload = {
+        "status": "needs_clarification",
+        "clarification": {
+            "prompt": "Hệ thống hiện chưa có chỉ số 'Tỷ lệ hủy đơn'. Bạn có muốn tạo không?",
+            "options": [],
+        },
+        "rationale": "Chưa có chỉ số trong catalog",
+    }
+
+    state = {
+        "user_message": "Xem tỷ lệ hủy đơn",
+        "parser_catalog": sample_catalog,
+        "can_generate_metrics": False,
+        "role": "member",
+    }
+
+    with patch("src.agents.nodes.semantic_parse_node.ainvoke_json", new_callable=AsyncMock) as mock_json:
+        mock_json.return_value = llm_payload
+        result = await semantic_parse_node(state)
+
+    interp = result["interpretation"]
+    assert interp["status"] == "needs_clarification"
+    assert result["clarification"] is not None
+    assert "Gửi Data Lead đề xuất chỉ số" in result["clarification"]["options"][0]["label"]
+    assert result["clarification"]["options"][0]["action"] == "create_metric"
+
+
+@pytest.mark.asyncio
+async def test_missing_metric_admin_gets_guidance_only(sample_catalog: dict) -> None:
+    """Admin (role) gets explanatory guidance directing to a Data Lead, with no create/submit action."""
+    llm_payload = {
+        "status": "needs_clarification",
+        "clarification": {
+            "prompt": "Hệ thống hiện chưa có chỉ số 'Tỷ lệ hủy đơn'. Bạn có muốn tạo không?",
+            "options": [],
+        },
+        "rationale": "Chưa có chỉ số trong catalog",
+    }
+
+    state = {
+        "user_message": "Xem tỷ lệ hủy đơn",
+        "parser_catalog": sample_catalog,
+        "can_generate_metrics": False,
+        "role": "admin",
+    }
+
+    with patch("src.agents.nodes.semantic_parse_node.ainvoke_json", new_callable=AsyncMock) as mock_json:
+        mock_json.return_value = llm_payload
+        result = await semantic_parse_node(state)
+
+    interp = result["interpretation"]
+    assert interp["status"] == "needs_clarification"
+    assert result["clarification"] is not None
+    # Admin must NOT receive any create/submit action option.
+    assert result["clarification"]["options"] == []
+    assert "Data Lead" in result["chat_response"]
+
+
+@pytest.mark.asyncio
 async def test_stale_catalog_metric_id_dropped_from_options(sample_catalog: dict) -> None:
     """Clarification options referencing metric IDs absent from the approved catalog are dropped."""
     llm_payload = {
@@ -363,3 +534,21 @@ async def test_stale_catalog_metric_id_dropped_from_options(sample_catalog: dict
     assert result["clarification"] is not None
     kept = result["clarification"]["options"]
     assert [o["id"] for o in kept] == ["opt_ok"]
+
+
+@pytest.mark.asyncio
+async def test_proactive_clarification_for_repeat_customer_concept(sample_catalog: dict) -> None:
+    """When user requests repeat customer rate, node proactively explains schema limits in clarification."""
+    state = {
+        "user_message": "Tính tỷ lệ khách quay lại",
+        "parser_catalog": sample_catalog,
+        "can_generate_metrics": True,
+        "role": "data_lead",
+    }
+    result = await semantic_parse_node(state)
+    assert result["intent"] == "metric_query"
+    assert result["clarification"] is not None
+    assert "chưa có dữ liệu lịch sử mua hàng lặp lại" in result["chat_response"].lower()
+    options = result["clarification"]["options"]
+    assert len(options) >= 2
+    assert "Tổng số khách hàng từng đặt đơn" in options[0]["label"]

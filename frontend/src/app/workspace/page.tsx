@@ -19,6 +19,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import {
   AppNotification,
+  approveMetricRequestApi,
   approveMetricsApi,
   approveSingleMetricApi,
   ChatSessionItem,
@@ -47,6 +48,7 @@ import {
   LiveDbSummary,
   MetricDefinition,
   MetricRecord,
+  MetricRequest,
   MetricSuggestion,
   METRIC_WRITE_PERMISSION_MESSAGE,
   isPermissionDenied,
@@ -202,6 +204,7 @@ export default function WorkspacePage() {
   const [metricOpen, setMetricOpen] = useState(false);
   const [editingMetric, setEditingMetric] = useState<MetricRecord | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<MetricSuggestion | null>(null);
+  const [editingRequest, setEditingRequest] = useState<MetricRequest | null>(null);
   const [toast, setToast] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -239,6 +242,7 @@ export default function WorkspacePage() {
   const canManageMetrics = Boolean(permissions.can_manage_metrics ?? permissions.can_create_metrics);
   const canSubmitMetric = Boolean(permissions.can_submit_metric);
   const canApproveMetrics = Boolean(permissions.can_approve_metrics);
+  const canGenerateMetrics = Boolean(permissions.can_generate_metrics);
   const canExport = Boolean(permissions.can_export);
   const canEditDashboard = Boolean(permissions.can_manage_metrics || role === 'data_lead' || role === 'admin');
   const canChat = Boolean(
@@ -388,15 +392,19 @@ export default function WorkspacePage() {
     });
   }, [token, currentWorkspace?.id]);
 
+  const lastNotificationFingerprintRef = useRef<string>('');
+
   useEffect(() => {
     if (!token) return;
     return streamNotifications((payload) => {
       setNotifications(payload.items);
       setUnreadNotifications(payload.unread_count);
-      // A new metric-request notification may have changed catalog data.
-      setCatalogRefreshKey((current) => current + 1);
-      // Approved requests create metrics the catalog must show without a reload.
-      void refreshSemanticDataRef.current();
+      const fingerprint = payload.items.map((i) => `${i.id}:${i.read_at}`).join(',');
+      if (lastNotificationFingerprintRef.current && lastNotificationFingerprintRef.current !== fingerprint) {
+        setCatalogRefreshKey((current) => current + 1);
+        void refreshSemanticDataRef.current();
+      }
+      lastNotificationFingerprintRef.current = fingerprint;
     });
   }, [token]);
 
@@ -622,7 +630,7 @@ export default function WorkspacePage() {
   }, [refreshSchemaReview]);
 
   const saveDefinition = async (definition: MetricDefinition, changeReason?: string) => {
-    const canSave = editingMetric ? canManageMetrics : canSubmitMetric;
+    const canSave = editingMetric || editingRequest ? canManageMetrics : canSubmitMetric;
     if (!canSave) {
       notify(METRIC_WRITE_PERMISSION_MESSAGE);
       throw new Error(METRIC_WRITE_PERMISSION_MESSAGE);
@@ -630,6 +638,14 @@ export default function WorkspacePage() {
     if (!activeLayer?.semantic_db_id) throw new Error('Semantic database chưa sẵn sàng');
     const dbId = String(activeLayer.semantic_db_id);
     try {
+      if (editingRequest) {
+        await approveMetricRequestApi(dbId, editingRequest.id, definition);
+        setEditingRequest(null);
+        setCatalogRefreshKey((k) => k + 1);
+        await refreshSemanticData();
+        notify('Đã phê duyệt và tạo metric từ yêu cầu của Member.');
+        return;
+      }
       let draftVersion: number | null = null;
       if (editingMetric) {
         const result = await updateMetricApi(dbId, editingMetric.metric_id, definition, changeReason);
@@ -725,38 +741,80 @@ export default function WorkspacePage() {
         item.id === activeLayerId
           ? {
             ...item,
-            metrics: item.metrics.map((m) => ({ ...m, status: 'approved' })),
+            metrics: item.metrics.map((m) => ({
+              ...m,
+              status: 'approved',
+              has_pending_version: false,
+              pending_version_number: undefined,
+              definition: m.definition
+                ? {
+                    ...m.definition,
+                    metric: {
+                      ...m.definition.metric,
+                      status: 'approved',
+                    },
+                  }
+                : m.definition,
+            })),
           }
           : item,
       ),
     );
     notify(`Đã phê duyệt ${response.approved_count} metric.`);
+    await refreshSemanticData();
   };
 
   const approveSingleMetric = async (metricId: number) => {
     if (!activeLayer?.semantic_db_id) return;
-    await approveSingleMetricApi(String(activeLayer.semantic_db_id), metricId);
+    const response = await approveSingleMetricApi(String(activeLayer.semantic_db_id), metricId);
     setLayers((current) =>
       current.map((item) =>
         item.id === activeLayerId
           ? {
             ...item,
-            metrics: item.metrics.map((m) => (m.metric_id === metricId ? { ...m, status: 'approved' } : m)),
+            metrics: item.metrics.map((m) =>
+              m.metric_id === metricId
+                ? {
+                    ...m,
+                    ...response,
+                    status: 'approved',
+                    has_pending_version: false,
+                    pending_version_number: undefined,
+                    definition: response?.definition || (m.definition
+                      ? {
+                          ...m.definition,
+                          metric: {
+                            ...m.definition.metric,
+                            status: 'approved',
+                          },
+                        }
+                      : m.definition),
+                  }
+                : m,
+            ),
           }
           : item,
       ),
     );
     notify('Đã phê duyệt chỉ số thành công.');
+    await refreshSemanticData();
   };
 
-  const openEditor = (metric?: MetricRecord, suggestion?: MetricSuggestion) => {
+  const openEditor = (
+    metric?: MetricRecord,
+    suggestion?: MetricSuggestion,
+    request?: MetricRequest,
+  ) => {
     setEditingMetric(metric || null);
     setEditingSuggestion(suggestion || null);
+    setEditingRequest(request || null);
     setMetricOpen(true);
   };
 
   const pendingCount = activeLayer
-    ? activeLayer.metrics.filter((m) => !m.is_deleted && m.status !== 'approved').length
+    ? activeLayer.metrics.filter(
+        (m) => !m.is_deleted && (m.status !== 'approved' || Boolean(m.has_pending_version)),
+      ).length
     : 0;
   const pendingSchemaCount = pendingSchema.tables + pendingSchema.columns;
 
@@ -920,6 +978,7 @@ export default function WorkspacePage() {
               onEditMetricRequest={canManageMetrics ? (item) => openEditor(undefined, item) : undefined}
               onOpenCatalog={openCatalog}
               refreshKey={catalogRefreshKey}
+              canSubmitMetric={canSubmitMetric}
             />
           )}
           {tab === 'schema' && (
@@ -940,13 +999,14 @@ export default function WorkspacePage() {
               canManageMetrics={canManageMetrics}
               canApproveMetrics={canApproveMetrics}
               canSubmitMetric={canSubmitMetric}
+              canGenerateMetrics={canGenerateMetrics}
               onAddMetric={canManageMetrics ? () => openEditor() : undefined}
-              onSubmitMetric={canSubmitMetric ? () => openEditor() : undefined}
               onDeleteMetric={canManageMetrics ? removeMetric : undefined}
               onPermanentDeleteMetric={canManageMetrics ? permanentDeleteMetric : undefined}
               onEmptyTrash={canManageMetrics ? emptyTrash : undefined}
               onRestoreMetric={canManageMetrics ? restoreMetric : undefined}
               onEditMetric={canManageMetrics ? (item) => openEditor(item) : undefined}
+              onEditRequest={canManageMetrics ? (req) => openEditor(undefined, undefined, req) : undefined}
               onOpenStudio={canUseMetricStudio ? () => setTab('studio') : undefined}
               onApproveAll={canApproveMetrics ? approve : undefined}
               onApproveMetric={canApproveMetrics ? approveSingleMetric : undefined}
@@ -1045,13 +1105,18 @@ export default function WorkspacePage() {
             setMetricOpen(false);
             setEditingMetric(null);
             setEditingSuggestion(null);
+            setEditingRequest(null);
           }}
           onSave={saveDefinition}
           tables={activeLayer?.tables || []}
-          initialDefinition={editingMetric?.definition || editingSuggestion?.definition}
-          initialName={editingMetric?.name}
+          initialDefinition={editingMetric?.definition || editingSuggestion?.definition || editingRequest?.definition}
+          initialName={editingMetric?.name || editingRequest?.definition?.metric?.name}
+          status={editingRequest ? 'pending_approval' : undefined}
+          isMemberRequest={Boolean(editingRequest)}
           canSave={canManageMetrics}
           saveDisabledReason={METRIC_WRITE_PERMISSION_MESSAGE}
+          dbId={semanticDbId ? String(semanticDbId) : null}
+          catalog={catalog}
         />
       )}
       {workspaceManagementOpen && (

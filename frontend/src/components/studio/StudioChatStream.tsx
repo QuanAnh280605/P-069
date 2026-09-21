@@ -27,8 +27,13 @@ import {
   ConflictWarningStrip,
   DuplicateNoticeCard,
 } from '@/components/studio/DedupeWarnings';
-import { ChatSemanticQueryResult, ChatClarificationPayload } from '@/lib/api';
+import {
+  ChatSemanticQueryResult,
+  ChatClarificationPayload,
+  ClarificationResolution,
+} from '@/lib/api';
 import { ChatQueryResultCard } from '@/components/studio/ChatQueryResultCard';
+import { ClarificationCard } from '@/components/studio/ClarificationCard';
 
 export interface ChatMessage {
   id: string;
@@ -40,6 +45,11 @@ export interface ChatMessage {
   suggestionAction?: 'save_metric' | 'submit_metric_request' | null;
   queryResult?: ChatSemanticQueryResult | null;
   clarification?: ChatClarificationPayload | null;
+  clarificationResolution?: ClarificationResolution | null;
+  /** True while a resolve request for this card is in flight; disables controls. */
+  clarificationPending?: boolean;
+  /** Inline error from a failed resolve attempt; renders a retry control. */
+  clarificationError?: string | null;
   timestamp: string;
   isError?: boolean;
 }
@@ -67,7 +77,11 @@ interface StudioChatStreamProps {
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
   onSubmitMetricRequest?: (messageId: string, suggestionIndex: number) => Promise<void>;
-  onSelectClarification?: (assistantMessageId: string, optionId: string, label: string) => void;
+  onSelectClarification?: (assistantMessageId: string, optionId: string) => void;
+  onCustomClarification?: (assistantMessageId: string, text: string) => void;
+  onSkipClarification?: (assistantMessageId: string) => void;
+  onRetryClarification?: (assistantMessageId: string) => void;
+  showSuggestionAuthoringTools?: boolean;
 }
 
 export function metricRequestKey(messageId: string, suggestionIndex: number): string {
@@ -238,6 +252,21 @@ export function StudioChatStream(props: StudioChatStreamProps) {
     [props.messages],
   );
 
+  const activeClarificationMessage = useMemo(() => {
+    return (
+      [...props.messages]
+        .reverse()
+        .find(
+          (m) =>
+            m.sender === 'assistant' &&
+            m.clarification?.options &&
+            m.clarification.options.length > 0 &&
+            !m.clarificationResolution &&
+            !m.clarificationPending,
+        ) || null
+    );
+  }, [props.messages]);
+
   return (
     <div className="flex h-full w-full flex-1 flex-col overflow-hidden bg-background text-foreground">
       {/* 💬 Messages Stream */}
@@ -253,6 +282,7 @@ export function StudioChatStream(props: StudioChatStreamProps) {
               key={message.id}
               message={message}
               saved={allSavedNames}
+              activeClarificationId={activeClarificationMessage?.id}
               onSave={save}
               onEdit={props.onEditMetric}
               onRefine={props.onRefineWithAI}
@@ -265,6 +295,10 @@ export function StudioChatStream(props: StudioChatStreamProps) {
               onDismissDuplicate={props.onDismissDuplicate}
               onUseExistingDuplicate={props.onUseExistingDuplicate}
               onSelectClarification={props.onSelectClarification}
+              onCustomClarification={props.onCustomClarification}
+              onSkipClarification={props.onSkipClarification}
+              onRetryClarification={props.onRetryClarification}
+              showSuggestionAuthoringTools={props.showSuggestionAuthoringTools !== false}
               theme={props.theme}
             />
           ))}
@@ -295,76 +329,103 @@ export function StudioChatStream(props: StudioChatStreamProps) {
         </div>
       </div>
 
-      {/* 💡 Suggested Prompts Bar & Composer */}
-      <div className="border-t border-border bg-card/40 px-6 py-4">
+      {/* 💡 Actions / Clarification & Composer (Seamless Canvas) */}
+      <div className="bg-transparent px-6 pb-6 pt-2">
         <div className="mx-auto max-w-4xl space-y-3">
-          {/* Suggested Questions Chips */}
-          <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
-                <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                  {canGenerateMetrics ? 'GỢI Ý CÂU HỎI TẠO METRIC' : 'GỢI Ý CÂU HỎI VỀ DỮ LIỆU'}
-                </span>
-                {showSuggestions && (
-                  <span className="font-mono text-[10px] text-muted-foreground/70">
-                    ({contextualSuggestions.length} mẫu)
-                  </span>
-                )}
-              </div>
-
-              <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={showSuggestions}
-                  onChange={toggleShowSuggestions}
-                  className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
-                />
-                <span>{showSuggestions ? 'Hiển thị gợi ý' : 'Đã ẩn (Tick để hiện)'}</span>
-              </label>
+          {/* ❓ Active Clarification Card (docked above input, replaces suggestions, hides immediately on click) */}
+          {activeClarificationMessage ? (
+            <div className="w-full">
+              <ClarificationCard
+                prompt={activeClarificationMessage.clarification!.prompt}
+                options={activeClarificationMessage.clarification!.options}
+                resolution={activeClarificationMessage.clarificationResolution}
+                pending={activeClarificationMessage.clarificationPending}
+                error={activeClarificationMessage.clarificationError}
+                onSelectOption={(optionId, label) =>
+                  props.onSelectClarification?.(activeClarificationMessage.id, optionId)
+                }
+                onCustomAnswer={(text) =>
+                  props.onCustomClarification?.(activeClarificationMessage.id, text)
+                }
+                onSkip={() => props.onSkipClarification?.(activeClarificationMessage.id)}
+                onRetry={
+                  activeClarificationMessage.clarificationError
+                    ? () => props.onRetryClarification?.(activeClarificationMessage.id)
+                    : undefined
+                }
+              />
             </div>
+          ) : !hasUserSentMessage ? (
+            /* 💡 Suggested Questions Chips (hidden once conversation starts) */
+            <div className="space-y-2 rounded-lg border border-border bg-card p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+                  <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                    {canGenerateMetrics ? 'GỢI Ý CÂU HỎI TẠO METRIC' : 'GỢI Ý CÂU HỎI VỀ DỮ LIỆU'}
+                  </span>
+                  {showSuggestions && (
+                    <span className="font-mono text-[10px] text-muted-foreground/70">
+                      ({contextualSuggestions.length} mẫu)
+                    </span>
+                  )}
+                </div>
 
-            {showSuggestions && (
-              <div
-                ref={stripRef}
-                data-testid="prompt-suggestion-strip"
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                className="flex overflow-x-auto whitespace-nowrap gap-1.5 pt-1"
-              >
-                {contextualSuggestions.map((item, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleSelectSuggestion(item.prompt)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/60 px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-secondary hover:text-foreground cursor-pointer shrink-0"
-                  >
-                    <span>{item.icon}</span>
-                    <span>{item.title}</span>
-                  </button>
-                ))}
+                <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={showSuggestions}
+                    onChange={toggleShowSuggestions}
+                    className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
+                  />
+                  <span>{showSuggestions ? 'Hiển thị gợi ý' : 'Đã ẩn (Tick để hiện)'}</span>
+                </label>
               </div>
-            )}
-          </div>
+
+              {showSuggestions && (
+                <div
+                  ref={stripRef}
+                  data-testid="prompt-suggestion-strip"
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  className="flex overflow-x-auto whitespace-nowrap gap-1.5 pt-1"
+                >
+                  {contextualSuggestions.map((item, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleSelectSuggestion(item.prompt)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/60 px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-secondary hover:text-foreground cursor-pointer shrink-0"
+                    >
+                      <span>{item.icon}</span>
+                      <span>{item.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
 
           {/* Composer Input Box */}
-          <div className="flex items-end gap-2 rounded-xl border border-border bg-card p-2 shadow-xs focus-within:border-foreground/30 focus-within:ring-1 focus-within:ring-ring/20">
+          <div className="flex items-end gap-2 rounded-2xl border border-border bg-card p-2.5 shadow-xs transition-all focus-within:border-foreground/30 focus-within:ring-1 focus-within:ring-ring/20 dark:border-zinc-800 dark:bg-zinc-900/90">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={2}
               placeholder={
-                canGenerateMetrics
-                  ? 'Mô tả chỉ số bạn muốn tạo hoặc đặt câu hỏi về schema...'
-                  : 'Hỏi về schema, metric đã duyệt hoặc cách chọn dữ liệu...'
+                activeClarificationMessage
+                  ? 'Hoặc trả lời trực tiếp...'
+                  : canGenerateMetrics
+                    ? 'Mô tả chỉ số bạn muốn tạo hoặc đặt câu hỏi về schema...'
+                    : 'Hỏi về schema, metric đã duyệt hoặc cách chọn dữ liệu...'
               }
-              className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
             />
             <Button
               size="icon"
-              className="h-9 w-9 shrink-0 rounded-lg cursor-pointer"
+              className="h-9 w-9 shrink-0 rounded-xl cursor-pointer"
               onClick={() => void send()}
               disabled={!input.trim() || props.isLoading}
               aria-label="Send message"
@@ -386,6 +447,7 @@ export function StudioChatStream(props: StudioChatStreamProps) {
 function MessageBubble({
   message,
   saved,
+  activeClarificationId,
   onSave,
   onEdit,
   onRefine,
@@ -398,10 +460,15 @@ function MessageBubble({
   onDismissDuplicate,
   onUseExistingDuplicate,
   onSelectClarification,
+  onCustomClarification,
+  onSkipClarification,
+  onRetryClarification,
+  showSuggestionAuthoringTools,
   theme,
 }: {
   message: ChatMessage;
   saved: ReadonlySet<string>;
+  activeClarificationId?: string | null;
   onSave: (suggestion: MetricSuggestion) => Promise<void>;
   onEdit?: (suggestion: MetricSuggestion) => void;
   onRefine?: (suggestion: MetricSuggestion) => void;
@@ -413,7 +480,11 @@ function MessageBubble({
   onDiscardSuggestion?: SuggestionIndexHandler;
   onDismissDuplicate?: SuggestionIndexHandler;
   onUseExistingDuplicate?: SuggestionIndexHandler;
-  onSelectClarification?: (assistantMessageId: string, optionId: string, label: string) => void;
+  onSelectClarification?: (assistantMessageId: string, optionId: string) => void;
+  onCustomClarification?: (assistantMessageId: string, text: string) => void;
+  onSkipClarification?: (assistantMessageId: string) => void;
+  onRetryClarification?: (assistantMessageId: string) => void;
+  showSuggestionAuthoringTools: boolean;
   theme?: 'light' | 'dark';
 }) {
   const isUser = message.sender === 'user';
@@ -440,7 +511,7 @@ function MessageBubble({
           <span>{message.timestamp}</span>
         </div>
 
-        {/* The description line is hidden once every duplicate notice is settled. */}
+        {/* Message Content Bubble */}
         {message.text ? (
           <div
             className={cn(
@@ -462,23 +533,22 @@ function MessageBubble({
           </div>
         )}
 
-        {/* ❓ Clarification Options */}
-        {message.clarification?.options && message.clarification.options.length > 0 && (
-          <div className="w-full space-y-2 pt-1">
-            <div className="flex flex-wrap gap-2">
-              {message.clarification.options.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => onSelectClarification?.(message.id, opt.id, opt.label)}
-                  className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/20 hover:border-primary/50 transition-all cursor-pointer shadow-2xs"
-                >
-                  <span>👉 {opt.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* ❓ Clarification Resolution (in history when resolved) */}
+        {message.clarification?.options &&
+          message.clarification.options.length > 0 &&
+          message.clarificationResolution && (
+            <ClarificationCard
+              prompt={message.clarification.prompt}
+              options={message.clarification.options}
+              resolution={message.clarificationResolution}
+              hidePrompt={Boolean(
+                message.text && message.text.trim() === message.clarification.prompt?.trim(),
+              )}
+              onSelectOption={() => {}}
+              onCustomAnswer={() => {}}
+              onSkip={() => {}}
+            />
+          )}
 
         {message.dedupeSkipped && (
           <div
@@ -511,6 +581,7 @@ function MessageBubble({
                 }
                 onRename={() => onRenameSuggestion?.(message.id, idx)}
                 onUseExisting={() => onDiscardSuggestion?.(message.id, idx)}
+                showAuthoringTools={showSuggestionAuthoringTools}
               />
             ))}
           </div>
@@ -626,6 +697,7 @@ function SuggestionCard({
   isSubmitted,
   isApproved,
   onSubmitRequest,
+  showAuthoringTools,
 }: {
   suggestion: MetricSuggestion;
   isSaved: boolean;
@@ -639,6 +711,7 @@ function SuggestionCard({
   isSubmitted?: boolean;
   isApproved?: boolean;
   onSubmitRequest?: () => Promise<void>;
+  showAuthoringTools: boolean;
 }) {
   const [showYaml, setShowYaml] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -703,43 +776,47 @@ function SuggestionCard({
           </div>
           <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
             Bảng: <span className="text-foreground">{def.base_entity}</span>
-            <span className="ml-2 opacity-60">YAML preview sẵn sàng</span>
+            {showAuthoringTools && (
+              <span className="ml-2 opacity-60">YAML preview sẵn sàng</span>
+            )}
           </p>
         </div>
 
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-            onClick={() => setShowYaml(!showYaml)}
-          >
-            <Code2 className="h-3.5 w-3.5" />
-            {showYaml ? 'Ẩn mã YAML' : 'Hiển thị mã YAML'}
-          </Button>
-          {onRefine && (
+        {showAuthoringTools && (
+          <div className="flex items-center gap-1">
             <Button
               variant="ghost"
               size="sm"
               className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-              onClick={onRefine}
+              onClick={() => setShowYaml(!showYaml)}
             >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Nhờ AI tinh chỉnh
+              <Code2 className="h-3.5 w-3.5" />
+              {showYaml ? 'Ẩn mã YAML' : 'Hiển thị mã YAML'}
             </Button>
-          )}
-          {onEdit && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-              onClick={onEdit}
-            >
-              <Edit3 className="h-3.5 w-3.5" />
-              Chỉnh sửa thủ công
-            </Button>
-          )}
-        </div>
+            {onRefine && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                onClick={onRefine}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Nhờ AI tinh chỉnh
+              </Button>
+            )}
+            {onEdit && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                onClick={onEdit}
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+                Chỉnh sửa thủ công
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Visual Properties */}
@@ -750,8 +827,14 @@ function SuggestionCard({
               Công thức tính
             </span>
             <p className="mt-0.5 font-mono text-xs font-medium text-foreground">
-              <span className="text-primary font-bold">{def.formula.function}</span>(
-              <span>{def.formula.expression}</span>)
+              {def?.formula?.function ? (
+                <>
+                  <span className="text-primary font-bold">{def.formula.function}</span>(
+                  <span>{def.formula.expression}</span>)
+                </>
+              ) : (
+                <span>{def?.formula?.expression || 'N/A'}</span>
+              )}
             </p>
           </div>
           <div className="rounded-md border border-border bg-secondary/30 p-2.5">
@@ -759,7 +842,7 @@ function SuggestionCard({
               Dựa vào bảng gốc
             </span>
             <p className="mt-0.5 font-mono text-xs font-medium text-foreground">
-              {def.base_entity}
+              {def?.base_entity || 'N/A'}
             </p>
           </div>
         </div>
@@ -770,7 +853,7 @@ function SuggestionCard({
               Cột dữ liệu sử dụng
             </span>
             <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-              {def.formula.expression}
+              {def?.formula?.expression || 'N/A'}
             </p>
           </div>
           <div className="rounded-md border border-border bg-secondary/30 p-2.5">
@@ -797,7 +880,7 @@ function SuggestionCard({
         )}
 
         {/* YAML Preview */}
-        {showYaml && (
+        {showAuthoringTools && showYaml && (
           <div className="mt-3 overflow-hidden rounded-md border border-border bg-secondary/20">
             <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
               <span className="font-mono text-[11px] text-muted-foreground">YAML preview</span>

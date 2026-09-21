@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from src.services.enrichment_config import DEFAULT_CONFIG, EnrichmentConfig
-from src.services.llm_caller import enrich_cluster_with_retry, execute_llm_request
+from src.services.llm_caller import enrich_cluster_with_retry, execute_llm_request_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,37 @@ def _title_case(name: str) -> str:
 def _normalize_col(name: str) -> str:
     """Normalize column name for matching: lowercase, stripped."""
     return name.strip().lower()
+
+
+def _match_llm_table(tname: str, llm_tables: dict[str, dict]) -> dict[str, Any] | None:
+    """Match a source table name to an LLM response table (exact-first).
+
+    Exact key match wins. Otherwise a strip().casefold() index is built and the
+    fallback is used only when the normalized key maps to exactly one response key.
+    Logs a structured warning on collision or missing key so silent loss is visible.
+    """
+    if tname in llm_tables:
+        return llm_tables[tname]
+    norm_index: dict[str, list[str]] = {}
+    for llm_key in llm_tables:
+        norm_index.setdefault(llm_key.strip().casefold(), []).append(llm_key)
+    candidates = norm_index.get(tname.strip().casefold())
+    if not candidates:
+        logger.warning("Table key missing in LLM response: source=%r", tname)
+        return None
+    if len(candidates) > 1:
+        logger.warning(
+            "Table key collision for %r among %s; skipping silent match",
+            tname,
+            candidates,
+        )
+        return None
+    logger.warning(
+        "Table key matched by case-insensitive fallback: source=%r llm_key=%r",
+        tname,
+        candidates[0],
+    )
+    return llm_tables[candidates[0]]
 
 
 # ---------------------------------------------------------------------------
@@ -235,8 +266,9 @@ def _merge_cluster_result(
     for t in cluster:
         key = table_key(t)
         tname = t["table_name"]
-        if tname in llm_tables:
-            result[key] = _merge_matched_table(t, llm_tables[tname])
+        matched = _match_llm_table(tname, llm_tables)
+        if matched is not None:
+            result[key] = _merge_matched_table(t, matched)
         else:
             result[key] = _fallback_table_entry(t, global_glossary)
     return result
@@ -247,6 +279,124 @@ def _merge_cluster_result(
 # ---------------------------------------------------------------------------
 
 
+def _fallback_chunk_columns(chunk: list[dict]) -> list[dict]:
+    """Build title-case fallback entries for every column in a failed chunk."""
+    return [
+        {
+            "column_name": col["column_name"],
+            "business_name": _title_case(col["column_name"]),
+            "description": "",
+        }
+        for col in chunk
+    ]
+
+
+def _merge_chunk_columns(matched: dict[str, Any], chunk: list[dict]) -> list[dict]:
+    """Merge a matched LLM table's columns against source chunk columns, in order."""
+    llm_cols_map = {
+        _normalize_col(lc["column_name"]): lc
+        for lc in matched.get("columns", [])
+        if isinstance(lc, dict) and "column_name" in lc
+    }
+    merged: list[dict] = []
+    for col in chunk:
+        norm = _normalize_col(col["column_name"])
+        llm_col = llm_cols_map.get(norm)
+        if llm_col:
+            merged.append(
+                {
+                    "column_name": col["column_name"],
+                    "business_name": llm_col.get("business_name", _title_case(col["column_name"])),
+                    "description": llm_col.get("description", ""),
+                }
+            )
+        else:
+            merged.append(
+                {
+                    "column_name": col["column_name"],
+                    "business_name": _title_case(col["column_name"]),
+                    "description": "",
+                }
+            )
+    return merged
+
+
+def _resolve_ultra_wide_meta(
+    key: str,
+    tname: str,
+    global_glossary: dict[str, dict],
+    llm_business_name: str | None,
+    llm_description: str | None,
+) -> tuple[str, str]:
+    """Resolve business_name/description: LLM first, then glossary, then title-case."""
+    glossary_entry = global_glossary.get(key) or global_glossary.get(tname)
+    business_name = llm_business_name
+    description = llm_description
+    if business_name is None and glossary_entry:
+        business_name = glossary_entry.get("business_name")
+    if description is None and glossary_entry:
+        description = glossary_entry.get("description")
+    if business_name is None:
+        business_name = _title_case(tname)
+    if description is None:
+        description = f"Bảng {tname}"
+    return business_name, description
+
+
+async def _enrich_ultra_wide_chunk(
+    chunk: list[dict],
+    table_meta: dict[str, Any],
+    global_glossary: dict[str, dict],
+    dialect: str,
+    sem: asyncio.Semaphore,
+    config: EnrichmentConfig,
+) -> tuple[list[dict], str | None, str | None]:
+    """Enrich one chunk; return merged columns plus table-level business metadata."""
+    tname = table_meta["table_name"]
+    chunk_table = {**table_meta, "columns": chunk}
+    prompt = build_cluster_prompt([chunk_table], global_glossary, dialect)
+    parsed = await execute_llm_request_with_retry(prompt, sem, config)
+    if parsed is None:
+        return _fallback_chunk_columns(chunk), None, None
+    matched = _match_llm_table(tname, _normalize_llm_tables(parsed))
+    if matched is None:
+        return _fallback_chunk_columns(chunk), None, None
+    return (
+        _merge_chunk_columns(matched, chunk),
+        matched.get("business_name"),
+        matched.get("description"),
+    )
+
+
+async def _gather_ultra_wide_columns(
+    table_meta: dict[str, Any],
+    chunks: list[list[dict]],
+    global_glossary: dict[str, dict],
+    dialect: str,
+    sem: asyncio.Semaphore,
+    config: EnrichmentConfig,
+) -> tuple[list[dict], str | None, str | None]:
+    """Enrich chunks in parallel, merge columns in source order."""
+    results = await asyncio.gather(
+        *[_enrich_ultra_wide_chunk(chunk, table_meta, global_glossary, dialect, sem, config) for chunk in chunks],
+        return_exceptions=True,
+    )
+    merged_columns: list[dict] = []
+    llm_business_name: str | None = None
+    llm_description: str | None = None
+    for r in results:
+        if isinstance(r, BaseException):
+            logger.warning("Ultra-wide chunk failed: %s", r)
+            continue
+        cols, bname, desc = r
+        merged_columns.extend(cols)
+        if llm_business_name is None and bname:
+            llm_business_name = bname
+        if llm_description is None and desc:
+            llm_description = desc
+    return merged_columns, llm_business_name, llm_description
+
+
 async def _handle_ultra_wide_table(
     table_meta: dict[str, Any],
     global_glossary: dict[str, dict],
@@ -254,100 +404,26 @@ async def _handle_ultra_wide_table(
     sem: asyncio.Semaphore,
     config: EnrichmentConfig,
 ) -> dict[str, Any]:
-    """Handle table with > ultra_wide_threshold columns by splitting into chunks."""
+    """Split a > ultra_wide_threshold table into chunks and enrich each in parallel.
+
+    Fallback entries are created for every source column on exhausted retries or parse
+    failure, so no column is ever dropped; chunks merge in source-column order.
+    """
     columns = table_meta.get("columns", [])
     chunk_size = config.ultra_wide_chunk_size
     chunks = [columns[i : i + chunk_size] for i in range(0, len(columns), chunk_size)]
-
     tname = table_meta["table_name"]
     key = table_key(table_meta)
-    all_merged_columns: list[dict] = []
-    llm_business_name: str | None = None
-    llm_description: str | None = None
-
-    async def _enrich_chunk(chunk: list[dict]) -> list[dict]:
-        nonlocal llm_business_name, llm_description
-        chunk_table = {
-            **table_meta,
-            "columns": chunk,
-        }
-        prompt = build_cluster_prompt([chunk_table], global_glossary, dialect)
-        raw = await execute_llm_request(prompt, sem, config.llm_call_timeout_sec)
-        from src.services.llm_caller import parse_llm_json
-
-        parsed = parse_llm_json(raw)
-        llm_tables = parsed.get("tables", {})
-        if tname in llm_tables:
-            llm_tbl = llm_tables[tname]
-            if llm_business_name is None and llm_tbl.get("business_name"):
-                llm_business_name = llm_tbl["business_name"]
-            if llm_description is None and llm_tbl.get("description"):
-                llm_description = llm_tbl["description"]
-            llm_cols_map = {}
-            for lc in llm_tables[tname].get("columns", []):
-                llm_cols_map[_normalize_col(lc["column_name"])] = lc
-            chunk_result = []
-            for col in chunk:
-                norm = _normalize_col(col["column_name"])
-                if norm in llm_cols_map:
-                    llm_col = llm_cols_map[norm]
-                    chunk_result.append(
-                        {
-                            "column_name": col["column_name"],
-                            "business_name": llm_col.get("business_name", _title_case(col["column_name"])),
-                            "description": llm_col.get("description", ""),
-                        }
-                    )
-                else:
-                    chunk_result.append(
-                        {
-                            "column_name": col["column_name"],
-                            "business_name": _title_case(col["column_name"]),
-                            "description": "",
-                        }
-                    )
-            return chunk_result
-        # Fallback for chunk
-        return [
-            {
-                "column_name": col["column_name"],
-                "business_name": _title_case(col["column_name"]),
-                "description": "",
-            }
-            for col in chunk
-        ]
-
-    results = await asyncio.gather(
-        *[_enrich_chunk(chunk) for chunk in chunks],
-        return_exceptions=True,
+    merged_columns, llm_business_name, llm_description = await _gather_ultra_wide_columns(
+        table_meta, chunks, global_glossary, dialect, sem, config
     )
-
-    for r in results:
-        if isinstance(r, BaseException):
-            logger.warning("Ultra-wide chunk failed: %s", r)
-        else:
-            all_merged_columns.extend(r)
-
-    # Get business_name / description: prefer LLM data from chunks, then glossary, then fallback
-    glossary_entry = global_glossary.get(key) or global_glossary.get(tname)
-
-    business_name = llm_business_name
-    description = llm_description
-
-    if business_name is None and glossary_entry:
-        business_name = glossary_entry.get("business_name")
-    if description is None and glossary_entry:
-        description = glossary_entry.get("description")
-
-    if business_name is None:
-        business_name = _title_case(tname)
-    if description is None:
-        description = f"Bảng {tname}"
-
+    business_name, description = _resolve_ultra_wide_meta(
+        key, tname, global_glossary, llm_business_name, llm_description
+    )
     return {
         "business_name": business_name,
         "description": description,
-        "columns": all_merged_columns,
+        "columns": merged_columns,
     }
 
 

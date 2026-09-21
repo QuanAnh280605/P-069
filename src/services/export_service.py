@@ -22,6 +22,7 @@ from src.models.db import (
     SemanticMetricModel,
     SemanticTableModel,
 )
+from src.models.review_mixin import REVIEW_STATUS_APPROVED
 
 
 async def _load_database(db: AsyncSession, db_id: int) -> SemanticDatabaseModel | None:
@@ -54,9 +55,18 @@ async def _load_metrics(db: AsyncSession, db_id: int) -> list[SemanticMetricMode
 
 
 async def _load_relationships(db: AsyncSession, db_id: int) -> list[CanonicalRelationshipModel]:
-    """Fetch all canonical relationships for a given database."""
+    """Fetch canonical relationships that are both valid and human-approved.
+
+    Flow 2 consumers (catalog/export) must never receive pending or technically
+    invalid relationships, so only rows with ``review_status == 'approved'`` and
+    ``validation_status == 'valid'`` are returned.
+    """
     result = await db.execute(
-        select(CanonicalRelationshipModel).where(CanonicalRelationshipModel.connection_id == db_id)
+        select(CanonicalRelationshipModel).where(
+            CanonicalRelationshipModel.connection_id == db_id,
+            CanonicalRelationshipModel.review_status == REVIEW_STATUS_APPROVED,
+            CanonicalRelationshipModel.validation_status == "valid",
+        )
     )
     return list(result.scalars().all())
 
@@ -146,6 +156,11 @@ def _relationship_to_dict(rel: CanonicalRelationshipModel) -> dict[str, Any]:
         "to_entity_id": rel.to_entity_id,
         "relationship_type": rel.relationship_type,
         "join_condition": rel.join_condition,
+        "business_name": rel.business_name,
+        "description": rel.description,
+        "validation_status": rel.validation_status,
+        "review_status": rel.review_status,
+        "column_pairs": rel.column_pairs,
         "created_at": rel.created_at.isoformat() if rel.created_at else None,
     }
 

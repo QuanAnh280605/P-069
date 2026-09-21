@@ -11,68 +11,69 @@ import {
   SemanticApiError,
 } from '@/lib/api';
 
-describe('MetricsCatalogView', () => {
-  const mockMetrics: MetricRecord[] = [
-    {
-      metric_id: 1,
-      name: 'Doanh thu thuần',
-      source: 'ai',
-      version: 1,
-      status: 'approved',
-      created_at: '2026-01-01',
-      definition: {
-        schema_version: 2,
-        metric: {
-          name: 'Doanh thu thuần',
-          base_entity: 'orders',
-          base_entity_id: 10,
-          grain: { column_ids: [101] },
-          formula: { function: 'SUM', expression: 'price' },
-          filters: [],
-          status: 'approved',
-          confidence: 'high',
-          excluded_notes: '',
-        },
-      },
-    },
-    {
-      metric_id: 2,
-      name: 'Số lượng đơn hàng mới',
-      source: 'ai',
-      version: 1,
-      status: 'pending_approval',
-      created_at: '2026-01-01',
-      definition: {
-        schema_version: 2,
-        metric: {
-          name: 'Số lượng đơn hàng mới',
-          base_entity: 'orders',
-          base_entity_id: 10,
-          grain: { column_ids: [101] },
-          formula: { function: 'COUNT', expression: 'id' },
-          filters: [],
-          status: 'pending_approval',
-          confidence: 'medium',
-          excluded_notes: '',
-        },
-      },
-    },
-  ];
-
-  const unverifiedMetric: MetricRecord = {
-    ...mockMetrics[1],
-    metric_id: 3,
-    name: 'Giá trị đơn trung bình',
-    status: 'unverified',
+const mockMetrics: MetricRecord[] = [
+  {
+    metric_id: 1,
+    name: 'Doanh thu thuần',
+    source: 'ai',
+    version: 1,
+    status: 'approved',
+    created_at: '2026-01-01',
     definition: {
-      ...mockMetrics[1].definition!,
+      schema_version: 2,
       metric: {
-        ...mockMetrics[1].definition!.metric,
-        name: 'Giá trị đơn trung bình',
-        status: 'unverified',
+        name: 'Doanh thu thuần',
+        base_entity: 'orders',
+        base_entity_id: 10,
+        grain: { column_ids: [101] },
+        formula: { function: 'SUM', expression: 'price' },
+        filters: [],
+        status: 'approved',
+        confidence: 'high',
+        excluded_notes: '',
       },
     },
-  };
+  },
+  {
+    metric_id: 2,
+    name: 'Số lượng đơn hàng mới',
+    source: 'ai',
+    version: 1,
+    status: 'pending_approval',
+    created_at: '2026-01-01',
+    definition: {
+      schema_version: 2,
+      metric: {
+        name: 'Số lượng đơn hàng mới',
+        base_entity: 'orders',
+        base_entity_id: 10,
+        grain: { column_ids: [101] },
+        formula: { function: 'COUNT', expression: 'id' },
+        filters: [],
+        status: 'pending_approval',
+        confidence: 'medium',
+        excluded_notes: '',
+      },
+    },
+  },
+];
+
+const unverifiedMetric: MetricRecord = {
+  ...mockMetrics[1],
+  metric_id: 3,
+  name: 'Giá trị đơn trung bình',
+  status: 'unverified',
+  definition: {
+    ...mockMetrics[1].definition!,
+    metric: {
+      ...mockMetrics[1].definition!.metric,
+      name: 'Giá trị đơn trung bình',
+      status: 'unverified',
+    },
+  },
+};
+
+describe('MetricsCatalogView', () => {
   const dataLeadCapabilities = {
     canSubmitMetric: true,
     canManageMetrics: true,
@@ -515,7 +516,74 @@ describe('MetricsCatalogView', () => {
 
     expect(handleRestore).toHaveBeenCalledWith(99);
   });
+
+  it('moves metric to approved section immediately when status is approved without pending version', () => {
+    const { rerender } = render(
+      <MetricsCatalogView
+        {...dataLeadCapabilities}
+        dbId={3}
+        metrics={[mockMetrics[1]]} // pending_approval
+        onApproveMetric={vi.fn()}
+      />,
+    );
+
+    // Should be in pending section
+    expect(screen.getByText(/Metrics Đang Chờ Phê Duyệt/)).toBeInTheDocument();
+    expect(screen.getByTitle('Phê duyệt chỉ số này')).toBeInTheDocument();
+
+    // Rerender as approved with no pending version
+    const approvedItem: MetricRecord = {
+      ...mockMetrics[1],
+      status: 'approved',
+      has_pending_version: false,
+      definition: {
+        ...mockMetrics[1].definition!,
+        metric: {
+          ...mockMetrics[1].definition!.metric,
+          status: 'approved',
+        },
+      },
+    };
+
+    rerender(
+      <MetricsCatalogView
+        {...dataLeadCapabilities}
+        dbId={3}
+        metrics={[approvedItem]}
+        onApproveMetric={vi.fn()}
+      />,
+    );
+
+    // Pending section should be empty
+    expect(screen.getByText('Không có metric nào đang chờ duyệt.')).toBeInTheDocument();
+    // Approve button should no longer exist
+    expect(screen.queryByTitle('Phê duyệt chỉ số này')).not.toBeInTheDocument();
+    // Metric name should be in approved section
+    expect(screen.getByText('Số lượng đơn hàng mới')).toBeInTheDocument();
+  });
+
+  it('displays metric with pending version in pending section with version badge', () => {
+    const approvedWithPendingVersion: MetricRecord = {
+      ...mockMetrics[0],
+      status: 'approved',
+      has_pending_version: true,
+      pending_version_number: 2,
+    };
+
+    render(
+      <MetricsCatalogView
+        {...dataLeadCapabilities}
+        dbId={3}
+        metrics={[approvedWithPendingVersion]}
+        onApproveMetric={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/v2 chờ duyệt/)).toBeInTheDocument();
+    expect(screen.getByTitle('Phê duyệt chỉ số này')).toBeInTheDocument();
+  });
 });
+
 
 describe('MetricsCatalogView history modal', () => {
   function makeDefinition(expression: string): MetricDefinition {
@@ -734,3 +802,158 @@ describe('MetricsCatalogView history modal', () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe('MetricsCatalogView member metric requests in pending approval section', () => {
+  const dataLeadCapabilities = {
+    canSubmitMetric: true,
+    canManageMetrics: true,
+    canApproveMetrics: true,
+  };
+
+  const mockMemberRequest: apiModule.MetricRequest = {
+    id: 42,
+    db_id: 3,
+    requester_id: 99,
+    assistant_message_id: 'msg-1',
+    suggestion_index: 0,
+    status: 'pending',
+    created_at: '2026-01-01',
+    updated_at: '2026-01-01',
+    definition: {
+      schema_version: 2,
+      metric: {
+        name: 'Tỷ lệ khách hàng quay lại',
+        base_entity: 'orders',
+        base_entity_id: 10,
+        grain: { column_ids: [101] },
+        formula: { function: 'COUNT_DISTINCT', expression: 'customer_id' },
+        filters: [],
+        status: 'pending_approval',
+        confidence: 'high',
+        excluded_notes: '',
+      },
+    },
+  };
+
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('renders member metric request inside pending approval section and updates tab count', async () => {
+    vi.spyOn(apiModule, 'listMetricRequestsApi').mockResolvedValue([mockMemberRequest]);
+
+    render(
+      <MetricsCatalogView
+        {...dataLeadCapabilities}
+        dbId={3}
+        metrics={mockMetrics}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onOpenStudio={vi.fn()}
+        onApproveAll={vi.fn()}
+      />,
+    );
+
+    // Wait for member request to load and appear inside Pending approval section
+    expect(await screen.findByText('Tỷ lệ khách hàng quay lại')).toBeInTheDocument();
+    expect(screen.getByText('Member đề xuất')).toBeInTheDocument();
+
+    // Section 1 header should reflect 1 pending metric + 1 member request = 2
+    expect(screen.getByText(/1\. Metrics Đang Chờ Phê Duyệt/)).toBeInTheDocument();
+
+    // Pending tab button should include pending request
+    const pendingTab = screen.getByRole('button', { name: /Chờ phê duyệt/ });
+    expect(pendingTab).toHaveTextContent('(2)');
+  });
+
+  it('displays member request when switching to Chờ phê duyệt tab and allows approve', async () => {
+    vi.spyOn(apiModule, 'listMetricRequestsApi').mockResolvedValue([mockMemberRequest]);
+    const approveSpy = vi.spyOn(apiModule, 'approveMetricRequestApi').mockResolvedValue({
+      ...mockMemberRequest,
+      status: 'approved',
+    });
+
+    render(
+      <MetricsCatalogView
+        {...dataLeadCapabilities}
+        dbId={3}
+        metrics={mockMetrics}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onOpenStudio={vi.fn()}
+        onApproveAll={vi.fn()}
+        onMetricsChanged={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('Tỷ lệ khách hàng quay lại')).toBeInTheDocument();
+
+    // Switch to "Chờ phê duyệt" tab
+    fireEvent.click(screen.getByRole('button', { name: /Chờ phê duyệt/ }));
+
+    // Verify request is present in "Chờ phê duyệt" tab
+    expect(screen.getByText('Tỷ lệ khách hàng quay lại')).toBeInTheDocument();
+
+    // Click "Duyệt & tạo"
+    fireEvent.click(screen.getByRole('button', { name: 'Duyệt & tạo' }));
+
+    await waitFor(() => {
+      expect(approveSpy).toHaveBeenCalledWith('3', 42, undefined);
+    });
+  });
+
+  it('allows rejecting a member metric request', async () => {
+    vi.spyOn(apiModule, 'listMetricRequestsApi').mockResolvedValue([mockMemberRequest]);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const rejectSpy = vi.spyOn(apiModule, 'rejectMetricRequestApi').mockResolvedValue({
+      ...mockMemberRequest,
+      status: 'rejected',
+    });
+
+    render(
+      <MetricsCatalogView
+        {...dataLeadCapabilities}
+        dbId={3}
+        metrics={mockMetrics}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onOpenStudio={vi.fn()}
+        onApproveAll={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('Tỷ lệ khách hàng quay lại')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Từ chối' }));
+
+    await waitFor(() => {
+      expect(rejectSpy).toHaveBeenCalledWith('3', 42);
+    });
+  });
+
+  it('calls onEditRequest when clicking Chỉnh sửa on member request', async () => {
+    vi.spyOn(apiModule, 'listMetricRequestsApi').mockResolvedValue([mockMemberRequest]);
+    const handleEditRequest = vi.fn();
+
+    render(
+      <MetricsCatalogView
+        {...dataLeadCapabilities}
+        dbId={3}
+        metrics={mockMetrics}
+        onDeleteMetric={vi.fn()}
+        onEditMetric={vi.fn()}
+        onEditRequest={handleEditRequest}
+        onOpenStudio={vi.fn()}
+        onApproveAll={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('Tỷ lệ khách hàng quay lại')).toBeInTheDocument();
+
+    const requestCard = screen.getByText('Tỷ lệ khách hàng quay lại').closest('article')!;
+    fireEvent.click(within(requestCard).getByRole('button', { name: 'Chỉnh sửa' }));
+    expect(handleEditRequest).toHaveBeenCalledWith(mockMemberRequest);
+  });
+});
+

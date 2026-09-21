@@ -204,12 +204,16 @@ async def test_register_creates_workspace_atomically(async_session: AsyncSession
     ).scalar_one_or_none()
     assert user is not None
     memberships = list(
-        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id))).scalars().all()
+        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id)))
+        .scalars()
+        .all()
     )
     assert len(memberships) == 1
     assert memberships[0].role == "admin"
     orgs = list(
-        (await async_session.execute(select(OrganizationModel).where(OrganizationModel.id == memberships[0].org_id))).scalars().all()
+        (await async_session.execute(select(OrganizationModel).where(OrganizationModel.id == memberships[0].org_id)))
+        .scalars()
+        .all()
     )
     assert len(orgs) == 1
 
@@ -239,7 +243,9 @@ async def test_google_signup_creates_personal_workspace(async_session: AsyncSess
     ).scalar_one_or_none()
     assert user is not None
     memberships = list(
-        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id))).scalars().all()
+        (await async_session.execute(select(OrganizationMemberModel).where(OrganizationMemberModel.user_id == user.id)))
+        .scalars()
+        .all()
     )
     assert len(memberships) == 1
     assert memberships[0].role == "admin"

@@ -94,8 +94,8 @@ async def test_invalid_classifier_response_falls_back_to_data_assistant() -> Non
 
 
 @pytest.mark.asyncio
-async def test_classifier_failure_keeps_metric_creation_available() -> None:
-    """A failed classifier does not reintroduce the old safe fallback."""
+async def test_classifier_failure_falls_back_to_safe_chitchat() -> None:
+    """A failed classifier must fall back to a safe non-mutating chitchat/apology, never metric_query."""
     with patch("src.agents.nodes.orchestrator_node.get_llm") as mock_get_llm:
         llm = AsyncMock()
         llm.ainvoke.side_effect = RuntimeError("timeout")
@@ -103,7 +103,11 @@ async def test_classifier_failure_keeps_metric_creation_available() -> None:
 
         result = await orchestrator_node({"user_message": "Tao metric doanh thu"})
 
-    assert result["intent"] == "metric_query"
+    assert result["intent"] == "chitchat"
+    assert "chat_response" in result
+    assert result["chat_response"]
+    # The fallback must never route toward metric creation/submission.
+    assert result["intent"] != "metric_query"
 
 
 @pytest.mark.asyncio

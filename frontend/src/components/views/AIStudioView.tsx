@@ -6,6 +6,7 @@ import { MessageSquare, Plus } from 'lucide-react';
 import {
   ChatMessageItem,
   ChatSessionItem,
+  ClarificationResolution,
   createMetricApi,
   getChatSessionDetailApi,
   MetricSuggestion,
@@ -37,6 +38,7 @@ interface AIStudioViewProps {
   onNotify?: (message: string) => void;
   mode?: 'data_assistant' | 'metric_studio';
   refreshKey?: number;
+  canSubmitMetric?: boolean;
 }
 
 export function AIStudioView({
@@ -54,6 +56,7 @@ export function AIStudioView({
   onNotify,
   mode = 'metric_studio',
   refreshKey = 0,
+  canSubmitMetric = false,
 }: AIStudioViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,6 +65,8 @@ export function AIStudioView({
   const semanticDbId = layer.semantic_db_id;
   const canGenerateMetrics = mode === 'metric_studio';
   const requestVersion = useRef(0);
+  const pendingResolutionRef = useRef<Record<string, import('@/lib/api').ChatClarificationSelection>>({});
+  const inFlightRef = useRef<Set<string>>(new Set());
 
   const submittedRequestKeys = useMemo(
     () =>
@@ -227,27 +232,66 @@ export function AIStudioView({
     }
   };
 
-  const handleSelectClarification = async (
+  const reloadSessionMessages = async (sessionId: string | null | undefined): Promise<void> => {
+    if (!semanticDbId || !sessionId) return;
+    try {
+      const detail = await getChatSessionDetailApi(String(semanticDbId), sessionId);
+      setMessages(detail.messages.filter((item) => item.sender !== 'system').map(toChatMessage));
+    } catch {
+      // Keep current optimistic state if the reload fails.
+    }
+  };
+
+  const buildResolution = (
+    resolution: import('@/lib/api').ChatClarificationSelection,
+    message: ChatMessage,
+  ): ClarificationResolution => {
+    if (resolution.skipped) return { status: 'skipped' };
+    if (resolution.custom_answer) {
+      return { status: 'answered', custom_answer: resolution.custom_answer };
+    }
+    const option = message.clarification?.options?.find((opt) => opt.id === resolution.option_id);
+    return {
+      status: 'answered',
+      selected_option_id: resolution.option_id ?? null,
+      selected_label: option?.label ?? null,
+    };
+  };
+
+  const resolveClarification = async (
     assistantMessageId: string,
-    optionId: string,
-    label: string,
-  ) => {
+    resolution: { option_id?: string | null; custom_answer?: string | null; skipped?: boolean },
+  ): Promise<void> => {
     if (!semanticDbId) return;
+    // Synchronous guard: block duplicate in-flight requests even before React re-renders.
+    if (inFlightRef.current.has(assistantMessageId)) return;
+
+    const selection: import('@/lib/api').ChatClarificationSelection = {
+      assistant_message_id: assistantMessageId,
+      option_id: resolution.option_id ?? null,
+      custom_answer: resolution.custom_answer ?? null,
+      skipped: Boolean(resolution.skipped),
+    };
+    pendingResolutionRef.current[assistantMessageId] = selection;
+    inFlightRef.current.add(assistantMessageId);
+
     const clientMessageId = crypto.randomUUID();
     const requestSessionId = activeSessionId;
 
-    setMessages((current) => [
-      ...current,
-      { id: clientMessageId, sender: 'user', text: label, timestamp: now() },
-    ]);
+    // Optimistically mark the original card pending, in place (no user bubble).
+    updateMessage(assistantMessageId, (message) => ({
+      ...message,
+      clarificationPending: true,
+      clarificationError: null,
+    }));
     setLoading(true);
     try {
       const response = await sendChatOrchestratorApi(
         String(semanticDbId),
-        label,
+        resolution.custom_answer ?? resolution.option_id ?? (selection.skipped ? 'Bỏ qua' : 'Làm rõ'),
         requestSessionId,
         clientMessageId,
-        { assistant_message_id: assistantMessageId, option_id: optionId },
+        selection,
       );
       if (requestSessionId && activeSessionId !== requestSessionId) return;
       if (response.session_id) {
@@ -259,22 +303,78 @@ export function AIStudioView({
           ...current.filter((item) => item.id !== response.session!.id),
         ]);
       }
+
+      // Merge canonical resolution into the original card (resolved in place).
+      updateMessage(assistantMessageId, (message) => ({
+        ...message,
+        clarificationPending: false,
+        clarificationError: null,
+        clarificationResolution: response.clarification_resolution
+          ? response.clarification_resolution
+          : buildResolution(selection, message),
+      }));
+      delete pendingResolutionRef.current[assistantMessageId];
+
+      // Skip persists and stops: no continuation, no user bubble.
+      if (response.intent === 'clarification_skipped') return;
+
+      // Custom input appends exactly one trimmed user bubble before the AI continuation.
+      if (resolution.custom_answer) {
+        setMessages((current) => [
+          ...current,
+          { id: clientMessageId, sender: 'user', text: resolution.custom_answer!, timestamp: now() },
+        ]);
+      }
+      const suggestions = response.suggestions || [];
       setMessages((current) => [
         ...current,
         {
           id: response.assistant_message_id || crypto.randomUUID(),
           sender: 'assistant',
-          text: response.chat_response || '',
+          text:
+            response.chat_response ||
+            (suggestions.length
+              ? `Dựa trên schema của bạn, tôi đề xuất ${suggestions.length} Metric Definition dưới đây. Bạn có thể xem trước YAML và lưu vào catalog để duyệt:`
+              : ''),
+          suggestions: response.suggestions ?? undefined,
+          duplicates: response.duplicates,
+          dedupeSkipped: response.dedupe_performed === false,
+          suggestionAction: response.suggestion_action,
           queryResult: response.semantic_query_result,
           clarification: response.clarification,
           timestamp: now(),
         },
       ]);
     } catch (error) {
-      appendError(setMessages, error instanceof Error ? error.message : 'Không thể thực thi lựa chọn');
+      const detail = error instanceof Error ? error.message : 'Không thể thực thi lựa chọn';
+      // Backend already resolved this card: reload canonical state instead of executing again.
+      if (detail === 'clarification_already_resolved') {
+        delete pendingResolutionRef.current[assistantMessageId];
+        await reloadSessionMessages(requestSessionId);
+        return;
+      }
+      // Restore interactive state and surface one localized inline error (keep selection for retry).
+      updateMessage(assistantMessageId, (message) => ({
+        ...message,
+        clarificationPending: false,
+        clarificationError: detail.includes('AI phản hồi quá lâu')
+          ? detail
+          : 'Không thể lưu lựa chọn. Vui lòng thử lại.',
+      }));
     } finally {
+      inFlightRef.current.delete(assistantMessageId);
       setLoading(false);
     }
+  };
+
+  const retryClarification = (assistantMessageId: string): void => {
+    const stored = pendingResolutionRef.current[assistantMessageId];
+    if (!stored) return;
+    void resolveClarification(assistantMessageId, {
+      option_id: stored.option_id ?? undefined,
+      custom_answer: stored.custom_answer ?? undefined,
+      skipped: stored.skipped,
+    });
   };
 
   const updateMessage = (messageId: string, updater: (message: ChatMessage) => ChatMessage): void => {
@@ -344,6 +444,7 @@ export function AIStudioView({
       const request = await submitMetricRequestApi(String(semanticDbId), assistantMessageId, suggestionIndex);
       setMetricRequests((current) => [request, ...current]);
       onNotify?.('Đã gửi yêu cầu cho Data Lead xem xét.');
+      await onMetricsChanged?.();
     } catch (error) {
       // The server refuses duplicate submissions — surface it instead of failing silently.
       appendError(setMessages, error instanceof Error ? error.message : 'Không thể gửi yêu cầu.');
@@ -428,8 +529,18 @@ export function AIStudioView({
           onDiscardSuggestion={discardSuggestion}
           onDismissDuplicate={dismissDuplicate}
           onUseExistingDuplicate={useExistingDuplicate}
-          onSubmitMetricRequest={!canGenerateMetrics ? submitRequest : undefined}
-          onSelectClarification={handleSelectClarification}
+          onSubmitMetricRequest={canSubmitMetric ? submitRequest : undefined}
+          onSelectClarification={(assistantMessageId, optionId) =>
+            void resolveClarification(assistantMessageId, { option_id: optionId })
+          }
+          onCustomClarification={(assistantMessageId, text) =>
+            void resolveClarification(assistantMessageId, { custom_answer: text })
+          }
+          onSkipClarification={(assistantMessageId) =>
+            void resolveClarification(assistantMessageId, { skipped: true })
+          }
+          onRetryClarification={retryClarification}
+          showSuggestionAuthoringTools={canGenerateMetrics}
           submittedRequestKeys={submittedRequestKeys}
           approvedRequestKeys={approvedRequestKeys}
           savedMetricNames={layer.metrics.map((metric) => metricName(metric))}
@@ -440,6 +551,16 @@ export function AIStudioView({
 }
 
 function toChatMessage(message: ChatMessageItem): ChatMessage {
+  const clar = message.metadata_json?.clarification;
+  const resolution: ClarificationResolution | null =
+    clar && clar.resolved_at
+      ? {
+          status: clar.resolution_kind === 'skip' ? 'skipped' : 'answered',
+          selected_option_id: clar.selected_option_id ?? null,
+          selected_label: clar.selected_label ?? null,
+          custom_answer: clar.custom_answer ?? null,
+        }
+      : null;
   return {
     id: message.id,
     sender: message.sender === 'user' ? 'user' : 'assistant',
@@ -449,7 +570,8 @@ function toChatMessage(message: ChatMessageItem): ChatMessage {
     dedupeSkipped: message.metadata_json?.dedupe_performed === false,
     suggestionAction: message.metadata_json?.suggestion_action,
     queryResult: message.metadata_json?.semantic_query_result,
-    clarification: message.metadata_json?.clarification,
+    clarification: clar ?? null,
+    clarificationResolution: resolution,
     timestamp: new Date(message.created_at).toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',

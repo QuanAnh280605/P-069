@@ -5,10 +5,11 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import attributes, selectinload
 
 from src.models.db import (
     ChatMessageModel,
@@ -17,6 +18,7 @@ from src.models.db import (
     OrganizationMemberModel,
     SemanticDatabaseModel,
 )
+from src.models.schemas import ChatClarificationSelection
 from src.services.organization_service import ROLE_PERMISSIONS, require_permission
 
 DEFAULT_SESSION_TITLE = "Cuộc trò chuyện mới"
@@ -25,6 +27,10 @@ ALLOWED_SENDERS = {"user", "assistant", "system"}
 
 class ChatAuthorizationError(Exception):
     """Raised when a chat resource is missing or belongs to another user."""
+
+
+class ClarificationAlreadyResolvedError(Exception):
+    """Raised when a clarification card is resolved a second time (idempotency guard)."""
 
 
 async def _fetch_chat_database(
@@ -206,6 +212,73 @@ async def save_chat_message(
     await db.commit()
     await db.refresh(message)
     return message
+
+
+async def resolve_clarification_message(
+    db: AsyncSession,
+    session_id: str,
+    user_id: int,
+    message_id: str,
+    resolution: ChatClarificationSelection,
+    selected_label: str,
+) -> ChatMessageModel:
+    """Atomically persist a clarification resolution, refusing a second resolution."""
+    message = await _lock_clarification_message(db, session_id, message_id)
+    clar_meta = _require_clarification_meta(message)
+    if clar_meta.get("resolved_at"):
+        raise ClarificationAlreadyResolvedError("clarification_already_resolved")
+    _apply_clarification_resolution(message, resolution, selected_label)
+    attributes.flag_modified(message, "metadata_json")
+    await db.commit()
+    await db.refresh(message)
+    return message
+
+
+def _require_clarification_meta(message: ChatMessageModel) -> dict[str, Any]:
+    """Return the clarification metadata dict or reject a non-clarification message."""
+    if not isinstance(message.metadata_json, dict):
+        raise ChatAuthorizationError("Clarification message not found")
+    clar_meta = message.metadata_json.get("clarification")
+    if not isinstance(clar_meta, dict):
+        raise ChatAuthorizationError("Clarification message not found")
+    return clar_meta
+
+
+async def _lock_clarification_message(db: AsyncSession, session_id: str, message_id: str) -> ChatMessageModel:
+    """Load the clarification message under a row lock (skip lock on SQLite)."""
+    stmt = select(ChatMessageModel).where(
+        ChatMessageModel.session_id == session_id,
+        ChatMessageModel.id == message_id,
+    )
+    if db.bind is not None and db.bind.dialect.name != "sqlite":
+        stmt = stmt.with_for_update()
+    message = (await db.execute(stmt)).scalar_one_or_none()
+    if message is None:
+        raise ChatAuthorizationError("Clarification message not found")
+    return message
+
+
+def _apply_clarification_resolution(
+    message: ChatMessageModel,
+    resolution: ChatClarificationSelection,
+    selected_label: str,
+) -> None:
+    """Write the canonical resolution fields into the message clarification metadata."""
+    clar_meta = message.metadata_json["clarification"]
+    if resolution.option_id is not None:
+        resolution_kind = "option"
+        selected_option_id = resolution.option_id
+    elif resolution.custom_answer:
+        resolution_kind = "custom"
+        selected_option_id = None
+    else:
+        resolution_kind = "skip"
+        selected_option_id = None
+    clar_meta["selected_option_id"] = selected_option_id
+    clar_meta["selected_label"] = selected_label
+    clar_meta["resolution_kind"] = resolution_kind
+    clar_meta["resolved_at"] = datetime.now(UTC).isoformat()
+    message.metadata_json = {**message.metadata_json, "clarification": clar_meta}
 
 
 async def get_recent_chat_history(db: AsyncSession, session_id: str, limit: int = 10) -> list[dict[str, str]]:

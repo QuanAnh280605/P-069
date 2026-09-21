@@ -21,7 +21,7 @@ _SYSTEM_PROMPT = (
 )
 
 _FALLBACK_RESPONSE = "Xin lỗi, tôi không thể phản hồi lúc này. Vui lòng thử lại!"
-_MAX_HISTORY_CHARS = 12000
+_MAX_HISTORY_CHARS = 6000
 
 
 async def chitchat_node(state: AgentState) -> dict[str, Any]:

@@ -174,3 +174,18 @@ def test_unknown_role_raises() -> None:
 def test_temperature_is_part_of_resolved_config() -> None:
     config = _resolve_llm_config(_settings(llm_provider="groq", groq_api_key="gsk_test"))
     assert config.temperature == 0.0
+
+
+def test_metric_generation_limits_have_safe_defaults() -> None:
+    settings = _settings()
+    assert settings.llm_metric_timeout_seconds == 0.0
+    assert settings.llm_metric_max_output_tokens == 1200
+
+
+def test_fallback_model_is_part_of_resolved_config() -> None:
+    config = _resolve_llm_config(
+        _settings(llm_provider="groq", groq_api_key="gsk_test", llm_fallback_model="z-ai/glm-5.3-flash")
+    )
+    assert config.fallback_model == "z-ai/glm-5.3-flash"
+
+

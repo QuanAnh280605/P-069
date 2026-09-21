@@ -8,13 +8,16 @@ from src.models.db import (
     SemanticDatabaseModel,
     UserModel,
 )
+from src.models.schemas import ChatClarificationSelection
 from src.services.chat_service import (
     ChatAuthorizationError,
+    ClarificationAlreadyResolvedError,
     create_chat_session,
     delete_chat_session,
     get_chat_session_with_messages,
     get_recent_chat_history,
     list_chat_sessions,
+    resolve_clarification_message,
     save_chat_message,
     update_chat_session_title,
 )
@@ -148,3 +151,94 @@ async def test_workspace_member_cannot_use_chat_without_live_data_permission(asy
 
     with pytest.raises(ChatAuthorizationError, match="only supported for live"):
         await create_chat_session(async_session, 2, database.id, org_id=organization.id)
+
+
+async def _seed_clarification_message(async_session, session_id, options):
+    """Persist an assistant message carrying a clarification payload."""
+    await save_chat_message(
+        async_session,
+        session_id,
+        "assistant",
+        "Bạn muốn xem theo?",
+        metadata_json={"clarification": {"prompt": "Bạn muốn xem theo?", "options": options}},
+    )
+    return (
+        await async_session.execute(select(ChatMessageModel).where(ChatMessageModel.session_id == session_id))
+    ).scalar_one()
+
+
+async def test_resolve_clarification_option_persists_resolution(async_session):
+    """Option resolution writes selected id/label/kind and a resolved timestamp."""
+    db_id = await _seed_live_database(async_session)
+    session = await create_chat_session(async_session, 1, db_id)
+    msg = await _seed_clarification_message(
+        async_session,
+        session.id,
+        [
+            {
+                "id": "opt1",
+                "label": "Theo khách hàng",
+                "spec": {"metric_ids": [1], "dimensions": [], "filters": [], "limit": 100},
+            }
+        ],
+    )
+
+    resolution = ChatClarificationSelection(assistant_message_id=msg.id, option_id="opt1")
+    updated = await resolve_clarification_message(async_session, session.id, 1, msg.id, resolution, "Theo khách hàng")
+
+    clar = updated.metadata_json["clarification"]
+    assert clar["selected_option_id"] == "opt1"
+    assert clar["selected_label"] == "Theo khách hàng"
+    assert clar["resolution_kind"] == "option"
+    assert clar["resolved_at"]
+
+
+async def test_resolve_clarification_refuses_second_resolution(async_session):
+    """A second resolution attempt raises a stable idempotency error."""
+    db_id = await _seed_live_database(async_session)
+    session = await create_chat_session(async_session, 1, db_id)
+    msg = await _seed_clarification_message(async_session, session.id, [{"id": "opt1", "label": "A", "spec": None}])
+
+    resolution = ChatClarificationSelection(assistant_message_id=msg.id, option_id="opt1")
+    await resolve_clarification_message(async_session, session.id, 1, msg.id, resolution, "A")
+    with pytest.raises(ClarificationAlreadyResolvedError, match="clarification_already_resolved"):
+        await resolve_clarification_message(async_session, session.id, 1, msg.id, resolution, "A")
+
+
+async def test_resolve_clarification_skip_persists_label(async_session):
+    """Skip resolution persists the stable label without an option id."""
+    db_id = await _seed_live_database(async_session)
+    session = await create_chat_session(async_session, 1, db_id)
+    msg = await _seed_clarification_message(async_session, session.id, [{"id": "opt1", "label": "A", "spec": None}])
+
+    resolution = ChatClarificationSelection(assistant_message_id=msg.id, skipped=True)
+    updated = await resolve_clarification_message(async_session, session.id, 1, msg.id, resolution, "Đã bỏ qua")
+
+    clar = updated.metadata_json["clarification"]
+    assert clar["resolution_kind"] == "skip"
+    assert clar["selected_label"] == "Đã bỏ qua"
+    assert clar["selected_option_id"] is None
+    assert clar["resolved_at"]
+
+
+async def test_resolve_clarification_custom_persists_trimmed_label(async_session):
+    """Custom resolution persists the trimmed custom answer as the selected label."""
+    db_id = await _seed_live_database(async_session)
+    session = await create_chat_session(async_session, 1, db_id)
+    msg = await _seed_clarification_message(async_session, session.id, [])
+
+    resolution = ChatClarificationSelection(assistant_message_id=msg.id, custom_answer="  Tự nhập  ")
+    updated = await resolve_clarification_message(async_session, session.id, 1, msg.id, resolution, "Tự nhập")
+
+    clar = updated.metadata_json["clarification"]
+    assert clar["resolution_kind"] == "custom"
+    assert clar["selected_label"] == "Tự nhập"
+    assert clar["selected_option_id"] is None
+
+
+async def test_clarification_resolution_contract_requires_one_mode(async_session):
+    """The resolution contract rejects zero or multiple active modes."""
+    with pytest.raises(ValueError, match="Exactly one"):
+        ChatClarificationSelection(assistant_message_id="m1")
+    with pytest.raises(ValueError, match="Exactly one"):
+        ChatClarificationSelection(assistant_message_id="m1", option_id="o1", skipped=True)

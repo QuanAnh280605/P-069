@@ -243,3 +243,11 @@ def _ready_diagnostic(schema: dict[str, Any]) -> dict[str, Any]:
         "tables": [item["table_name"] for item in schema["tables"]],
         "relationship_count": len(schema["relationships"]),
     }
+
+
+async def fast_metric_context(db: AsyncSession, db_id: int) -> MetricContextResult:
+    """Prepare ready schema context for metric workflows without unnecessary LLM scope calls."""
+    tables, relationships = await _load_metadata(db, db_id)
+    valid_tables = {t.table_name for t in tables}
+    schema = _expand_context(tables, relationships, valid_tables)
+    return MetricContextResult(schema=schema, diagnostic=_ready_diagnostic(schema))

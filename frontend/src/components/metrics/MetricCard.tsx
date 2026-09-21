@@ -31,7 +31,7 @@ export function MetricCard({
 }: MetricCardProps) {
   const definition = metric.definition;
   const isDeleted = Boolean(metric.is_deleted);
-  const isPending = metric.status !== 'approved';
+  const isPending = metric.status !== 'approved' || Boolean(metric.has_pending_version);
 
   return (
     <article

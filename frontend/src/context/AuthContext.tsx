@@ -10,6 +10,7 @@ import {
   setStoredRefreshToken,
   removeStoredTokens,
 } from '@/lib/jwt';
+import { refreshAccessToken } from '@/lib/api';
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -27,29 +28,6 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-/** Call POST /auth/refresh and store new tokens. Returns new access token or null. */
-async function refreshAccessToken(): Promise<string | null> {
-  const refreshToken = getStoredRefreshToken();
-  if (!refreshToken) return null;
-
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    setStoredToken(data.access_token);
-    setStoredRefreshToken(data.refresh_token);
-    return data.access_token;
-  } catch {
-    return null;
-  }
-}
 
 /** Fetch /auth/me with auto-refresh on 401. */
 async function fetchUserProfile(

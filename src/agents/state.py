@@ -83,6 +83,9 @@ class AgentState(TypedDict, total=False):
     can_generate_metrics: bool
     """Server-derived capability controlling metric-authoring routing."""
 
+    role: str
+    """Active workspace role (admin | data_lead | member) used for role-aware clarification."""
+
     approved_metrics: list[dict[str, Any]]
     """Approved metric context available to the read-only data assistant."""
 
@@ -108,8 +111,17 @@ class AgentState(TypedDict, total=False):
     clarification_selection: dict[str, str] | None
     """User-selected clarification option referencing assistant_message_id and option_id."""
 
+    clarified_dimensions: list[str]
+    """Dimensions confirmed during clarification to attach directly to the metric."""
+
+    is_clarified: bool
+    """True when user has answered the clarification and is ready to generate metric."""
+
     semantic_query_result: dict[str, Any] | None
     """Result snapshot of the executed semantic query."""
+
+    semantic_schema_text: str
+    """Reachable Semantic Layer schema metadata for dynamic dimension discovery."""
 
     # Chitchat Agent — Output
     chat_response: str

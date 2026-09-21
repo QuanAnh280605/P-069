@@ -76,3 +76,75 @@ def test_metric_spec_coerces_weird_status_to_pending_approval() -> None:
         status="WEIRD",
     )
     assert spec.status == "pending_approval"
+
+
+def test_preferred_join_paths_defaults_to_empty() -> None:
+    spec = MetricSpec(
+        name="Doanh thu",
+        formula={"function": "SUM", "expression": "amount"},
+        base_entity="orders",
+    )
+    assert spec.preferred_join_paths == {}
+
+
+def test_preferred_join_paths_accepts_valid_map() -> None:
+    spec = MetricSpec(
+        name="Doanh thu",
+        formula={"function": "SUM", "expression": "amount"},
+        base_entity="orders",
+        preferred_join_paths={2: [10, 11], 3: [12]},
+    )
+    assert spec.preferred_join_paths == {2: [10, 11], 3: [12]}
+
+
+def test_preferred_join_paths_rejects_non_positive_target_key() -> None:
+    with pytest.raises(ValidationError):
+        MetricSpec(
+            name="Doanh thu",
+            formula={"function": "SUM", "expression": "amount"},
+            base_entity="orders",
+            preferred_join_paths={0: [1]},
+        )
+
+
+def test_preferred_join_paths_rejects_empty_path() -> None:
+    with pytest.raises(ValidationError):
+        MetricSpec(
+            name="Doanh thu",
+            formula={"function": "SUM", "expression": "amount"},
+            base_entity="orders",
+            preferred_join_paths={2: []},
+        )
+
+
+def test_preferred_join_paths_rejects_duplicate_relationship_id() -> None:
+    with pytest.raises(ValidationError):
+        MetricSpec(
+            name="Doanh thu",
+            formula={"function": "SUM", "expression": "amount"},
+            base_entity="orders",
+            preferred_join_paths={2: [10, 10]},
+        )
+
+
+def test_preferred_join_paths_rejects_non_positive_relationship_id() -> None:
+    with pytest.raises(ValidationError):
+        MetricSpec(
+            name="Doanh thu",
+            formula={"function": "SUM", "expression": "amount"},
+            base_entity="orders",
+            preferred_join_paths={2: [-1]},
+        )
+
+
+def test_yaml_omits_empty_preferred_join_paths() -> None:
+    definition = MetricDefinition.model_validate(_payload())
+    assert "preferred_join_paths" not in definition.to_yaml()
+
+
+def test_yaml_includes_non_empty_preferred_join_paths() -> None:
+    payload = _payload()
+    payload["metric"]["preferred_join_paths"] = {2: [10, 11]}
+    definition = MetricDefinition.model_validate(payload)
+    assert "preferred_join_paths" in definition.to_yaml()
+    assert "10" in definition.to_yaml()

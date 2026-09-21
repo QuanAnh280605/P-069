@@ -59,9 +59,8 @@ export function HeroSection() {
       <div className="relative z-10 max-w-[1400px] mx-auto px-6 lg:px-12 py-32 lg:py-40">
         {/* Eyebrow */}
         <div
-          className={`mb-8 transition-all duration-700 ${
-            isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-          }`}
+          className={`mb-8 transition-all duration-700 ${isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+            }`}
         >
           <span className="inline-flex items-center gap-3 text-sm font-mono text-muted-foreground">
             <span className="w-8 h-px bg-foreground/30" />
@@ -72,9 +71,8 @@ export function HeroSection() {
         {/* Main headline */}
         <div className="mb-12">
           <h1
-            className={`text-[clamp(3rem,12vw,10rem)] font-display leading-[0.9] tracking-tight transition-all duration-1000 ${
-              isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-            }`}
+            className={`text-[clamp(3rem,12vw,10rem)] font-display leading-[0.9] tracking-tight transition-all duration-1000 ${isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
+              }`}
           >
             <span className="block">Nền tảng</span>
             <span className="block">
@@ -102,19 +100,17 @@ export function HeroSection() {
         {/* Description */}
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-24 items-end">
           <p
-            className={`text-xl lg:text-2xl text-muted-foreground leading-relaxed max-w-xl transition-all duration-700 delay-200 ${
-              isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-            }`}
+            className={`text-xl lg:text-2xl text-muted-foreground leading-relaxed max-w-xl transition-all duration-700 delay-200 ${isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+              }`}
           >
             Tự động chuyển đổi DB schema kỹ thuật thành ngôn ngữ nghiệp vụ thống nhất.
-            Xây dựng, quản trị và biên dịch chỉ số với độ chính xác tuyệt đối.
+            Xây dựng, quản trị và biên dịch chỉ số.
           </p>
 
           {/* CTAs */}
           <div
-            className={`flex flex-col sm:flex-row items-start gap-4 transition-all duration-700 delay-300 ${
-              isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-            }`}
+            className={`flex flex-col sm:flex-row items-start gap-4 transition-all duration-700 delay-300 ${isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+              }`}
           >
             <Button
               asChild
@@ -143,9 +139,8 @@ export function HeroSection() {
 
       {/* Stats marquee - full width outside container */}
       <div
-        className={`absolute bottom-16 lg:bottom-20 left-0 right-0 transition-all duration-700 delay-500 ${
-          isVisible ? "opacity-100" : "opacity-0"
-        }`}
+        className={`absolute bottom-16 lg:bottom-20 left-0 right-0 transition-all duration-700 delay-500 ${isVisible ? "opacity-100" : "opacity-0"
+          }`}
       >
         <div className="flex gap-16 marquee whitespace-nowrap">
           {[...Array(2)].map((_, i) => (

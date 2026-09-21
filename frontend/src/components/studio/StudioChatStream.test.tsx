@@ -392,10 +392,23 @@ describe('StudioChatStream', () => {
     expect(textarea.value).toContain('Tính tổng doanh thu thuần của các đơn hàng');
   });
 
-  it('allows selecting a prompt after dragging the suggestion strip', async () => {
+  it('hides the suggestion strip once the user has sent a message', () => {
     render(
       <StudioChatStream
         messages={[{ id: 'user-1', sender: 'user', text: 'Xin chào', timestamp: '10:00' }]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        tableNames={['orders']}
+      />,
+    );
+
+    expect(screen.queryByTestId('prompt-suggestion-strip')).not.toBeInTheDocument();
+  });
+
+  it('allows selecting a prompt after dragging the suggestion strip', async () => {
+    render(
+      <StudioChatStream
+        messages={[]}
         onSendMessage={vi.fn()}
         isLoading={false}
         tableNames={['orders']}
@@ -494,6 +507,50 @@ describe('StudioChatStream', () => {
     expect(screen.getByRole('button', { name: /Chỉnh sửa thủ công/i })).toBeInTheDocument();
   });
 
+  it('hides YAML, AI refine, and manual edit controls for member suggestions', () => {
+    render(
+      <StudioChatStream
+        messages={[
+          {
+            id: 'member-suggestion',
+            sender: 'assistant',
+            text: 'Gợi ý metric',
+            timestamp: '10:00',
+            suggestionAction: 'submit_metric_request',
+            suggestions: [
+              {
+                definition: {
+                  metric: {
+                    name: 'Doanh thu',
+                    formula: { function: 'SUM', expression: 'price' },
+                    base_entity: 'orders',
+                    filters: [],
+                    status: 'pending_approval',
+                    confidence: 'high',
+                    excluded_notes: '',
+                  },
+                },
+                yaml_preview: 'metric:\n  name: Doanh thu\n',
+              },
+            ],
+          },
+        ]}
+        onSendMessage={vi.fn()}
+        onEditMetric={vi.fn()}
+        onRefineWithAI={vi.fn()}
+        onSubmitMetricRequest={vi.fn()}
+        isLoading={false}
+        tableNames={[]}
+        mode="data_assistant"
+        showSuggestionAuthoringTools={false}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: /mã YAML/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Nhờ AI tinh chỉnh/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Chỉnh sửa thủ công/i })).not.toBeInTheDocument();
+  });
+
   it('renders semantic query result card when queryResult is present', () => {
     render(
       <StudioChatStream
@@ -562,7 +619,7 @@ describe('StudioChatStream', () => {
     expect(screen.getByText(/Theo tháng/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByText(/Theo khách hàng/i));
-    expect(handleSelect).toHaveBeenCalledWith('msg-clar-1', 'opt_by_customer', 'Theo khách hàng');
+    expect(handleSelect).toHaveBeenCalledWith('msg-clar-1', 'opt_by_customer');
   });
 });
 

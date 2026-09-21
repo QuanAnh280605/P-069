@@ -117,6 +117,41 @@ class TestTableKey:
 
 
 # ---------------------------------------------------------------------------
+# _match_llm_table
+# ---------------------------------------------------------------------------
+
+
+class TestMatchLlmTable:
+    def test_exact_match_wins(self) -> None:
+        """Exact key match returns the corresponding LLM table."""
+        from src.services.pass2_cluster_enrichment import _match_llm_table
+
+        llm_tables = {"order_header": {"business_name": "X"}}
+        assert _match_llm_table("order_header", llm_tables) is llm_tables["order_header"]
+
+    def test_casefold_fallback_single_candidate(self) -> None:
+        """Source 'order_header' matches LLM key 'Order_Header' via casefold."""
+        from src.services.pass2_cluster_enrichment import _match_llm_table
+
+        llm_tables = {"Order_Header": {"business_name": "Don"}}
+        assert _match_llm_table("order_header", llm_tables) is llm_tables["Order_Header"]
+
+    def test_casefold_collision_returns_none(self) -> None:
+        """Non-exact source variant colliding with two LLM keys is not silently matched."""
+        from src.services.pass2_cluster_enrichment import _match_llm_table
+
+        llm_tables = {"Order_Header": {}, "order_header": {}}
+        assert _match_llm_table("ORDER_HEADER", llm_tables) is None
+
+    def test_missing_key_returns_none(self) -> None:
+        """Source key absent from LLM response returns None (caller falls back)."""
+        from src.services.pass2_cluster_enrichment import _match_llm_table
+
+        llm_tables = {"other_table": {}}
+        assert _match_llm_table("order_header", llm_tables) is None
+
+
+# ---------------------------------------------------------------------------
 # build_cluster_prompt
 # ---------------------------------------------------------------------------
 
@@ -282,6 +317,56 @@ class TestMergeClusterResult:
         assert result["orders"]["columns"][0]["column_name"] == "col_0"
         assert result["orders"]["columns"][0]["business_name"] == "Ma"
 
+    def test_merge_table_key_case_insensitive(self) -> None:
+        """Source 'order_header' matches LLM key 'Order_Header' (case mismatch)."""
+        from src.services.pass2_cluster_enrichment import _merge_cluster_result
+
+        table = _make_table("order_header", num_cols=2)
+        cluster = [table]
+        parsed = {
+            "matched_tables": ["Order_Header"],
+            "tables": {
+                "Order_Header": {
+                    "business_name": "Đơn hàng",
+                    "description": "Mo ta",
+                    "columns": [
+                        {"column_name": "COL_0", "business_name": "Ma don", "description": "Desc0"},
+                        {"column_name": "COL_1", "business_name": "Ma 1", "description": "Desc1"},
+                    ],
+                }
+            },
+        }
+        result = _merge_cluster_result(cluster, parsed, {})
+        assert result["order_header"]["business_name"] == "Đơn hàng"
+        assert result["order_header"]["columns"][0]["business_name"] == "Ma don"
+        assert result["order_header"]["columns"][1]["business_name"] == "Ma 1"
+
+    def test_merge_two_case_variant_tables_exact_wins(self) -> None:
+        """Two source tables differing only by case each match their exact LLM key."""
+        from src.services.pass2_cluster_enrichment import _merge_cluster_result
+
+        t1 = _make_table("Order_Header", num_cols=1)
+        t2 = _make_table("order_header", num_cols=1)
+        cluster = [t1, t2]
+        parsed = {
+            "matched_tables": ["Order_Header", "order_header"],
+            "tables": {
+                "Order_Header": {
+                    "business_name": "Don A",
+                    "description": "dA",
+                    "columns": [{"column_name": "COL_0", "business_name": "A0", "description": ""}],
+                },
+                "order_header": {
+                    "business_name": "Don B",
+                    "description": "dB",
+                    "columns": [{"column_name": "col_0", "business_name": "B0", "description": ""}],
+                },
+            },
+        }
+        result = _merge_cluster_result(cluster, parsed, {})
+        assert result["Order_Header"]["business_name"] == "Don A"
+        assert result["order_header"]["business_name"] == "Don B"
+
     def test_merge_output_uses_composite_key(self) -> None:
         """Output keys should be composite keys (schema.table)."""
         from src.services.pass2_cluster_enrichment import _merge_cluster_result
@@ -357,7 +442,7 @@ class TestEnrichClustersParallel:
         async def mock_execute(prompt, sem, timeout_sec=30.0):
             return json.dumps(resp)
 
-        with patch("src.services.pass2_cluster_enrichment.execute_llm_request", side_effect=mock_execute):
+        with patch("src.services.llm_caller.execute_llm_request", side_effect=mock_execute):
             result = await enrich_clusters_parallel(cluster, glossary, "postgresql", asyncio.Semaphore(3), config)
 
         assert "public.orders" in result
@@ -466,7 +551,7 @@ class TestHandleUltraWideTable:
             retry_backoff_base_sec=0.01,
         )
 
-        with patch("src.services.pass2_cluster_enrichment.execute_llm_request", side_effect=mock_execute):
+        with patch("src.services.llm_caller.execute_llm_request", side_effect=mock_execute):
             result = await _handle_ultra_wide_table(table, glossary, "postgresql", asyncio.Semaphore(3), config)
 
         assert call_count == 2
@@ -513,7 +598,7 @@ class TestHandleUltraWideTable:
             retry_backoff_base_sec=0.01,
         )
 
-        with patch("src.services.pass2_cluster_enrichment.execute_llm_request", side_effect=mock_execute):
+        with patch("src.services.llm_caller.execute_llm_request", side_effect=mock_execute):
             result = await _handle_ultra_wide_table(table, glossary, "postgresql", asyncio.Semaphore(3), config)
 
         assert call_count == 4
@@ -599,3 +684,108 @@ class TestHandleUltraWideTable:
 
         assert result["orders"]["business_name"] == "Đơn hàng LLM"
         assert result["orders"]["columns"][0]["business_name"] == "Cột 0"
+
+    @pytest.mark.asyncio
+    async def test_ultra_wide_table_key_case_insensitive(self) -> None:
+        """Source 'order_header' matches LLM key 'Order_Header'; all cols preserved."""
+        from src.services.pass2_cluster_enrichment import _handle_ultra_wide_table
+
+        table = _make_wide_table("order_header", 50)
+        glossary = _build_global_glossary(["order_header"])
+
+        call_count = 0
+
+        async def mock_execute(prompt, sem, timeout_sec=30.0):
+            nonlocal call_count
+            call_count += 1
+            import re
+
+            cols_in_prompt = re.findall(r"col_\d+", prompt)
+            cols_data = [
+                {"column_name": c, "business_name": f"Field {c}", "description": f"Desc {c}"}
+                for c in set(cols_in_prompt)
+            ]
+            return json.dumps(
+                {
+                    "matched_tables": ["Order_Header"],
+                    "tables": {
+                        "Order_Header": {
+                            "business_name": "Don Hang",
+                            "description": "Mo ta",
+                            "columns": cols_data,
+                        }
+                    },
+                }
+            )
+
+        config = EnrichmentConfig(
+            ultra_wide_threshold=40,
+            ultra_wide_chunk_size=30,
+            llm_match_threshold=0.0,
+            retry_backoff_base_sec=0.01,
+        )
+
+        with patch("src.services.llm_caller.execute_llm_request", side_effect=mock_execute):
+            result = await _handle_ultra_wide_table(table, glossary, "postgresql", asyncio.Semaphore(3), config)
+
+        assert call_count == 2
+        assert result["business_name"] == "Don Hang"
+        assert len(result["columns"]) == 50
+        assert result["columns"][0]["business_name"] == "Field col_0"
+        assert result["columns"][49]["column_name"] == "col_49"
+
+    @pytest.mark.asyncio
+    async def test_ultra_wide_exhausted_retries_preserves_all_columns(self) -> None:
+        """Every chunk exhausts retries (timeout) → fallback entries for ALL columns."""
+        from src.services.pass2_cluster_enrichment import _handle_ultra_wide_table
+
+        table = _make_wide_table("wide_table", 50)
+        glossary = _build_global_glossary(["wide_table"])
+
+        call_count = 0
+
+        async def mock_execute(prompt, sem, timeout_sec=30.0):
+            nonlocal call_count
+            call_count += 1
+            raise TimeoutError("simulated timeout")
+
+        config = EnrichmentConfig(
+            ultra_wide_threshold=40,
+            ultra_wide_chunk_size=30,
+            retry_max_attempts=2,
+            retry_backoff_base_sec=0.01,
+        )
+
+        with patch("src.services.llm_caller.execute_llm_request", side_effect=mock_execute):
+            result = await _handle_ultra_wide_table(table, glossary, "postgresql", asyncio.Semaphore(3), config)
+
+        # 2 chunks * (retry_max_attempts + 1) attempts = 6 I/O calls
+        assert call_count == 6
+        assert len(result["columns"]) == 50
+        assert [c["column_name"] for c in result["columns"]] == [f"col_{i}" for i in range(50)]
+        assert result["columns"][0]["business_name"] == "Col 0"
+
+    @pytest.mark.asyncio
+    async def test_ultra_wide_malformed_json_preserves_all_columns(self) -> None:
+        """Malformed LLM JSON exhausts retries → fallback entries for ALL columns."""
+        from src.services.pass2_cluster_enrichment import _handle_ultra_wide_table
+
+        table = _make_wide_table("wide_table", 50)
+        glossary = _build_global_glossary(["wide_table"])
+
+        async def mock_execute(prompt, sem, timeout_sec=30.0):
+            return "this is not valid json <<<"
+
+        config = EnrichmentConfig(
+            ultra_wide_threshold=40,
+            ultra_wide_chunk_size=30,
+            retry_max_attempts=2,
+            retry_backoff_base_sec=0.01,
+        )
+
+        with patch("src.services.llm_caller.execute_llm_request", side_effect=mock_execute):
+            result = await _handle_ultra_wide_table(table, glossary, "postgresql", asyncio.Semaphore(3), config)
+
+        assert len(result["columns"]) == 50
+        assert [c["column_name"] for c in result["columns"]] == [f"col_{i}" for i in range(50)]
+        assert result["columns"][0]["business_name"] == "Col 0"
