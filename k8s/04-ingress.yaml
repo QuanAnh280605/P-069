@@ -1,0 +1,47 @@
+# ==============================================================================
+# BƯỚC 4: INGRESS (CỔNG VÀO DUY NHẤT TỪ INTERNET / VPS)
+# Tương đương với phần mở cổng 'ports: - 80:80' và phân luồng tên miền
+# Khách truy cập vào IP VPS:
+#   - Nếu vào /api/* hoặc /health -> Chuyển vào Backend (FastAPI)
+#   - Nếu vào các trang khác (/) -> Chuyển vào Frontend (Next.js)
+# ==============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  annotations:
+    # Cho phép upload file SQL Dump lên đến 25MB mà không bị lỗi 413
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"
+    # Tăng thời gian chờ lên 60s để các câu trả lời LLM/AI không bị timeout
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          # 1. Toàn bộ API Backend
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          # 2. Kiểm tra trạng thái Backend
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          # 3. Giao diện người dùng Frontend
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 8080

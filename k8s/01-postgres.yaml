@@ -1,0 +1,68 @@
+# ==============================================================================
+# BƯỚC 1: POSTGRESQL DATABASE
+# Tương đương với block 'postgres' trong docker-compose.yml
+# File này gom đủ 3 thành phần: Ổ đĩa (PVC) + Ứng dụng (Deployment) + Mạng nội bộ (Service)
+# ==============================================================================
+
+# --- PHẦN 1: Ổ ĐĨA LƯU TRỮ DỮ LIỆU (Tương đương named volume 'postgres_data') ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce         # Ổ đĩa được 1 Pod gắn vào đọc/ghi
+  resources:
+    requests:
+      storage: 5Gi          # Xin cấp 5GB dung lượng trên VPS
+
+---
+# --- PHẦN 2: CHẠY CONTAINER POSTGRES (Tương đương 'image' và 'environment') ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1               # Database chỉ chạy 1 pod để tránh xung đột dữ liệu
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres"        # Bạn có thể đổi mật khẩu này
+            - name: POSTGRES_DB
+              value: "semantic_layer"
+          volumeMounts:
+            # Gắn ổ đĩa persistent vào thư mục dữ liệu của Postgres
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+
+---
+# --- PHẦN 3: ĐẶT TÊN MẠNG NỘI BỘ (Tương đương mạng 'postgres:5432' để Backend gọi) ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres            # Tên này trở thành DNS nội bộ: postgres:5432
+spec:
+  type: ClusterIP           # Chỉ mở bên trong K8s, không ai từ internet chọc vào được
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

@@ -1,0 +1,79 @@
+# ==============================================================================
+# BƯỚC 2: FASTAPI BACKEND
+# Tương đương với block 'backend' trong docker-compose.yml
+# File này gồm: Biến môi trường (ConfigMap/Secret) + Ứng dụng (Deployment) + Mạng nội bộ (Service)
+# ==============================================================================
+
+# --- PHẦN 1: CẤU HÌNH & MẬT KHẨU (Tương đương file .env) ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-secret
+type: Opaque
+stringData:
+  # Kết nối tới Service Postgres ở Bước 1 bằng tên DNS 'postgres:5432'
+  DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/semantic_layer"
+  
+  # Khóa mã hóa Fernet (sinh bằng: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+  ENCRYPTION_KEY: "CHANGEME_BASE64_FERNET_KEY"
+  
+  # API Key của LLM bạn sử dụng
+  OPENAI_API_KEY: "sk-your-openai-api-key"
+  ANTHROPIC_API_KEY: ""
+  GROQ_API_KEY: ""
+
+---
+# --- PHẦN 2: CHẠY CONTAINER BACKEND (Tương đương 'build/image', 'command', 'replicas') ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1               # Bạn có thể tăng lên 2 sau khi đã chạy ổn định
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: p069-backend:latest
+          imagePullPolicy: IfNotPresent
+          # Chạy migration database trước khi bật uvicorn
+          command: ["sh", "-c", "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000"]
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: backend-secret
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: APP_PORT
+              value: "8000"
+            - name: CORS_ORIGINS
+              value: "*"
+          # Kiểm tra xem API còn sống không (Health Check)
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+
+---
+# --- PHẦN 3: ĐẶT TÊN MẠNG NỘI BỘ (Để Ingress và Frontend gọi vào: backend:8000) ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend             # Tên DNS nội bộ: backend:8000
+spec:
+  type: NodePort            
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 30136       
