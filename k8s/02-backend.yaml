@@ -14,8 +14,8 @@ stringData:
   # Kết nối tới Service Postgres ở Bước 1 bằng tên DNS 'postgres:5432'
   DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/semantic_layer"
   
-  # Khóa mã hóa Fernet (sinh bằng: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-  ENCRYPTION_KEY: "CHANGEME_BASE64_FERNET_KEY"
+  # Khóa mã hóa Fernet (đã sinh chuẩn 32 bytes base64)
+  ENCRYPTION_KEY: "ZP-LbkQ7ufS8uh2ZupeRIV0Fjz7_yrd3NIS3yRVyk58="
   
   # API Key của LLM bạn sử dụng
   OPENAI_API_KEY: "sk-your-openai-api-key"
@@ -61,8 +61,9 @@ spec:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 20
+            initialDelaySeconds: 45
             periodSeconds: 15
+
 
 ---
 # --- PHẦN 3: ĐẶT TÊN MẠNG NỘI BỘ (Để Ingress và Frontend gọi vào: backend:8000) ---
