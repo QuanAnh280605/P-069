@@ -17,7 +17,6 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
-  ingressClassName: nginx
   rules:
     - http:
         paths:
@@ -29,7 +28,22 @@ spec:
                 name: backend
                 port:
                   number: 8000
-          # 2. Kiểm tra trạng thái Backend
+          # 2. Swagger UI & OpenAPI Docs
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /openapi.json
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          # 3. Kiểm tra trạng thái Backend
           - path: /health
             pathType: Prefix
             backend:
@@ -37,7 +51,7 @@ spec:
                 name: backend
                 port:
                   number: 8000
-          # 3. Giao diện người dùng Frontend
+          # 4. Giao diện người dùng Frontend (fallback)
           - path: /
             pathType: Prefix
             backend:
@@ -45,3 +59,4 @@ spec:
                 name: frontend
                 port:
                   number: 8080
+

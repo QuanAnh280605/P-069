@@ -44,10 +44,9 @@ kind: Service
 metadata:
   name: frontend            # Tên DNS nội bộ: frontend:8080
 spec:
-  type: NodePort            
+  type: ClusterIP           # Đóng kín cổng, đi qua Ingress
   selector:
     app: frontend
   ports:
     - port: 8080
       targetPort: 8080
-      nodePort: 30135

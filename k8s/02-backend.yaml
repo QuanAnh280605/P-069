@@ -72,10 +72,9 @@ kind: Service
 metadata:
   name: backend             # Tên DNS nội bộ: backend:8000
 spec:
-  type: NodePort            
+  type: ClusterIP           # Đóng kín cổng, đi qua Ingress
   selector:
     app: backend
   ports:
     - port: 8000
       targetPort: 8000
-      nodePort: 30136
