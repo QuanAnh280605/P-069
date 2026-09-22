@@ -76,4 +76,5 @@ spec:
     app: backend
   ports:
     - port: 8000
-      targetPort: 30136       
+      targetPort: 8000
+      nodePort: 30136
