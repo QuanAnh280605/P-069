@@ -33,7 +33,7 @@ jobs:
           script: |
             set -e
             echo "🚀 [1/4] Bắt đầu kết nối tới VPS..."
-            DEPLOY_DIR="${{ secrets.DEPLOY_PATH || '~/P-069' }}"
+            DEPLOY_DIR="${{ secrets.DEPLOY_PATH || '~/code/P-069' }}"
             cd "$DEPLOY_DIR"
 
             BRANCH_NAME="${{ github.event.inputs.target_branch || github.event.workflow_run.head_branch || 'main' }}"
