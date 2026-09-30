@@ -1,4 +1,4 @@
-name: Deploy to Production VPS
+name: Deploy to VPS
 
 on:
   workflow_run:
@@ -6,32 +6,47 @@ on:
     types:
       - completed
     branches:
+      - main
       - production
   workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Nhánh cần deploy (main / production)"
+        required: true
+        default: "main"
 
 jobs:
   deploy:
-    name: Deploy to VPS
-    runs-on: self-hosted
+    name: Deploy to VPS via SSH
+    runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
     steps:
-      - name: Deploy to VPS via SSH
+      - name: Connect and Deploy on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          username: ${{ secrets.SSH_USER || 'root' }}
           password: ${{ secrets.SSH_PASSWORD }}
           port: ${{ secrets.SSH_PORT || 22 }}
           script_stop: true
           script: |
             set -e
-            echo "🚀 Starting VPS deployment for production branch..."
-            cd ${{ secrets.DEPLOY_PATH || '~/P-069' }}
+            echo "🚀 [1/4] Bắt đầu kết nối tới VPS..."
+            DEPLOY_DIR="${{ secrets.DEPLOY_PATH || '~/P-069' }}"
+            cd "$DEPLOY_DIR"
+
+            BRANCH_NAME="${{ github.event.inputs.target_branch || github.event.workflow_run.head_branch || 'main' }}"
+            echo "📥 [2/4] Cập nhật mã nguồn nhánh $BRANCH_NAME..."
             git fetch origin
-            git checkout production
-            git pull origin production
+            git checkout "$BRANCH_NAME"
+            git pull origin "$BRANCH_NAME"
+
+            echo "🐳 [3/4] Build & Khởi động Containers..."
             docker compose up -d --build --remove-orphans
             docker system prune -f
-            echo "✅ Deployment on VPS completed successfully!"
+
+            echo "🩺 [4/4] Kiểm tra trạng thái ứng dụng..."
+            sleep 10
+            docker compose ps
+            echo "✅ Deployment trên VPS đã hoàn tất thành công!"
