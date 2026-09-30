@@ -9,13 +9,17 @@ __pycache__
 docs/
 presentation/
 eval/
+tests/
+frontend/
+infra/
+helm/
+scratch/
 *.md
 !requirements.txt
 .dockerignore
 Dockerfile
 docker-compose.yml
-frontend/node_modules
-frontend/.next
+docker-compose.dev.yml
 .uv-cache
 .uv-python
 .mypy_cache
@@ -24,3 +28,6 @@ frontend/.next
 .agents
 .opencode
 data
+*.db
+*.sqlite
+*.sqlite3

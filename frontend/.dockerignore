@@ -2,3 +2,11 @@ node_modules
 .next
 .git
 *.log
+*.test.ts
+*.test.tsx
+tests
+__tests__
+.env.local
+tsconfig.tsbuildinfo
+D*
+README.md
