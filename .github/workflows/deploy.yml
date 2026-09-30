@@ -29,6 +29,7 @@ jobs:
           username: ${{ secrets.SSH_USER || 'root' }}
           password: ${{ secrets.SSH_PASSWORD }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          command_timeout: 30m
           script_stop: true
           script: |
             set -e
@@ -37,6 +38,15 @@ jobs:
             DEPLOY_DIR="${DEPLOY_DIR/#\~/$HOME}"
             echo "📂 Thư mục triển khai: $DEPLOY_DIR"
             cd "$DEPLOY_DIR"
+
+            # Đảm bảo VPS có ít nhất 2GB Swap để build Next.js không bị treo tràn RAM
+            if [ $(free -m | awk '/^Swap:/ {print $2}') -eq 0 ]; then
+              echo "⚡ Đang tự động tạo 2GB Swap để tăng tốc build Frontend..."
+              fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+              chmod 600 /swapfile
+              mkswap /swapfile
+              swapon /swapfile
+            fi
 
             BRANCH_NAME="${{ github.event.inputs.target_branch || github.event.workflow_run.head_branch || 'main' }}"
             echo "📥 [2/4] Cập nhật mã nguồn nhánh $BRANCH_NAME..."
