@@ -3,6 +3,8 @@
 global:
   appEnv: production
 
+imagePullSecrets: []
+
 # --- PostgreSQL Configuration ---
 postgres:
   enabled: true

@@ -1,4 +1,4 @@
-name: Deploy to VPS
+name: Build & Deploy to Kubernetes
 
 on:
   workflow_run:
@@ -15,50 +15,113 @@ on:
         required: true
         default: "main"
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  deploy:
-    name: Deploy to VPS via SSH
+  # ==========================================================
+  # JOB 1: BUILD DOCKER IMAGES TRÊN GITHUB RUNNER & PUSH GHCR
+  # ==========================================================
+  build-and-push:
+    name: Build & Push Images to GHCR
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    outputs:
+      image_tag: ${{ steps.set_tag.outputs.tag }}
 
     steps:
-      - name: Connect and Deploy on VPS
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set Image Tag
+        id: set_tag
+        run: |
+          TAG="${{ github.sha }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Building with tag: $TAG"
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # --- Build & Push Backend ---
+      - name: Build and Push Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/p069-backend:latest
+            ghcr.io/${{ github.repository_owner }}/p069-backend:${{ steps.set_tag.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # --- Build & Push Frontend ---
+      - name: Build and Push Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/p069-frontend:latest
+            ghcr.io/${{ github.repository_owner }}/p069-frontend:${{ steps.set_tag.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ==========================================================
+  # JOB 2: DEPLOY LÊN KUBERNETES TRÊN VPS QUA HELM
+  # ==========================================================
+  deploy-k8s:
+    name: Deploy to K3s via Helm
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VPS via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER || 'ubuntu' }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          command_timeout: 30m
+          command_timeout: 10m
           script_stop: true
           script: |
             set -e
-            echo "🚀 [1/4] Bắt đầu kết nối tới VPS..."
+            echo "🚀 [1/3] Cập nhật mã nguồn & Helm Chart trên VPS..."
             DEPLOY_DIR="${{ secrets.DEPLOY_PATH || '/home/ubuntu/P-069' }}"
             DEPLOY_DIR="${DEPLOY_DIR/#\~/$HOME}"
-            echo "📂 Thư mục triển khai: $DEPLOY_DIR"
             cd "$DEPLOY_DIR"
 
-            # Đảm bảo VPS có ít nhất 2GB Swap để build Next.js không bị treo tràn RAM
-            if [ $(free -m | awk '/^Swap:/ {print $2}') -eq 0 ]; then
-              echo "⚡ Đang tự động tạo 2GB Swap để tăng tốc build Frontend..."
-              fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
-              chmod 600 /swapfile
-              mkswap /swapfile
-              swapon /swapfile
-            fi
-
             BRANCH_NAME="${{ github.event.inputs.target_branch || github.event.workflow_run.head_branch || 'main' }}"
-            echo "📥 [2/4] Cập nhật mã nguồn nhánh $BRANCH_NAME..."
             git fetch origin
             git checkout "$BRANCH_NAME"
             git pull origin "$BRANCH_NAME"
 
-            echo "🐳 [3/4] Build & Khởi động Containers..."
-            docker compose up -d --build --remove-orphans
-            docker system prune -f
+            echo "☸️ [2/3] Cập nhật bản phát hành Helm với Image mới..."
+            export KUBECONFIG=~/.kube/config
+            OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+            IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}"
 
-            echo "🩺 [4/4] Kiểm tra trạng thái ứng dụng..."
-            sleep 10
-            docker compose ps
-            echo "✅ Deployment trên VPS đã hoàn tất thành công!"
+            helm upgrade --install p069 ./helm/p069 \
+              --set backend.image.repository="ghcr.io/$OWNER_LOWER/p069-backend" \
+              --set backend.image.tag="$IMAGE_TAG" \
+              --set backend.image.pullPolicy="Always" \
+              --set frontend.image.repository="ghcr.io/$OWNER_LOWER/p069-frontend" \
+              --set frontend.image.tag="$IMAGE_TAG" \
+              --set frontend.image.pullPolicy="Always"
+
+            echo "🩺 [3/3] Trạng thái Pods sau khi cập nhật:"
+            kubectl rollout status deployment/backend --timeout=60s || true
+            kubectl rollout status deployment/frontend --timeout=60s || true
+            kubectl get pods
+            echo "✅ Deployment lên Kubernetes hoàn tất thành công!"
