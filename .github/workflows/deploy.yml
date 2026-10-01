@@ -26,15 +26,15 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER || 'root' }}
-          password: ${{ secrets.SSH_PASSWORD }}
+          username: ${{ secrets.SSH_USER || 'ubuntu' }}
+          key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
           command_timeout: 30m
           script_stop: true
           script: |
             set -e
             echo "🚀 [1/4] Bắt đầu kết nối tới VPS..."
-            DEPLOY_DIR="${{ secrets.DEPLOY_PATH || '/root/code/P-069' }}"
+            DEPLOY_DIR="${{ secrets.DEPLOY_PATH || '/home/ubuntu/P-069' }}"
             DEPLOY_DIR="${DEPLOY_DIR/#\~/$HOME}"
             echo "📂 Thư mục triển khai: $DEPLOY_DIR"
             cd "$DEPLOY_DIR"
