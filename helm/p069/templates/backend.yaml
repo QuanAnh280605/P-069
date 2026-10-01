@@ -51,6 +51,10 @@ spec:
               value: {{ .Values.backend.port | quote }}
             - name: CORS_ORIGINS
               value: {{ .Values.backend.corsOrigins | quote }}
+            {{- if .Values.redis.enabled }}
+            - name: REDIS_URL
+              value: "redis://redis:{{ .Values.redis.port }}/0"
+            {{- end }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
           livenessProbe:

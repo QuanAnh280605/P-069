@@ -1,10 +1,7 @@
 name: Build & Deploy to Kubernetes
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types:
-      - completed
+  push:
     branches:
       - main
       - production
@@ -26,7 +23,6 @@ jobs:
   build-and-push:
     name: Build & Push Images to GHCR
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     outputs:
       image_tag: ${{ steps.set_meta.outputs.tag }}
       owner: ${{ steps.set_meta.outputs.owner }}

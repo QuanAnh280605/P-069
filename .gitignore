@@ -143,3 +143,16 @@ plan_*.md
 /Ecommerce_Metric_Dictionary_Ground_Truth.xlsx
 /docs/superpowers/
 /eval/harness/*/
+
+# ==========================================
+# Terraform
+# ==========================================
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!terraform.tfvars.example
+.terraformrc
+terraform.rc
+.terraform/

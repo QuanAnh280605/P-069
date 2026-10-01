@@ -1,10 +1,8 @@
 name: CI
 
+# Tạm thời tắt auto-check lint & test khi push, chuyển sang chạy thủ công (manual)
 on:
-  push:
-    branches: [main, develop, production]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   # ==========================================

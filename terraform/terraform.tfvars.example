@@ -1,0 +1,11 @@
+# Thông tin API OCI (Lấy từ User Settings > API Keys trên Oracle Cloud)
+tenancy_ocid     = "ocid1.tenancy.oc1..aaaaaaaaxxxxx"
+user_ocid        = "ocid1.user.oc1..aaaaaaaayyyyy"
+fingerprint      = "xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx"
+private_key_path = "~/.oci/oci_api_key.pem"
+region           = "ap-singapore-1" # hoặc ap-tokyo-1, us-ashburn-1 tùy account bạn tạo
+compartment_ocid = "ocid1.compartment.oc1..aaaaaaaazzzzz" # Hoặc dùng tenancy_ocid nếu là root compartment
+
+# OCID của con VPS đang chạy (140.245.58.162)
+# Lấy tại: Compute > Instances > Bấm vào instance > Copy OCID
+instance_ocid    = "ocid1.instance.oc1.ap-singapore-1.aaaaaaaawwwww"
