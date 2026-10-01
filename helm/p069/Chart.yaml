@@ -1,0 +1,8 @@
+apiVersion: v2
+name: p069
+description: Helm Chart for AI Semantic Layer Agent (Postgres, Backend, Frontend, Ingress)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+maintainers:
+  - name: P-069 Team

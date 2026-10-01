@@ -1,0 +1,69 @@
+# Default values for p069 Helm chart
+
+global:
+  appEnv: production
+
+# --- PostgreSQL Configuration ---
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  storage: 5Gi
+  user: postgres
+  password: postgres
+  database: semantic_layer
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+
+# --- FastAPI Backend Configuration ---
+backend:
+  replicaCount: 2
+  image:
+    repository: p069-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 8000
+  corsOrigins: "*"
+  secrets:
+    databaseUrl: "postgresql+asyncpg://postgres:postgres@postgres:5432/semantic_layer"
+    encryptionKey: "ZP-LbkQ7ufS8uh2ZupeRIV0Fjz7_yrd3NIS3yRVyk58="
+    openaiApiKey: "sk-your-openai-api-key"
+    anthropicApiKey: ""
+    groqApiKey: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+
+# --- Next.js Frontend Configuration ---
+frontend:
+  replicaCount: 1
+  image:
+    repository: p069-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# --- Ingress Configuration ---
+ingress:
+  enabled: true
+  className: ""
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  host: ""
