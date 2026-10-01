@@ -28,17 +28,21 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     outputs:
-      image_tag: ${{ steps.set_tag.outputs.tag }}
+      image_tag: ${{ steps.set_meta.outputs.tag }}
+      owner: ${{ steps.set_meta.outputs.owner }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set Image Tag
-        id: set_tag
+      - name: Prepare lowercase repo owner & tag
+        id: set_meta
         run: |
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           TAG="${{ github.sha }}"
+          echo "owner=$OWNER_LC" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Owner (lowercase): $OWNER_LC"
           echo "Building with tag: $TAG"
 
       - name: Log in to GitHub Container Registry (GHCR)
@@ -59,8 +63,8 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/p069-backend:latest
-            ghcr.io/${{ github.repository_owner }}/p069-backend:${{ steps.set_tag.outputs.tag }}
+            ghcr.io/${{ steps.set_meta.outputs.owner }}/p069-backend:latest
+            ghcr.io/${{ steps.set_meta.outputs.owner }}/p069-backend:${{ steps.set_meta.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -70,10 +74,12 @@ jobs:
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=http://140.245.58.162
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/p069-frontend:latest
-            ghcr.io/${{ github.repository_owner }}/p069-frontend:${{ steps.set_tag.outputs.tag }}
+            ghcr.io/${{ steps.set_meta.outputs.owner }}/p069-frontend:latest
+            ghcr.io/${{ steps.set_meta.outputs.owner }}/p069-frontend:${{ steps.set_meta.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
