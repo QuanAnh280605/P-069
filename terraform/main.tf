@@ -1,5 +1,16 @@
 # ==============================================================================
-# HẠ TẦNG VPS ORACLE CLOUD (140.245.58.162) - ĐÃ ĐƯỢC IMPORT VÀO TERRAFORM
+# 1. MODULE HẠ TẦNG MẠNG VCN (VPC) - PHÂN TẦNG PUBLIC & PRIVATE SUBNET
+# ==============================================================================
+
+module "vpc" {
+  source         = "./modules/vpc"
+  compartment_id = var.compartment_id
+  environment    = var.environment
+  vcn_name       = "p069-vcn"
+}
+
+# ==============================================================================
+# 2. HẠ TẦNG VPS ORACLE CLOUD (140.245.58.162) - ĐÃ ĐƯỢC IMPORT VÀO TERRAFORM
 # ==============================================================================
 
 resource "oci_core_instance" "vps" {

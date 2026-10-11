@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://dev:devpassword@localhost:5432/semantic_layer_dev"
     encryption_key: str = ""  # Base64 Fernet key — must be set via .env
 
+    # Cache / Redis
+    redis_url: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
