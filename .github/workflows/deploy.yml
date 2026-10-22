@@ -94,53 +94,51 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ==========================================================
-  # JOB 2: DEPLOY LÊN KUBERNETES TRÊN VPS QUA HELM
+  # JOB 2: CẬP NHẬT GITOPS MANIFEST TRÊN REPO CLOUD-INFRA
   # ==========================================================
-  deploy-k8s:
-    name: Deploy to K3s via Helm
+  update-gitops:
+    name: Update Image Tag in cloud-infra (GitOps)
     needs: [build-backend, build-frontend]
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to VPS via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Checkout cloud-infra repository
+        uses: actions/checkout@v4
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER || 'ubuntu' }}
-          key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
-          command_timeout: 10m
-          script_stop: true
-          script: |
-            set -e
-            echo "🚀 [1/3] Cập nhật mã nguồn & Helm Chart trên VPS..."
-            DEPLOY_DIR="${{ secrets.DEPLOY_PATH || '/home/ubuntu/P-069' }}"
-            DEPLOY_DIR="${DEPLOY_DIR/#\~/$HOME}"
-            cd "$DEPLOY_DIR"
+          repository: QuanAnh280605/cloud-infra
+          token: ${{ secrets.GITOPS_PAT }}
+          path: cloud-infra
 
-            BRANCH_NAME="${{ github.event.inputs.target_branch || github.event.workflow_run.head_branch || 'main' }}"
-            git fetch origin
-            git checkout "$BRANCH_NAME"
-            git pull origin "$BRANCH_NAME"
+      - name: Update Image Tags in values.yaml
+        run: |
+          IMAGE_TAG="${{ github.sha }}"
+          VALUES_FILE="cloud-infra/apps/p069/values.yaml"
+          
+          echo "Updating $VALUES_FILE with tag: $IMAGE_TAG..."
+          
+          # Cập nhật trường tag của backend và frontend
+          sed -i.bak -E "/backend:/,/frontend:/ s/(tag: ).*/\1\"$IMAGE_TAG\"/" "$VALUES_FILE"
+          sed -i.bak -E "/frontend:/,/ingress:/ s/(tag: ).*/\1\"$IMAGE_TAG\"/" "$VALUES_FILE"
+          rm -f "$VALUES_FILE.bak"
+          
+          echo "Cấu hình sau khi cập nhật:"
+          grep -E "tag: " "$VALUES_FILE"
 
-            echo "☸️ [2/3] Cập nhật bản phát hành Helm với Image mới từ OCIR..."
-            export KUBECONFIG=~/.kube/config
-            IMAGE_TAG="${{ github.sha }}"
-
-            helm upgrade --install p069 ./helm/p069 \
-              --set imagePullSecrets[0].name="ocir-secret" \
-              --set backend.image.repository="xsp.ocir.io/ax2il7nx7xmg/p069-backend" \
-              --set backend.image.tag="$IMAGE_TAG" \
-              --set backend.image.pullPolicy="Always" \
-              --set frontend.image.repository="xsp.ocir.io/ax2il7nx7xmg/p069-frontend" \
-              --set frontend.image.tag="$IMAGE_TAG" \
-              --set frontend.image.pullPolicy="Always"
-
-            echo "🩺 [3/3] Trạng thái Pods sau khi cập nhật:"
-            kubectl rollout status deployment/backend --timeout=60s || true
-            kubectl rollout status deployment/frontend --timeout=60s || true
-            kubectl get pods
-            echo "✅ Deployment lên Kubernetes hoàn tất thành công!"
+      - name: Commit and Push new Image Tag to cloud-infra
+        run: |
+          cd cloud-infra
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add apps/p069/values.yaml
+          if git diff --staged --quiet; then
+            echo "Không có thay đổi nào về image tag."
+          else
+            git commit -m "deploy(p069): update image tag to ${{ github.sha }} [skip ci]"
+            git push origin main
+            echo "✅ Đã push commit cập nhật phiên bản lên cloud-infra thành công!"
+            echo "🚀 ArgoCD sẽ tự động đồng bộ và rollout bản cập nhật trong giây lát."
+          fi
 
       - name: Send Deployment Notification (Teams / Telegram)
         if: always()
@@ -148,10 +146,10 @@ jobs:
           STATUS="${{ job.status }}"
           if [ "$STATUS" = "success" ]; then
             EMOJI="🚀"
-            TEXT="✅ **P-069 Deployment Thành Công**\n- **Nhánh**: \`${{ github.ref_name }}\`\n- **Commit**: \`${{ github.sha }}\`\n- **Triggered by**: \`${{ github.actor }}\`"
+            TEXT="✅ **P-069 Image Build & GitOps Trigger Thành Công**\n- **Nhánh**: \`${{ github.ref_name }}\`\n- **Image Tag**: \`${{ github.sha }}\`\n- **Trạng thái**: Đã cập nhật tag vào repo cloud-infra, ArgoCD đang tự động rollout lên cụm K3s!"
           else
             EMOJI="🚨"
-            TEXT="❌ **P-069 Deployment Thất Bại**\n- **Nhánh**: \`${{ github.ref_name }}\`\n- **Commit**: \`${{ github.sha }}\`\n- Vui lòng kiểm tra GitHub Actions logs!"
+            TEXT="❌ **P-069 CI/CD Thất Bại**\n- **Nhánh**: \`${{ github.ref_name }}\`\n- **Commit**: \`${{ github.sha }}\`\n- Vui lòng kiểm tra GitHub Actions logs!"
           fi
 
           # Microsoft Teams Webhook
