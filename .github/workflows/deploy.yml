@@ -128,6 +128,7 @@ jobs:
             IMAGE_TAG="${{ github.sha }}"
 
             helm upgrade --install p069 ./helm/p069 \
+              --set imagePullSecrets[0].name="ocir-secret" \
               --set backend.image.repository="xsp.ocir.io/ax2il7nx7xmg/p069-backend" \
               --set backend.image.tag="$IMAGE_TAG" \
               --set backend.image.pullPolicy="Always" \

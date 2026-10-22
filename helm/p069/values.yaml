@@ -3,7 +3,8 @@
 global:
   appEnv: production
 
-imagePullSecrets: []
+imagePullSecrets:
+  - name: ocir-secret
 
 # --- PostgreSQL Configuration ---
 postgres:
