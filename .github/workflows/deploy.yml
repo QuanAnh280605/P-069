@@ -18,28 +18,15 @@ permissions:
 
 jobs:
   # ==========================================================
-  # JOB 1: BUILD DOCKER IMAGES TRÊN GITHUB RUNNER & PUSH GHCR
+  # JOB 1A: BUILD BACKEND (CHẠY SONG SONG)
   # ==========================================================
-  build-and-push:
-    name: Build & Push Images to GHCR
+  build-backend:
+    name: Build & Push Backend to OCIR
     runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.set_meta.outputs.tag }}
-      owner: ${{ steps.set_meta.outputs.owner }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Prepare lowercase repo owner & tag
-        id: set_meta
-        run: |
-          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          TAG="${{ github.sha }}"
-          echo "owner=$OWNER_LC" >> $GITHUB_OUTPUT
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "Owner (lowercase): $OWNER_LC"
-          echo "Building with tag: $TAG"
 
       - name: Log in to Oracle Cloud Infrastructure Registry (OCIR)
         uses: docker/login-action@v3
@@ -54,33 +41,55 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # --- Build & Push Backend ---
       - name: Build and Push Backend Image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/arm64
           push: true
           tags: |
             xsp.ocir.io/ax2il7nx7xmg/p069-backend:latest
-            xsp.ocir.io/ax2il7nx7xmg/p069-backend:${{ steps.set_meta.outputs.tag }}
+            xsp.ocir.io/ax2il7nx7xmg/p069-backend:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # --- Build & Push Frontend ---
+  # ==========================================================
+  # JOB 1B: BUILD FRONTEND (CHẠY SONG SONG CÙNG BACKEND)
+  # ==========================================================
+  build-frontend:
+    name: Build & Push Frontend to OCIR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Oracle Cloud Infrastructure Registry (OCIR)
+        uses: docker/login-action@v3
+        with:
+          registry: xsp.ocir.io
+          username: ${{ secrets.OCIR_USERNAME }}
+          password: ${{ secrets.OCIR_AUTH_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and Push Frontend Image
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/arm64
           build-args: |
             NEXT_PUBLIC_API_BASE_URL=http://140.245.58.162
           push: true
           tags: |
             xsp.ocir.io/ax2il7nx7xmg/p069-frontend:latest
-            xsp.ocir.io/ax2il7nx7xmg/p069-frontend:${{ steps.set_meta.outputs.tag }}
+            xsp.ocir.io/ax2il7nx7xmg/p069-frontend:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -89,7 +98,7 @@ jobs:
   # ==========================================================
   deploy-k8s:
     name: Deploy to K3s via Helm
-    needs: build-and-push
+    needs: [build-backend, build-frontend]
     runs-on: ubuntu-latest
 
     steps:
@@ -114,10 +123,9 @@ jobs:
             git checkout "$BRANCH_NAME"
             git pull origin "$BRANCH_NAME"
 
-            echo "☸️ [2/3] Cập nhật bản phát hành Helm với Image mới..."
+            echo "☸️ [2/3] Cập nhật bản phát hành Helm với Image mới từ OCIR..."
             export KUBECONFIG=~/.kube/config
-            OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-            IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}"
+            IMAGE_TAG="${{ github.sha }}"
 
             helm upgrade --install p069 ./helm/p069 \
               --set backend.image.repository="xsp.ocir.io/ax2il7nx7xmg/p069-backend" \
@@ -161,4 +169,3 @@ jobs:
               -d "parse_mode=Markdown" \
               -d "text=$TEXT" || true
           fi
-
